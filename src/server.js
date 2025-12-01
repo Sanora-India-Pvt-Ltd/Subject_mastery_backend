@@ -55,5 +55,9 @@ app.listen(PORT, () => {
     console.log(`📊 Database: sanora`);
     console.log(`👨‍🎓 Student routes: http://localhost:${PORT}/api/students`);
     console.log(`👨‍⚕️ Doctor routes: http://localhost:${PORT}/api/doctors`);
+    console.log('Environment Variables Check:');
+console.log('GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID ? 'SET' : 'NOT SET');
+console.log('GOOGLE_CLIENT_SECRET:', process.env.GOOGLE_CLIENT_SECRET ? 'SET' : 'NOT SET');
+console.log('GOOGLE_CALLBACK_URL:', process.env.GOOGLE_CALLBACK_URL || 'NOT SET');
 });
 
