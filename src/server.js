@@ -16,6 +16,10 @@ app.use(express.json());
 app.use('/api/students', require('./routes/studentRoutes'));
 app.use('/api/doctors', require('./routes/doctorRoutes'));
 
+// Auth routes
+app.use('/api/auth', require('./routes/authRoutes'));
+app.use('/api/auth', require('./routes/googleAuthRoutes'));
+
 // Basic route
 app.get('/', (req, res) => {
     res.json({
@@ -52,3 +56,4 @@ app.listen(PORT, () => {
     console.log(`👨‍🎓 Student routes: http://localhost:${PORT}/api/students`);
     console.log(`👨‍⚕️ Doctor routes: http://localhost:${PORT}/api/doctors`);
 });
+

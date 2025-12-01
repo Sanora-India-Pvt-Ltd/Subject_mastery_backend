@@ -10,6 +10,23 @@ const studentSchema = new mongoose.Schema({
     password: {
         type: String,
         required: true
+    },
+    name: {
+        type: String,
+        default: ''
+    },
+    googleId: {
+        type: String,
+        unique: true,
+        sparse: true // Allows multiple null values
+    },
+    profileImage: {
+        type: String,
+        default: ''
+    },
+    isGoogleOAuth: {
+        type: Boolean,
+        default: false
     }
 }, {
     timestamps: true
