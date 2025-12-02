@@ -21,6 +21,17 @@ app.use(cors({
     credentials: true
 }));
 
+// Request logging middleware (for debugging)
+app.use((req, res, next) => {
+    if (req.path.startsWith('/api/')) {
+        console.log(`📥 ${req.method} ${req.path}`);
+        if (Object.keys(req.body || {}).length > 0) {
+            console.log(`   Body:`, JSON.stringify(req.body));
+        }
+    }
+    next();
+});
+
 // JSON parser
 app.use(express.json({ limit: '10mb' }));
 
@@ -209,6 +220,41 @@ if (client && validClientIds.length > 0) {
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/auth', require('./routes/googleAuthRoutes'));
 
+// Debug route to list all registered routes
+app.get('/api/debug/routes', (req, res) => {
+    const routes = [];
+    
+    const extractRoutes = (stack, basePath = '') => {
+        stack.forEach((middleware) => {
+            if (middleware.route) {
+                const methods = Object.keys(middleware.route.methods).map(m => m.toUpperCase()).join(', ');
+                routes.push({
+                    method: methods,
+                    path: basePath + middleware.route.path
+                });
+            } else if (middleware.name === 'router' || middleware.name === 'bound dispatch') {
+                const routerPath = middleware.regexp.source
+                    .replace('\\/?', '')
+                    .replace('(?=\\/|$)', '')
+                    .replace(/\\\//g, '/')
+                    .replace(/\^/g, '')
+                    .replace(/\$/g, '')
+                    .replace(/\\/g, '');
+                extractRoutes(middleware.handle.stack || [], basePath + routerPath);
+            }
+        });
+    };
+    
+    extractRoutes(app._router.stack);
+    
+    res.json({
+        success: true,
+        message: 'Registered routes',
+        routes: routes,
+        total: routes.length
+    });
+});
+
 // Basic route
 app.get('/', (req, res) => {
     res.json({
@@ -219,16 +265,24 @@ app.get('/', (req, res) => {
             signup: 'POST /api/auth/signup',
             login: 'POST /api/auth/login',
             googleAuth: 'GET /api/auth/google',
-            verifyGoogleToken: 'POST /api/auth/verify-google-token'
+            verifyGoogleToken: 'POST /api/auth/verify-google-token',
+            sendOTPSignup: 'POST /api/auth/send-otp-signup',
+            verifyOTPSignup: 'POST /api/auth/verify-otp-signup'
         }
     });
 });
 
 // Handle undefined routes
 app.use((req, res) => {
+    console.log(`❌ Route not found: ${req.method} ${req.path}`);
+    console.log(`   Headers:`, req.headers);
+    console.log(`   Body:`, req.body);
     res.status(404).json({
         success: false,
-        message: 'Route not found'
+        message: 'Route not found',
+        method: req.method,
+        path: req.path,
+        hint: 'Make sure you are using the correct HTTP method (POST for /api/auth/send-otp-signup) and Content-Type: application/json header'
     });
 });
 

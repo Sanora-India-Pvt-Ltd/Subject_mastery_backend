@@ -16,31 +16,55 @@ const verifyRateLimiter = new RateLimiterMemory({
 
 const limitOTPRequests = async (req, res, next) => {
     try {
-        const email = req.body.email;
-        const key = `otp_${email}`;
+        const email = req.body?.email;
         
+        // If email is missing, let the route handler deal with validation
+        // Don't block the request here
+        if (!email) {
+            return next();
+        }
+        
+        const key = `otp_${email}`;
         await otpRateLimiter.consume(key);
         next();
     } catch (error) {
-        res.status(429).json({
-            success: false,
-            message: 'Too many OTP requests. Please wait 15 minutes before trying again.'
-        });
+        // Check if it's a rate limit error
+        if (error.remainingPoints !== undefined) {
+            return res.status(429).json({
+                success: false,
+                message: 'Too many OTP requests. Please wait 15 minutes before trying again.'
+            });
+        }
+        // For other errors, log and continue
+        console.error('Rate limiter error:', error.message);
+        next();
     }
 };
 
 const limitVerifyRequests = async (req, res, next) => {
     try {
-        const email = req.body.email;
-        const key = `verify_${email}`;
+        const email = req.body?.email;
         
+        // If email is missing, let the route handler deal with validation
+        // Don't block the request here
+        if (!email) {
+            return next();
+        }
+        
+        const key = `verify_${email}`;
         await verifyRateLimiter.consume(key);
         next();
     } catch (error) {
-        res.status(429).json({
-            success: false,
-            message: 'Too many verification attempts. Please wait 15 minutes before trying again.'
-        });
+        // Check if it's a rate limit error
+        if (error.remainingPoints !== undefined) {
+            return res.status(429).json({
+                success: false,
+                message: 'Too many verification attempts. Please wait 15 minutes before trying again.'
+            });
+        }
+        // For other errors, log and continue
+        console.error('Rate limiter error:', error.message);
+        next();
     }
 };
 

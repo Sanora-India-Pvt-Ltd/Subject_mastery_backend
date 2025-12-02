@@ -5,7 +5,13 @@ class EmailService {
     constructor() {
         this.transporter = null;
         this.usingOAuth = false;
-        this.initializeTransporter();
+        this.initializationPromise = null;
+        // Initialize asynchronously without blocking
+        this.initializeTransporter().catch(error => {
+            // Log error but don't throw - allows server to start even if email isn't configured
+            console.warn('⚠️  Email service initialization failed:', error.message);
+            console.warn('⚠️  Email functionality will not be available. Routes will still work.');
+        });
     }
 
     async initializeTransporter() {
@@ -40,7 +46,11 @@ class EmailService {
             this.transporter = this.createDummyTransporter();
             console.log('Dummy transporter created for development');
         } else {
-            throw new Error('No email transport method configured');
+            // Don't throw - just log a warning and allow the service to exist
+            console.warn('⚠️  No email transport method configured. Email functionality will not be available.');
+            console.warn('⚠️  To enable email, configure EMAIL_USER and EMAIL_PASSWORD, or set up Google OAuth.');
+            // Create a no-op transporter that returns false when trying to send
+            this.transporter = null;
         }
     }
 
@@ -173,12 +183,17 @@ class EmailService {
             // Ensure transporter is ready - wait for initialization if needed
             if (!this.transporter) {
                 console.log('📧 Transporter not initialized, initializing now...');
-                await this.initializeTransporter();
+                try {
+                    await this.initializeTransporter();
+                } catch (initError) {
+                    console.warn('📧 ⚠️  Email initialization failed:', initError.message);
+                }
             }
 
             if (!this.transporter) {
                 console.error('📧 ❌ ERROR: Transporter failed to initialize');
                 console.error('📧 Check your .env file for EMAIL_USER, EMAIL_PASSWORD, EMAIL_HOST, EMAIL_PORT');
+                console.error('📧 Email functionality is not available. Please configure email settings.');
                 return false;
             }
 
