@@ -1,7 +1,6 @@
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const Student = require('../models/Student');
-const Doctor = require('../models/Doctor');
+const User = require('../models/User');
 
 console.log('=== Loading Passport Configuration ===');
 console.log('GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID ? 'Set' : 'Not Set');
@@ -27,50 +26,28 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
             const email = emails[0].value;
             const photo = photos[0]?.value;
             
-            // Determine user type from query parameter
-            const userType = req.query.state || 'student'; // Default to student
+            // Check if user exists
+            let user = await User.findOne({ email });
             
-            let user;
-            
-            if (userType === 'student') {
-                // Check if student exists
-                user = await Student.findOne({ email });
-                
-                if (!user) {
-                    // Create new student with Google OAuth
-                    user = await Student.create({
-                        email,
-                        name: displayName,
-                        googleId: id,
-                        profileImage: photo,
-                        password: 'oauth-user' // Dummy password for OAuth users
-                    });
-                } else if (!user.googleId) {
-                    // Link Google account to existing student
-                    user.googleId = id;
-                    user.profileImage = photo;
-                    await user.save();
-                }
-            } else {
-                // For doctors
-                user = await Doctor.findOne({ email });
-                
-                if (!user) {
-                    user = await Doctor.create({
-                        email,
-                        name: displayName,
-                        googleId: id,
-                        profileImage: photo,
-                        password: 'oauth-user'
-                    });
-                } else if (!user.googleId) {
-                    user.googleId = id;
-                    user.profileImage = photo;
-                    await user.save();
-                }
+            if (!user) {
+                // Create new user with Google OAuth
+                user = await User.create({
+                    email,
+                    name: displayName,
+                    googleId: id,
+                    profileImage: photo,
+                    password: 'oauth-user', // Dummy password for OAuth users
+                    isGoogleOAuth: true
+                });
+            } else if (!user.googleId) {
+                // Link Google account to existing user
+                user.googleId = id;
+                user.profileImage = photo;
+                user.isGoogleOAuth = true;
+                await user.save();
             }
             
-            console.log(`Google OAuth successful for ${email} (${userType})`);
+            console.log(`Google OAuth successful for ${email}`);
             return done(null, user);
         } catch (error) {
             console.error('Google OAuth error:', error);
@@ -90,10 +67,7 @@ passport.serializeUser((user, done) => {
 
 passport.deserializeUser(async (id, done) => {
     try {
-        let user = await Student.findById(id);
-        if (!user) {
-            user = await Doctor.findById(id);
-        }
+        const user = await User.findById(id);
         done(null, user);
     } catch (error) {
         done(error, null);

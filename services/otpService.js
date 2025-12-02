@@ -18,15 +18,18 @@ const verifyOTP = async (hashedOTP, otp) => {
 
 // Create OTP record
 const createOTPRecord = async (email, userType) => {
+    // Normalize email to lowercase
+    const normalizedEmail = email.toLowerCase().trim();
+    
     // Delete any existing OTP for this email
-    await OTP.deleteMany({ email });
+    await OTP.deleteMany({ email: normalizedEmail });
     
     const otp = generateOTP();
     const hashedOTP = await hashOTP(otp);
     const expiresAt = new Date(Date.now() + (process.env.OTP_EXPIRY_MINUTES || 5) * 60000);
     
     const otpRecord = await OTP.create({
-        email,
+        email: normalizedEmail,
         otp: hashedOTP,
         userType,
         expiresAt,
@@ -42,8 +45,11 @@ const createOTPRecord = async (email, userType) => {
 
 // Validate OTP
 const validateOTP = async (email, userType, otp) => {
+    // Normalize email to lowercase
+    const normalizedEmail = email.toLowerCase().trim();
+    
     const otpRecord = await OTP.findOne({ 
-        email, 
+        email: normalizedEmail, 
         userType,
         verified: false 
     });

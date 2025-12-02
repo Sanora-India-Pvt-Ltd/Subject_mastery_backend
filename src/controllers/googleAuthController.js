@@ -1,15 +1,13 @@
 const passport = require('../middleware/passport');
 const jwt = require('jsonwebtoken');
-const Student = require('../models/Student');
-const Doctor = require('../models/Doctor');
+const User = require('../models/User');
 
 // Generate JWT Token
-const generateToken = (user, userType) => {
+const generateToken = (user) => {
     return jwt.sign(
         {
             id: user._id,
             email: user.email,
-            userType: userType,
             name: user.name,
             isGoogleOAuth: user.googleId ? true : false
         },
@@ -20,15 +18,8 @@ const generateToken = (user, userType) => {
 
 // Initiate Google OAuth
 const googleAuth = (req, res, next) => {
-    const userType = req.query.userType || 'student'; // Default to student if not specified
-    
-    if (!['student', 'doctor'].includes(userType)) {
-        return res.redirect(`${process.env.FRONTEND_URL}/login?error=invalid_user_type`);
-    }
-    
     passport.authenticate('google', {
-        scope: ['profile', 'email'],
-        state: userType // Pass user type to the callback
+        scope: ['profile', 'email']
     })(req, res, next);
 };
 
@@ -39,17 +30,12 @@ const googleCallback = (req, res, next) => {
             return res.redirect(`${process.env.FRONTEND_URL}/login?error=auth_failed`);
         }
         
-        // Get user type from state parameter or user email
-        let userType = req.query.state || 
-                      (user.email.includes('doctor') ? 'doctor' : 'student');
-        
         // Generate JWT token
-        const token = generateToken(user, userType);
+        const token = generateToken(user);
         
         // Redirect to frontend with token and user info
         const redirectUrl = new URL(`${process.env.FRONTEND_URL}/auth/callback`);
         redirectUrl.searchParams.append('token', token);
-        redirectUrl.searchParams.append('userType', userType);
         redirectUrl.searchParams.append('name', encodeURIComponent(user.name));
         redirectUrl.searchParams.append('email', user.email);
         
@@ -62,17 +48,14 @@ const checkEmailExists = async (req, res) => {
     try {
         const { email } = req.body;
         
-        const student = await Student.findOne({ email });
-        const doctor = await Doctor.findOne({ email });
-        
-        const exists = !!(student || doctor);
+        const user = await User.findOne({ email });
         
         res.json({
             success: true,
-            exists: exists,
+            exists: !!user,
             data: {
                 email,
-                hasGoogleAccount: !!(student?.googleId || doctor?.googleId)
+                hasGoogleAccount: !!user?.googleId
             }
         });
     } catch (error) {

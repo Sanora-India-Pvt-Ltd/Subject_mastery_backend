@@ -1,43 +1,29 @@
-const { sendOTPEmail } = require('../../services/emailService');
+const emailService = require('../../services/emailService');
 const { createOTPRecord, validateOTP } = require('../../services/otpService');
-const Student = require('../models/Student');
-const Doctor = require('../models/Doctor');
+const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
-// Send OTP
+// Send OTP (for existing users - login/password reset)
 const sendOTP = async (req, res) => {
     try {
-        const { email, userType } = req.body;
+        const { email } = req.body;
         
-        // Validate user type
-        if (!['student', 'doctor'].includes(userType)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid user type. Must be "student" or "doctor"'
-            });
-        }
-        
-        // Check if user exists based on userType
-        let user;
-        if (userType === 'student') {
-            user = await Student.findOne({ email });
-        } else {
-            user = await Doctor.findOne({ email });
-        }
+        // Check if user exists
+        const user = await User.findOne({ email });
         
         if (!user) {
             return res.status(404).json({
                 success: false,
-                message: `${userType} not found with this email`
+                message: 'User not found with this email'
             });
         }
         
-        // Create OTP record
-        const { otpRecord, plainOTP } = await createOTPRecord(email, userType);
+        // Create OTP record (using 'user' as userType for unified system)
+        const { otpRecord, plainOTP } = await createOTPRecord(email, 'user');
         
         // Send email
-        const emailSent = await sendOTPEmail(email, plainOTP);
+        const emailSent = await emailService.sendOTPEmail(email, plainOTP);
         
         if (!emailSent) {
             return res.status(500).json({
@@ -51,7 +37,6 @@ const sendOTP = async (req, res) => {
             message: 'OTP sent successfully',
             data: {
                 email,
-                userType,
                 expiresAt: otpRecord.expiresAt,
                 // Don't send OTP in response for security
             }
@@ -67,13 +52,66 @@ const sendOTP = async (req, res) => {
     }
 };
 
-// Verify OTP
+// Send OTP for Signup (doesn't require user to exist)
+const sendOTPForSignup = async (req, res) => {
+    try {
+        const { email } = req.body;
+        
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email is required'
+            });
+        }
+        
+        // Check if user already exists
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({
+                success: false,
+                message: 'User already exists with this email'
+            });
+        }
+        
+        // Create OTP record for signup
+        const { otpRecord, plainOTP } = await createOTPRecord(email, 'signup');
+        
+        // Send email
+        const emailSent = await emailService.sendOTPEmail(email, plainOTP);
+        
+        if (!emailSent) {
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to send OTP email'
+            });
+        }
+        
+        res.status(200).json({
+            success: true,
+            message: 'OTP sent successfully to your email',
+            data: {
+                email,
+                expiresAt: otpRecord.expiresAt
+            }
+        });
+        
+    } catch (error) {
+        console.error('Send OTP for signup error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error sending OTP',
+            error: error.message
+        });
+    }
+};
+
+// Verify OTP (for existing users)
 const verifyOTP = async (req, res) => {
     try {
-        const { email, userType, otp } = req.body;
+        const { email, otp } = req.body;
         
-        // Validate OTP
-        const result = await validateOTP(email, userType, otp);
+        // Validate OTP (using 'user' as userType for unified system)
+        const result = await validateOTP(email, 'user', otp);
         
         if (!result.valid) {
             return res.status(400).json({
@@ -87,7 +125,6 @@ const verifyOTP = async (req, res) => {
         const verificationToken = jwt.sign(
             { 
                 email, 
-                userType, 
                 purpose: 'otp_verification' 
             },
             process.env.JWT_SECRET,
@@ -99,13 +136,58 @@ const verifyOTP = async (req, res) => {
             message: 'OTP verified successfully',
             data: {
                 verificationToken,
-                email,
-                userType
+                email
             }
         });
         
     } catch (error) {
         console.error('Verify OTP error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error verifying OTP',
+            error: error.message
+        });
+    }
+};
+
+// Verify OTP for Signup
+const verifyOTPForSignup = async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+        
+        // Validate OTP for signup
+        const result = await validateOTP(email, 'signup', otp);
+        
+        if (!result.valid) {
+            return res.status(400).json({
+                success: false,
+                message: result.message,
+                remainingAttempts: result.remainingAttempts
+            });
+        }
+        
+        // Create verification token (short-lived, 10 minutes)
+        const verificationToken = jwt.sign(
+            { 
+                email, 
+                purpose: 'otp_verification',
+                forSignup: true
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '10m' }
+        );
+        
+        res.status(200).json({
+            success: true,
+            message: 'OTP verified successfully. You can now complete signup.',
+            data: {
+                verificationToken,
+                email
+            }
+        });
+        
+    } catch (error) {
+        console.error('Verify OTP for signup error:', error);
         res.status(500).json({
             success: false,
             message: 'Error verifying OTP',
@@ -138,15 +220,10 @@ const signin = async (req, res) => {
             });
         }
         
-        const { email, userType } = decoded;
+        const { email } = decoded;
         
-        // Find user based on type
-        let user;
-        if (userType === 'student') {
-            user = await Student.findOne({ email });
-        } else {
-            user = await Doctor.findOne({ email });
-        }
+        // Find user
+        const user = await User.findOne({ email });
         
         if (!user) {
             return res.status(404).json({
@@ -169,7 +246,6 @@ const signin = async (req, res) => {
             { 
                 id: user._id, 
                 email: user.email, 
-                userType,
                 purpose: 'session' 
             },
             process.env.JWT_SECRET,
@@ -184,7 +260,7 @@ const signin = async (req, res) => {
                 user: {
                     id: user._id,
                     email: user.email,
-                    userType
+                    name: user.name
                 }
             }
         });
@@ -201,6 +277,8 @@ const signin = async (req, res) => {
 
 module.exports = {
     sendOTP,
+    sendOTPForSignup,
     verifyOTP,
+    verifyOTPForSignup,
     signin
 };

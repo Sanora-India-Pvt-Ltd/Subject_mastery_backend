@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const User = require('../models/User');
 
 const generateToken = (payload) => {
     return jwt.sign(
@@ -8,7 +9,7 @@ const generateToken = (payload) => {
     );
 };
 
-const protect = (Model) => async (req, res, next) => {
+const protect = async (req, res, next) => {
     try {
         let token;
         
@@ -25,7 +26,7 @@ const protect = (Model) => async (req, res, next) => {
 
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-            const user = await Model.findById(decoded.id).select('-password');
+            const user = await User.findById(decoded.id).select('-password');
             
             if (!user) {
                 return res.status(404).json({
