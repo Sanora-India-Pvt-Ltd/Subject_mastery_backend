@@ -596,8 +596,13 @@ app.get('/', (req, res) => {
             verifyGoogleToken: 'POST /api/auth/verify-google-token',
             sendOTPSignup: 'POST /api/auth/send-otp-signup',
             verifyOTPSignup: 'POST /api/auth/verify-otp-signup',
+            sendPhoneOTPSignup: 'POST /api/auth/send-phone-otp-signup',
+            verifyPhoneOTPSignup: 'POST /api/auth/verify-phone-otp-signup',
             sendOTPPhone: 'POST /send-otp (Twilio phone OTP)',
-            verifyOTPPhone: 'POST /verify-otp (Twilio phone OTP)'
+            verifyOTPPhone: 'POST /verify-otp (Twilio phone OTP)',
+            forgotPasswordSendOTP: 'POST /api/auth/forgot-password/send-otp',
+            forgotPasswordVerifyOTP: 'POST /api/auth/forgot-password/verify-otp',
+            forgotPasswordReset: 'POST /api/auth/forgot-password/reset'
         }
     });
 });

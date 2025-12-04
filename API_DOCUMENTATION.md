@@ -21,7 +21,7 @@ Base URL: `https://api.sanoraindia.com`
 
 The verification token proves the email was already verified and allows the user time to fill the form.
 
-**Request Body (Option 1 - With Verification Token - Recommended):**
+**Request Body:**
 ```json
 {
   "email": "user@example.com",
@@ -31,21 +31,8 @@ The verification token proves the email was already verified and allows the user
   "lastName": "Doe",
   "phoneNumber": "+1234567890",
   "gender": "Male",
-  "verificationToken": "token_from_verify_otp_signup_endpoint"
-}
-```
-
-**Request Body (Option 2 - With OTP directly):**
-```json
-{
-  "email": "user@example.com",
-  "password": "yourPassword123",
-  "confirmPassword": "yourPassword123",
-  "firstName": "John",
-  "lastName": "Doe",
-  "phoneNumber": "+1234567890",
-  "gender": "Male",
-  "otp": "123456"
+  "emailVerificationToken": "token_from_verify_otp_signup_endpoint",
+  "phoneVerificationToken": "token_from_verify_phone_otp_signup_endpoint"
 }
 ```
 
@@ -57,8 +44,8 @@ The verification token proves the email was already verified and allows the user
 - `lastName` (string): User's last name
 - `phoneNumber` (string): User's phone number
 - `gender` (string): User's gender - must be one of: "Male", "Female", "Other", "Prefer not to say"
-- `verificationToken` (string, optional): Token from OTP verification endpoint (recommended, valid for 20 minutes)
-- `otp` (string, optional): OTP code directly (alternative to verificationToken)
+- `emailVerificationToken` (string, required): Token from email OTP verification endpoint (`/api/auth/verify-otp-signup`, valid for 20 minutes)
+- `phoneVerificationToken` (string, required): Token from phone OTP verification endpoint (`/api/auth/verify-phone-otp-signup`, valid for 20 minutes)
 
 **Response (Success - 201):**
 ```json
@@ -112,11 +99,27 @@ The verification token proves the email was already verified and allows the user
 }
 ```
 
-**Response (Error - 400 - Missing OTP):**
+**Response (Error - 400 - Missing Email Verification):**
 ```json
 {
   "success": false,
-  "message": "OTP verification is required for signup. Please verify your email first using /api/auth/send-otp-signup and /api/auth/verify-otp-signup"
+  "message": "Email verification is required. Please verify your email using /api/auth/send-otp-signup and /api/auth/verify-otp-signup"
+}
+```
+
+**Response (Error - 400 - Missing Phone Verification):**
+```json
+{
+  "success": false,
+  "message": "Phone verification is required. Please verify your phone using /api/auth/send-phone-otp-signup and /api/auth/verify-phone-otp-signup"
+}
+```
+
+**Response (Error - 400 - Phone Already Registered):**
+```json
+{
+  "success": false,
+  "message": "Phone number is already registered"
 }
 ```
 
@@ -404,14 +407,139 @@ The verification token proves the email was already verified and allows the user
 
 **Note:** 
 - Rate limited: 5 attempts per 15 minutes per email
-- Use the `verificationToken` in the signup endpoint
+- Use the `emailVerificationToken` in the signup endpoint (along with phone verification token)
 - Token expires in 20 minutes (allows time to fill the signup form)
 - Maximum 5 attempts per OTP
 - Email addresses are automatically normalized to lowercase
+- **Both email and phone verification are required for signup**
 
 ---
 
-### 7. Send OTP (For Existing Users - Email)
+### 7. Send Phone OTP for Signup (New Users)
+
+**Method:** `POST`  
+**URL:** `https://api.sanoraindia.com/api/auth/send-phone-otp-signup`
+
+**Request Body:**
+```json
+{
+  "phone": "+1234567890"
+}
+```
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "OTP sent successfully to your phone",
+  "data": {
+    "phone": "+1234567890",
+    "sid": "VEXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+    "status": "pending"
+  }
+}
+```
+
+**Response (Error - 400 - Phone already registered):**
+```json
+{
+  "success": false,
+  "message": "Phone number is already registered"
+}
+```
+
+**Response (Error - 400 - Missing phone):**
+```json
+{
+  "success": false,
+  "message": "Phone number is required"
+}
+```
+
+**Response (Error - 429 - Rate limited):**
+```json
+{
+  "success": false,
+  "message": "Too many OTP requests. Please wait 15 minutes before trying again."
+}
+```
+
+**Response (Error - 500 - Twilio not configured):**
+```json
+{
+  "success": false,
+  "message": "Twilio is not configured for phone OTP"
+}
+```
+
+**Note:** 
+- Rate limited: 3 requests per 15 minutes per phone
+- Works for new users (checks if phone is already registered)
+- **Required before signup** - This is part of the signup flow
+- Phone number must be in E.164 format (e.g., +1234567890)
+- OTP expires in 10 minutes (Twilio default)
+- After verification, you'll receive a phone verification token valid for 20 minutes
+
+---
+
+### 8. Verify Phone OTP for Signup
+
+**Method:** `POST`  
+**URL:** `https://api.sanoraindia.com/api/auth/verify-phone-otp-signup`
+
+**Request Body:**
+```json
+{
+  "phone": "+1234567890",
+  "otp": "123456"
+}
+```
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "Phone OTP verified successfully. You can now complete signup.",
+  "data": {
+    "phoneVerificationToken": "jwt_verification_token_here",
+    "phone": "+1234567890"
+  }
+}
+```
+
+**Response (Error - 400 - Invalid OTP):**
+```json
+{
+  "success": false,
+  "message": "Invalid or expired OTP code"
+}
+```
+
+**Response (Error - 400 - Phone already registered):**
+```json
+{
+  "success": false,
+  "message": "Phone number is already registered"
+}
+```
+
+**Response (Error - 500 - Twilio not configured):**
+```json
+{
+  "success": false,
+  "message": "Twilio is not configured"
+}
+```
+
+**Note:** 
+- Use the `phoneVerificationToken` in the signup endpoint (along with email verification token)
+- Token expires in 20 minutes (allows time to fill the signup form)
+- Phone number must match the one used in `/api/auth/send-phone-otp-signup`
+- **Both email and phone verification are required for signup**
+
+---
+
+### 9. Send OTP (For Existing Users - Email)
 
 **Method:** `POST`  
 **URL:** `https://api.sanoraindia.com/api/auth/send-otp`
@@ -459,7 +587,7 @@ The verification token proves the email was already verified and allows the user
 
 ---
 
-### 8. Verify OTP (For Existing Users - Email)
+### 10. Verify OTP (For Existing Users - Email)
 
 **Method:** `POST`  
 **URL:** `https://api.sanoraindia.com/api/auth/verify-otp`
@@ -510,7 +638,7 @@ The verification token proves the email was already verified and allows the user
 
 ---
 
-### 9. Sign In (After OTP Verification - For Existing Users)
+### 11. Sign In (After OTP Verification - For Existing Users)
 
 **Method:** `POST`  
 **URL:** `https://api.sanoraindia.com/api/auth/signin`
@@ -563,9 +691,256 @@ The verification token proves the email was already verified and allows the user
 
 ---
 
+## 🔑 Forgot Password Endpoints
+
+### 10. Send OTP for Password Reset
+
+**Method:** `POST`  
+**URL:** `https://api.sanoraindia.com/api/auth/forgot-password/send-otp`
+
+**Request Body (Option 1 - With Email):**
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+**Request Body (Option 2 - With Phone):**
+```json
+{
+  "phone": "+1234567890"
+}
+```
+
+**Required Fields:**
+- Either `email` (string) OR `phone` (string) - one of these is required
+
+**Response (Success - 200 - Email):**
+```json
+{
+  "success": true,
+  "message": "OTP sent successfully to your email",
+  "data": {
+    "email": "user@example.com",
+    "expiresAt": "2024-01-01T12:05:00.000Z"
+  }
+}
+```
+
+**Response (Success - 200 - Phone):**
+```json
+{
+  "success": true,
+  "message": "OTP sent successfully to your phone",
+  "data": {
+    "phone": "+1234567890",
+    "sid": "VEXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+    "status": "pending"
+  }
+}
+```
+
+**Response (Error - 400):**
+```json
+{
+  "success": false,
+  "message": "Either email or phone number is required"
+}
+```
+
+**Response (Error - 404):**
+```json
+{
+  "success": false,
+  "message": "User not found with the provided email or phone number"
+}
+```
+
+**Response (Error - 429 - Rate limited):**
+```json
+{
+  "success": false,
+  "message": "Too many OTP requests. Please wait 15 minutes before trying again."
+}
+```
+
+**Note:** 
+- Rate limited: 3 requests per 15 minutes per email/phone
+- Works for existing users only
+- Email OTP expires in 5 minutes (default, configurable via `OTP_EXPIRY_MINUTES`)
+- Phone OTP expires in 10 minutes (Twilio default)
+- Phone number must be in E.164 format (e.g., +1234567890)
+- Email addresses are automatically normalized to lowercase
+
+---
+
+### 11. Verify OTP for Password Reset
+
+**Method:** `POST`  
+**URL:** `https://api.sanoraindia.com/api/auth/forgot-password/verify-otp`
+
+**Request Body (Option 1 - With Email):**
+```json
+{
+  "email": "user@example.com",
+  "otp": "123456"
+}
+```
+
+**Request Body (Option 2 - With Phone):**
+```json
+{
+  "phone": "+1234567890",
+  "otp": "123456"
+}
+```
+
+**Required Fields:**
+- Either `email` (string) OR `phone` (string) - one of these is required
+- `otp` (string): The OTP code received via email or SMS
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "OTP verified successfully. You can now reset your password.",
+  "data": {
+    "verificationToken": "jwt_verification_token_here",
+    "email": "user@example.com"
+  }
+}
+```
+
+**Response (Error - 400 - Invalid OTP):**
+```json
+{
+  "success": false,
+  "message": "Invalid OTP",
+  "remainingAttempts": 4
+}
+```
+
+**Response (Error - 400 - OTP expired):**
+```json
+{
+  "success": false,
+  "message": "OTP expired"
+}
+```
+
+**Response (Error - 400 - Too many attempts):**
+```json
+{
+  "success": false,
+  "message": "Too many attempts. Please request a new OTP"
+}
+```
+
+**Response (Error - 404):**
+```json
+{
+  "success": false,
+  "message": "User not found with this email"
+}
+```
+
+**Response (Error - 429 - Rate limited):**
+```json
+{
+  "success": false,
+  "message": "Too many verification attempts. Please wait 15 minutes before trying again."
+}
+```
+
+**Note:** 
+- Rate limited: 5 attempts per 15 minutes per email/phone
+- Use the `verificationToken` in the reset password endpoint
+- Token expires in 15 minutes
+- Maximum 5 attempts per OTP (for email OTP)
+- Phone number must match the one used in send-otp request
+
+---
+
+### 12. Reset Password
+
+**Method:** `POST`  
+**URL:** `https://api.sanoraindia.com/api/auth/forgot-password/reset`
+
+**Request Body:**
+```json
+{
+  "verificationToken": "verification_token_from_verify_otp",
+  "password": "newPassword123",
+  "confirmPassword": "newPassword123"
+}
+```
+
+**Required Fields:**
+- `verificationToken` (string): Token from `/api/auth/forgot-password/verify-otp` endpoint
+- `password` (string): New password (minimum 6 characters)
+- `confirmPassword` (string): Password confirmation (must match password)
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "Password reset successfully. You can now login with your new password."
+}
+```
+
+**Response (Error - 400 - Missing fields):**
+```json
+{
+  "success": false,
+  "message": "Verification token, password, and confirm password are required"
+}
+```
+
+**Response (Error - 400 - Password too short):**
+```json
+{
+  "success": false,
+  "message": "Password must be at least 6 characters long"
+}
+```
+
+**Response (Error - 400 - Password mismatch):**
+```json
+{
+  "success": false,
+  "message": "Password and confirm password do not match"
+}
+```
+
+**Response (Error - 401 - Invalid token):**
+```json
+{
+  "success": false,
+  "message": "Invalid or expired verification token. Please request a new OTP."
+}
+```
+
+**Response (Error - 404):**
+```json
+{
+  "success": false,
+  "message": "User not found"
+}
+```
+
+**Note:** 
+- Requires OTP verification first
+- Use the `verificationToken` from `/api/auth/forgot-password/verify-otp`
+- Token expires in 15 minutes
+- Password must be at least 6 characters long
+- Password and confirmPassword must match
+- After successful reset, user can login with the new password
+
+---
+
 ## 🔵 Google OAuth Endpoints
 
-### 10. Google OAuth (Web - Redirect Flow)
+### 13. Google OAuth (Web - Redirect Flow)
 
 **Method:** `GET`  
 **URL:** `https://api.sanoraindia.com/api/auth/google`
@@ -586,7 +961,7 @@ https://your-frontend.com/auth/callback?token=JWT_TOKEN&name=User%20Name&email=u
 
 ---
 
-### 11. Google OAuth Callback
+### 14. Google OAuth Callback
 
 **Method:** `GET`  
 **URL:** `https://api.sanoraindia.com/api/auth/google/callback`
@@ -599,7 +974,7 @@ https://your-frontend.com/auth/callback?token=JWT_TOKEN&name=User%20Name&email=u
 
 ---
 
-### 12. Verify Google Token (Android/iOS/Web) - Signup/Login
+### 15. Verify Google Token (Android/iOS/Web) - Signup/Login
 
 **Method:** `POST`  
 **URL:** `https://api.sanoraindia.com/api/auth/verify-google-token`
@@ -690,7 +1065,7 @@ https://your-frontend.com/auth/callback?token=JWT_TOKEN&name=User%20Name&email=u
 
 ---
 
-### 13. Check Email Exists
+### 16. Check Email Exists
 
 **Method:** `POST`  
 **URL:** `https://api.sanoraindia.com/api/auth/check-email`
@@ -734,7 +1109,7 @@ https://your-frontend.com/auth/callback?token=JWT_TOKEN&name=User%20Name&email=u
 
 ## 📊 Root Endpoint
 
-### 14. API Info
+### 17. API Info
 
 **Method:** `GET`  
 **URL:** `https://api.sanoraindia.com/`
@@ -802,7 +1177,7 @@ All endpoints return errors in this format:
 
 ## 🔄 Authentication Flow Examples
 
-### Standard Signup Flow (Email-First OTP Verification):
+### Standard Signup Flow (Email + Phone OTP Verification):
 
 **Step 1: Email Verification (OTP)**
 1. **Send OTP to Email:**
@@ -812,15 +1187,30 @@ All endpoints return errors in this format:
    ```
    → OTP sent to email address
 
-2. **Verify OTP:**
+2. **Verify Email OTP:**
    ```bash
    POST /api/auth/verify-otp-signup
    Body: { "email": "user@example.com", "otp": "123456" }
    ```
-   → Returns `verificationToken` (valid for 20 minutes)
+   → Returns `emailVerificationToken` (valid for 20 minutes)
 
-**Step 2: Complete Signup Form**
-3. **Fill and Submit Signup Form:**
+**Step 2: Phone Verification (OTP)**
+3. **Send OTP to Phone:**
+   ```bash
+   POST /api/auth/send-phone-otp-signup
+   Body: { "phone": "+1234567890" }
+   ```
+   → OTP sent via SMS (Twilio)
+
+4. **Verify Phone OTP:**
+   ```bash
+   POST /api/auth/verify-phone-otp-signup
+   Body: { "phone": "+1234567890", "otp": "123456" }
+   ```
+   → Returns `phoneVerificationToken` (valid for 20 minutes)
+
+**Step 3: Complete Signup Form**
+5. **Fill and Submit Signup Form:**
    ```bash
    POST /api/auth/signup
    Body: {
@@ -831,18 +1221,22 @@ All endpoints return errors in this format:
      "lastName": "Doe",
      "phoneNumber": "+1234567890",
      "gender": "Male",
-     "verificationToken": "token_from_step_2"
+     "emailVerificationToken": "token_from_step_2",
+     "phoneVerificationToken": "token_from_step_4"
    }
    ```
    → Returns JWT token and user data
 
-4. **Use token in `Authorization: Bearer <token>` header for protected routes**
+6. **Use token in `Authorization: Bearer <token>` header for protected routes**
 
 **Important Notes:**
-- Email verification (Step 1) must be completed before submitting the signup form
-- The verification token is valid for 20 minutes to allow time to fill the form
+- **Both email and phone verification are required** before submitting the signup form
+- Email and phone verification can be done in any order (Steps 1-2 and 3-4 can be swapped)
+- Both verification tokens are valid for 20 minutes to allow time to fill the form
 - Password must be at least 6 characters long
-- Password and confirmPassword must match (if confirmPassword is provided)
+- Password and confirmPassword must match
+- Phone number must be in E.164 format (e.g., +1234567890)
+- Phone number will be normalized and checked for duplicates
 
 ---
 
@@ -882,6 +1276,65 @@ All endpoints return errors in this format:
    → **No OTP verification needed** (Google already verified email)
 
 3. Use JWT token for authenticated requests
+
+---
+
+### Forgot Password Flow:
+
+**Step 1: Send OTP (Email or Phone)**
+1. **Send OTP via Email:**
+   ```bash
+   POST /api/auth/forgot-password/send-otp
+   Body: { "email": "user@example.com" }
+   ```
+   → OTP sent to email address
+
+   OR
+
+   **Send OTP via Phone:**
+   ```bash
+   POST /api/auth/forgot-password/send-otp
+   Body: { "phone": "+1234567890" }
+   ```
+   → OTP sent via SMS (Twilio)
+
+**Step 2: Verify OTP**
+2. **Verify OTP:**
+   ```bash
+   POST /api/auth/forgot-password/verify-otp
+   Body: { "email": "user@example.com", "otp": "123456" }
+   ```
+   OR
+   ```bash
+   POST /api/auth/forgot-password/verify-otp
+   Body: { "phone": "+1234567890", "otp": "123456" }
+   ```
+   → Returns `verificationToken` (valid for 15 minutes)
+
+**Step 3: Reset Password**
+3. **Reset Password:**
+   ```bash
+   POST /api/auth/forgot-password/reset
+   Body: {
+     "verificationToken": "token_from_step_2",
+     "password": "newPassword123",
+     "confirmPassword": "newPassword123"
+   }
+   ```
+   → Password updated successfully
+
+4. **Login with new password:**
+   ```bash
+   POST /api/auth/login
+   Body: { "email": "user@example.com", "password": "newPassword123" }
+   ```
+
+**Important Notes:**
+- User can use either email or phone number for password reset
+- OTP verification is required before password reset
+- Verification token is valid for 15 minutes
+- Password must be at least 6 characters long
+- Password and confirmPassword must match
 
 ---
 
