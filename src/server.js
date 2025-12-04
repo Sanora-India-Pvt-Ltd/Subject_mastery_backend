@@ -68,14 +68,16 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 // Create Google OAuth client for verification
-// Support both WEB and Android client IDs
+// Support WEB, Android, and iOS client IDs
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID; // WEB client ID
 const GOOGLE_ANDROID_CLIENT_ID = process.env.GOOGLE_ANDROID_CLIENT_ID; // Android client ID
+const GOOGLE_IOS_CLIENT_ID = process.env.GOOGLE_IOS_CLIENT_ID; // iOS client ID
 
 // Collect all valid client IDs
 const validClientIds = [];
 if (GOOGLE_CLIENT_ID) validClientIds.push(GOOGLE_CLIENT_ID);
 if (GOOGLE_ANDROID_CLIENT_ID) validClientIds.push(GOOGLE_ANDROID_CLIENT_ID);
+if (GOOGLE_IOS_CLIENT_ID) validClientIds.push(GOOGLE_IOS_CLIENT_ID);
 
 const client = validClientIds.length > 0 ? new OAuth2Client() : null;
 
@@ -117,7 +119,7 @@ if (client && validClientIds.length > 0) {
                 return res.status(401).json({
                     success: false,
                     message: 'Invalid Google token - token does not match any configured client ID',
-                    error: 'Please ensure you are using the correct Google Sign-In configuration for Android'
+                    error: 'Please ensure you are using the correct Google Sign-In configuration for your platform (Android/iOS/Web)'
                 });
             }
             
@@ -235,6 +237,17 @@ if (client && validClientIds.length > 0) {
             });
         }
     });
+} else {
+    // Google OAuth not configured - provide helpful error message
+    app.post('/api/auth/verify-google-token', async (req, res) => {
+        console.warn('⚠️  Google OAuth verification attempted but not configured');
+        return res.status(503).json({
+            success: false,
+            message: 'Google OAuth is not configured on the server',
+            error: 'Please set GOOGLE_CLIENT_ID (Web), GOOGLE_ANDROID_CLIENT_ID (Android), and/or GOOGLE_IOS_CLIENT_ID (iOS) environment variables',
+            help: 'Check your Railway/environment variables and ensure Google OAuth credentials are set'
+        });
+    });
 }
 
 // Auth routes - wrapped in try-catch to ensure server starts even if routes fail to load
@@ -261,6 +274,276 @@ try {
     console.log('✅ Google auth routes loaded successfully');
 } catch (error) {
     console.error('❌ Error loading Google auth routes:', error.message);
+    console.error('Stack:', error.stack);
+    // Don't crash - routes will just not be available
+}
+
+// Twilio OTP endpoints (phone verification)
+try {
+    console.log('🔄 Loading Twilio OTP routes...');
+    const twilio = require('twilio');
+    
+    // Initialize Twilio client (only if credentials are available)
+    let twilioClient = null;
+    const twilioServiceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
+    
+    // Check if Twilio credentials are configured
+    if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+        try {
+            twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+            console.log('✅ Twilio client initialized');
+        } catch (err) {
+            console.error('❌ Failed to initialize Twilio client:', err.message);
+        }
+    } else {
+        console.warn('⚠️  Twilio credentials not configured. Phone OTP endpoints will not work.');
+        console.warn('   Required: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_VERIFY_SERVICE_SID');
+    }
+    
+    // Helper function to validate and normalize phone number (E.164 format)
+    const validatePhoneNumber = (phone) => {
+        if (!phone) return { valid: false, error: 'Phone number is required' };
+        
+        // Remove all spaces, dashes, and parentheses
+        let normalized = phone.replace(/[\s\-\(\)]/g, '');
+        
+        // Ensure it starts with +
+        if (!normalized.startsWith('+')) {
+            normalized = '+' + normalized;
+        }
+        
+        // E.164 format: + followed by 1-15 digits
+        // Pattern: +[country code][subscriber number]
+        const e164Pattern = /^\+[1-9]\d{1,14}$/;
+        
+        if (!e164Pattern.test(normalized)) {
+            return { 
+                valid: false, 
+                error: 'Invalid phone number format. Phone number must be in E.164 format (e.g., +1234567890). It should start with + followed by country code and subscriber number (10-15 digits total).',
+                example: 'Example: +1234567890 or +919876543210'
+            };
+        }
+        
+        // Check minimum length (country code + at least 7 digits for subscriber)
+        if (normalized.length < 10) {
+            return { 
+                valid: false, 
+                error: 'Phone number too short. Must be at least 10 digits including country code.',
+                example: 'Example: +1234567890'
+            };
+        }
+        
+        // Check maximum length (E.164 max is 15 digits)
+        if (normalized.length > 16) { // + plus 15 digits
+            return { 
+                valid: false, 
+                error: 'Phone number too long. Maximum 15 digits after the + sign.',
+                example: 'Example: +123456789012345'
+            };
+        }
+        
+        return { valid: true, normalized };
+    };
+    
+    // 1) Send OTP via Twilio
+    app.post('/send-otp', async (req, res) => {
+        try {
+            const { phone } = req.body;
+            if (!phone) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'phone is required',
+                    hint: 'Phone number must be in E.164 format (e.g., +1234567890)'
+                });
+            }
+            
+            // Validate and normalize phone number
+            const phoneValidation = validatePhoneNumber(phone);
+            if (!phoneValidation.valid) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: phoneValidation.error,
+                    example: phoneValidation.example
+                });
+            }
+            
+            // Check if Twilio is configured
+            if (!twilioClient) {
+                return res.status(500).json({ 
+                    success: false, 
+                    message: 'Twilio is not configured',
+                    hint: 'Please set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN environment variables'
+                });
+            }
+            
+            if (!twilioServiceSid) {
+                return res.status(500).json({ 
+                    success: false, 
+                    message: 'Twilio Verify Service not configured',
+                    hint: 'Please set TWILIO_VERIFY_SERVICE_SID environment variable'
+                });
+            }
+            
+            // Create verification via Twilio Verify (channel sms)
+            const verification = await twilioClient.verify.services(twilioServiceSid)
+                .verifications
+                .create({ to: phoneValidation.normalized, channel: 'sms' });
+            
+            return res.json({ success: true, sid: verification.sid, status: verification.status });
+        } catch (err) {
+            console.error('Twilio send OTP error:', err);
+            console.error('Error details:', {
+                message: err.message,
+                code: err.code,
+                status: err.status,
+                moreInfo: err.moreInfo
+            });
+            
+            // Provide more helpful error messages based on error type
+            let errorMessage = err.message || 'Failed to send OTP';
+            let hint = '';
+            
+            // Network/Connection errors
+            if (err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || err.code === 'ENOTFOUND' || err.message?.includes('ECONNRESET')) {
+                errorMessage = 'Connection error: Unable to reach Twilio service';
+                hint = 'Please check your internet connection and Twilio service status. If the problem persists, verify your Twilio credentials are correct.';
+            }
+            // Authentication errors
+            else if (err.status === 401 || err.message?.includes('Authentication Error') || err.message?.includes('authenticate')) {
+                errorMessage = 'Twilio authentication failed';
+                hint = 'Please verify your TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN are correct.';
+            }
+            // Invalid phone number
+            else if (err.message && (err.message.includes('Invalid parameter `To`') || err.status === 400)) {
+                errorMessage = 'Invalid phone number format';
+                hint = 'Phone number must be in E.164 format: +[country code][subscriber number] (e.g., +1234567890)';
+            }
+            // Service not found
+            else if (err.status === 404 || err.message?.includes('not found')) {
+                errorMessage = 'Twilio Verify Service not found';
+                hint = 'Please verify your TWILIO_VERIFY_SERVICE_SID is correct and the service exists in your Twilio account.';
+            }
+            // Rate limiting
+            else if (err.status === 429) {
+                errorMessage = 'Rate limit exceeded';
+                hint = 'Too many requests. Please wait a few minutes before trying again.';
+            }
+            
+            return res.status(err.status || 500).json({ 
+                success: false, 
+                message: errorMessage,
+                hint: hint || 'Please check your Twilio configuration and try again.',
+                errorCode: err.code || err.status
+            });
+        }
+    });
+    
+    // 2) Verify OTP via Twilio
+    app.post('/verify-otp', async (req, res) => {
+        try {
+            const { phone, code } = req.body;
+            if (!phone || !code) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'phone and code required',
+                    hint: 'Phone number must be in E.164 format (e.g., +1234567890)'
+                });
+            }
+            
+            // Validate and normalize phone number
+            const phoneValidation = validatePhoneNumber(phone);
+            if (!phoneValidation.valid) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: phoneValidation.error,
+                    example: phoneValidation.example
+                });
+            }
+            
+            // Validate OTP code format (typically 4-8 digits)
+            if (!/^\d{4,8}$/.test(code)) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Invalid OTP code format. Code must be 4-8 digits.',
+                    example: 'Example: 123456'
+                });
+            }
+            
+            // Check if Twilio is configured
+            if (!twilioClient) {
+                return res.status(500).json({ 
+                    success: false, 
+                    message: 'Twilio is not configured',
+                    hint: 'Please set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN environment variables'
+                });
+            }
+            
+            if (!twilioServiceSid) {
+                return res.status(500).json({ 
+                    success: false, 
+                    message: 'Twilio Verify Service not configured',
+                    hint: 'Please set TWILIO_VERIFY_SERVICE_SID environment variable'
+                });
+            }
+            
+            const check = await twilioClient.verify.services(twilioServiceSid)
+                .verificationChecks
+                .create({ to: phoneValidation.normalized, code: code });
+            
+            if (check.status === 'approved') {
+                // TODO: mark user as verified in DB or issue JWT
+                return res.json({ success: true, message: 'Phone verified' });
+            }
+            
+            return res.status(400).json({ success: false, message: 'Invalid or expired code' });
+        } catch (err) {
+            console.error('Twilio verify OTP error:', err);
+            console.error('Error details:', {
+                message: err.message,
+                code: err.code,
+                status: err.status,
+                moreInfo: err.moreInfo
+            });
+            
+            // Provide more helpful error messages based on error type
+            let errorMessage = err.message || 'Failed to verify OTP';
+            let hint = '';
+            
+            // Network/Connection errors
+            if (err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || err.code === 'ENOTFOUND' || err.message?.includes('ECONNRESET')) {
+                errorMessage = 'Connection error: Unable to reach Twilio service';
+                hint = 'Please check your internet connection and Twilio service status. If the problem persists, verify your Twilio credentials are correct.';
+            }
+            // Authentication errors
+            else if (err.status === 401 || err.message?.includes('Authentication Error') || err.message?.includes('authenticate')) {
+                errorMessage = 'Twilio authentication failed';
+                hint = 'Please verify your TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN are correct.';
+            }
+            // Invalid phone number
+            else if (err.message && (err.message.includes('Invalid parameter `To`') || err.status === 400)) {
+                errorMessage = 'Invalid phone number format';
+                hint = 'Phone number must be in E.164 format: +[country code][subscriber number] (e.g., +1234567890)';
+            }
+            // Service not found
+            else if (err.status === 404 || err.message?.includes('not found')) {
+                errorMessage = 'Twilio Verify Service not found';
+                hint = 'Please verify your TWILIO_VERIFY_SERVICE_SID is correct and the service exists in your Twilio account.';
+            }
+            
+            return res.status(err.status || 500).json({ 
+                success: false, 
+                message: errorMessage,
+                hint: hint || 'Please check your Twilio configuration and try again.',
+                errorCode: err.code || err.status
+            });
+        }
+    });
+    
+    console.log('✅ Twilio OTP routes loaded successfully');
+    console.log('  POST /send-otp (Twilio phone OTP)');
+    console.log('  POST /verify-otp (Twilio phone OTP)');
+} catch (error) {
+    console.error('❌ Error loading Twilio OTP routes:', error.message);
     console.error('Stack:', error.stack);
     // Don't crash - routes will just not be available
 }
@@ -312,7 +595,9 @@ app.get('/', (req, res) => {
             googleAuth: 'GET /api/auth/google',
             verifyGoogleToken: 'POST /api/auth/verify-google-token',
             sendOTPSignup: 'POST /api/auth/send-otp-signup',
-            verifyOTPSignup: 'POST /api/auth/verify-otp-signup'
+            verifyOTPSignup: 'POST /api/auth/verify-otp-signup',
+            sendOTPPhone: 'POST /send-otp (Twilio phone OTP)',
+            verifyOTPPhone: 'POST /verify-otp (Twilio phone OTP)'
         }
     });
 });

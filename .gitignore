@@ -5,5 +5,8 @@ node_modules/
 CURL_COMMANDS.md
 POSTMAN_QUICK_REFERENCE.md
 OTP_SETUP_GUIDE.md
-API_DOCUMENTATION.md
+
 test-otp-flow.sh
+
+# Cloudflare Tunnel credentials (keep config.yml, ignore credentials)
+.cloudflared/*.json

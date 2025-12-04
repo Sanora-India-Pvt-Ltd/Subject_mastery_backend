@@ -680,7 +680,7 @@ https://your-frontend.com/auth/callback?token=JWT_TOKEN&name=User%20Name&email=u
 
 **Note:** 
 - **No OTP required** - Google already verifies the email
-- Supports both WEB and Android client IDs
+- Supports WEB, Android, and iOS client IDs (configure via `GOOGLE_CLIENT_ID`, `GOOGLE_ANDROID_CLIENT_ID`, `GOOGLE_IOS_CLIENT_ID` environment variables)
 - Automatically creates user account if doesn't exist (signup)
 - Logs in existing user if account exists (login)
 - Links Google account to existing email/password account if user exists

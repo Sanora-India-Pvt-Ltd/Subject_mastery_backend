@@ -32,11 +32,11 @@ const signup = async (req, res) => {
         }
 
         // Validate gender
-        const validGenders = ['Male', 'Female', 'Other'];
+        const validGenders = ['Male', 'Female', 'Other', 'Prefer not to say'];
         if (!validGenders.includes(gender)) {
             return res.status(400).json({
                 success: false,
-                message: 'Gender must be one of: Male, Female, Other'
+                message: 'Gender must be one of: Male, Female, Other, Prefer not to say'
             });
         }
 
@@ -145,22 +145,28 @@ const signup = async (req, res) => {
 // User Login
 const login = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { email, phoneNumber, password } = req.body;
 
-        // Validate input
-        if (!email || !password) {
+        // Validate input - must have either email or phoneNumber, and password
+        if ((!email && !phoneNumber) || !password) {
             return res.status(400).json({
                 success: false,
-                message: 'Email and password are required'
+                message: 'Either email or phone number, and password are required'
             });
         }
 
-        // Find user
-        const user = await User.findOne({ email });
+        // Find user by email or phone number
+        let user;
+        if (email) {
+            user = await User.findOne({ email: email.toLowerCase() });
+        } else if (phoneNumber) {
+            user = await User.findOne({ phoneNumber });
+        }
+
         if (!user) {
             return res.status(400).json({
                 success: false,
-                message: 'Invalid email or password'
+                message: 'Invalid email/phone number or password'
             });
         }
 
@@ -169,7 +175,7 @@ const login = async (req, res) => {
         if (!isPasswordValid) {
             return res.status(400).json({
                 success: false,
-                message: 'Invalid email or password'
+                message: 'Invalid email/phone number or password'
             });
         }
 
