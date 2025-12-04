@@ -1,6 +1,6 @@
 # Sanora API Documentation
 
-Base URL: `http://localhost:3100` (Local) or `https://your-production-url.com` (Production)
+Base URL: `https://api.sanoraindia.com`
 
 ---
 
@@ -9,7 +9,7 @@ Base URL: `http://localhost:3100` (Local) or `https://your-production-url.com` (
 ### 1. User Signup (OTP Verification Required)
 
 **Method:** `POST`  
-**URL:** `http://localhost:3100/api/auth/signup`
+**URL:** `https://api.sanoraindia.com/api/auth/signup`
 
 **⚠️ IMPORTANT:** OTP verification is **MANDATORY** for signup. 
 
@@ -56,7 +56,7 @@ The verification token proves the email was already verified and allows the user
 - `firstName` (string): User's first name
 - `lastName` (string): User's last name
 - `phoneNumber` (string): User's phone number
-- `gender` (string): User's gender - must be one of: "Male", "Female", "Other"
+- `gender` (string): User's gender - must be one of: "Male", "Female", "Other", "Prefer not to say"
 - `verificationToken` (string, optional): Token from OTP verification endpoint (recommended, valid for 20 minutes)
 - `otp` (string, optional): OTP code directly (alternative to verificationToken)
 
@@ -92,7 +92,7 @@ The verification token proves the email was already verified and allows the user
 ```json
 {
   "success": false,
-  "message": "Gender must be one of: Male, Female, Other"
+  "message": "Gender must be one of: Male, Female, Other, Prefer not to say"
 }
 ```
 
@@ -133,15 +133,27 @@ The verification token proves the email was already verified and allows the user
 ### 2. User Login
 
 **Method:** `POST`  
-**URL:** `http://localhost:3100/api/auth/login`
+**URL:** `https://api.sanoraindia.com/api/auth/login`
 
-**Request Body:**
+**Request Body (Option 1 - Login with Email):**
 ```json
 {
   "email": "user@example.com",
   "password": "yourPassword123"
 }
 ```
+
+**Request Body (Option 2 - Login with Phone Number):**
+```json
+{
+  "phoneNumber": "+1234567890",
+  "password": "yourPassword123"
+}
+```
+
+**Required Fields:**
+- Either `email` (string) OR `phoneNumber` (string) - one of these is required
+- `password` (string): User's password
 
 **Response (Success - 200):**
 ```json
@@ -164,11 +176,19 @@ The verification token proves the email was already verified and allows the user
 }
 ```
 
-**Response (Error - 400):**
+**Response (Error - 400 - Missing fields):**
 ```json
 {
   "success": false,
-  "message": "Invalid email or password"
+  "message": "Either email or phone number, and password are required"
+}
+```
+
+**Response (Error - 400 - Invalid credentials):**
+```json
+{
+  "success": false,
+  "message": "Invalid email/phone number or password"
 }
 ```
 
@@ -176,10 +196,108 @@ The verification token proves the email was already verified and allows the user
 
 ## 📧 OTP Endpoints
 
-### 3. Send OTP for Signup (New Users)
+### 3. Send OTP via Twilio (Phone Verification)
 
 **Method:** `POST`  
-**URL:** `http://localhost:3100/api/auth/send-otp-signup`
+**URL:** `https://api.sanoraindia.com/send-otp`
+
+**Request Body:**
+```json
+{
+  "phone": "+1234567890"
+}
+```
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "sid": "VEXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+  "status": "pending"
+}
+```
+
+**Response (Error - 400 - Missing phone):**
+```json
+{
+  "success": false,
+  "message": "phone is required"
+}
+```
+
+**Response (Error - 500 - Twilio not configured):**
+```json
+{
+  "success": false,
+  "message": "Twilio Verify Service not configured"
+}
+```
+
+**Note:** 
+- Uses Twilio Verify service to send SMS OTP
+- Phone number must be in E.164 format (e.g., +1234567890)
+- Requires `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_VERIFY_SERVICE_SID` environment variables
+- OTP is sent via SMS automatically by Twilio
+
+---
+
+### 4. Verify OTP via Twilio (Phone Verification)
+
+**Method:** `POST`  
+**URL:** `https://api.sanoraindia.com/verify-otp`
+
+**Request Body:**
+```json
+{
+  "phone": "+1234567890",
+  "code": "123456"
+}
+```
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "Phone verified"
+}
+```
+
+**Response (Error - 400 - Missing fields):**
+```json
+{
+  "success": false,
+  "message": "phone and code required"
+}
+```
+
+**Response (Error - 400 - Invalid code):**
+```json
+{
+  "success": false,
+  "message": "Invalid or expired code"
+}
+```
+
+**Response (Error - 500 - Twilio not configured):**
+```json
+{
+  "success": false,
+  "message": "Twilio Verify Service not configured"
+}
+```
+
+**Note:** 
+- Verifies the OTP code sent via Twilio SMS
+- Phone number must match the one used in `/send-otp`
+- Code is typically 6 digits
+- After successful verification, you can mark user as verified in DB or issue JWT (TODO in code)
+
+---
+
+### 5. Send OTP for Signup (New Users - Email)
+
+**Method:** `POST`  
+**URL:** `https://api.sanoraindia.com/api/auth/send-otp-signup`
 
 **Request Body:**
 ```json
@@ -226,10 +344,10 @@ The verification token proves the email was already verified and allows the user
 
 ---
 
-### 4. Verify OTP for Signup
+### 6. Verify OTP for Signup (Email)
 
 **Method:** `POST`  
-**URL:** `http://localhost:3100/api/auth/verify-otp-signup`
+**URL:** `https://api.sanoraindia.com/api/auth/verify-otp-signup`
 
 **Request Body:**
 ```json
@@ -293,10 +411,10 @@ The verification token proves the email was already verified and allows the user
 
 ---
 
-### 5. Send OTP (For Existing Users)
+### 7. Send OTP (For Existing Users - Email)
 
 **Method:** `POST`  
-**URL:** `http://localhost:3100/api/auth/send-otp`
+**URL:** `https://api.sanoraindia.com/api/auth/send-otp`
 
 **Request Body:**
 ```json
@@ -341,10 +459,10 @@ The verification token proves the email was already verified and allows the user
 
 ---
 
-### 6. Verify OTP (For Existing Users)
+### 8. Verify OTP (For Existing Users - Email)
 
 **Method:** `POST`  
-**URL:** `http://localhost:3100/api/auth/verify-otp`
+**URL:** `https://api.sanoraindia.com/api/auth/verify-otp`
 
 **Request Body:**
 ```json
@@ -392,10 +510,10 @@ The verification token proves the email was already verified and allows the user
 
 ---
 
-### 7. Sign In (After OTP Verification - For Existing Users)
+### 9. Sign In (After OTP Verification - For Existing Users)
 
 **Method:** `POST`  
-**URL:** `http://localhost:3100/api/auth/signin`
+**URL:** `https://api.sanoraindia.com/api/auth/signin`
 
 **Request Body:**
 ```json
@@ -447,10 +565,10 @@ The verification token proves the email was already verified and allows the user
 
 ## 🔵 Google OAuth Endpoints
 
-### 8. Google OAuth (Web - Redirect Flow)
+### 10. Google OAuth (Web - Redirect Flow)
 
 **Method:** `GET`  
-**URL:** `http://localhost:3100/api/auth/google`
+**URL:** `https://api.sanoraindia.com/api/auth/google`
 
 **Request:** No body required. This redirects to Google OAuth page.
 
@@ -468,10 +586,10 @@ https://your-frontend.com/auth/callback?token=JWT_TOKEN&name=User%20Name&email=u
 
 ---
 
-### 9. Google OAuth Callback
+### 11. Google OAuth Callback
 
 **Method:** `GET`  
-**URL:** `http://localhost:3100/api/auth/google/callback`
+**URL:** `https://api.sanoraindia.com/api/auth/google/callback`
 
 **Request:** No body required. This is called by Google after authentication.
 
@@ -481,10 +599,10 @@ https://your-frontend.com/auth/callback?token=JWT_TOKEN&name=User%20Name&email=u
 
 ---
 
-### 10. Verify Google Token (Android/iOS/Web) - Signup/Login
+### 12. Verify Google Token (Android/iOS/Web) - Signup/Login
 
 **Method:** `POST`  
-**URL:** `http://localhost:3100/api/auth/verify-google-token`
+**URL:** `https://api.sanoraindia.com/api/auth/verify-google-token`
 
 **⚠️ IMPORTANT:** This endpoint handles both **signup and login** via Google OAuth. **No OTP verification is required** because Google already verifies the email address.
 
@@ -572,10 +690,10 @@ https://your-frontend.com/auth/callback?token=JWT_TOKEN&name=User%20Name&email=u
 
 ---
 
-### 11. Check Email Exists
+### 13. Check Email Exists
 
 **Method:** `POST`  
-**URL:** `http://localhost:3100/api/auth/check-email`
+**URL:** `https://api.sanoraindia.com/api/auth/check-email`
 
 **Request Body:**
 ```json
@@ -616,10 +734,10 @@ https://your-frontend.com/auth/callback?token=JWT_TOKEN&name=User%20Name&email=u
 
 ## 📊 Root Endpoint
 
-### 12. API Info
+### 14. API Info
 
 **Method:** `GET`  
-**URL:** `http://localhost:3100/`
+**URL:** `https://api.sanoraindia.com/`
 
 **Request:** No body required
 
@@ -633,7 +751,11 @@ https://your-frontend.com/auth/callback?token=JWT_TOKEN&name=User%20Name&email=u
     "signup": "POST /api/auth/signup",
     "login": "POST /api/auth/login",
     "googleAuth": "GET /api/auth/google",
-    "verifyGoogleToken": "POST /api/auth/verify-google-token"
+    "verifyGoogleToken": "POST /api/auth/verify-google-token",
+    "sendOTPSignup": "POST /api/auth/send-otp-signup",
+    "verifyOTPSignup": "POST /api/auth/verify-otp-signup",
+    "sendOTPPhone": "POST /send-otp (Twilio phone OTP)",
+    "verifyOTPPhone": "POST /verify-otp (Twilio phone OTP)"
   }
 }
 ```
@@ -651,7 +773,7 @@ Authorization: Bearer your_jwt_token_here
 
 **Example:**
 ```bash
-curl -X GET http://localhost:3100/api/protected-route \
+curl -X GET https://api.sanoraindia.com/api/protected-route \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
 
@@ -821,19 +943,19 @@ All endpoints return errors in this format:
 
 ```bash
 # Step 1: Send OTP
-curl -X POST http://localhost:3100/api/auth/send-otp-signup \
+curl -X POST https://api.sanoraindia.com/api/auth/send-otp-signup \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com"}'
 
 # Step 2: Check email for OTP code (e.g., 123456)
 
 # Step 3: Verify OTP
-curl -X POST http://localhost:3100/api/auth/verify-otp-signup \
+curl -X POST https://api.sanoraindia.com/api/auth/verify-otp-signup \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","otp":"123456"}'
 
 # Step 4: Complete signup (use verificationToken from step 3)
-curl -X POST http://localhost:3100/api/auth/signup \
+curl -X POST https://api.sanoraindia.com/api/auth/signup \
   -H "Content-Type: application/json" \
   -d '{
     "email":"test@example.com",
@@ -849,18 +971,40 @@ curl -X POST http://localhost:3100/api/auth/signup \
 
 ### Test Login with curl:
 
+**Login with Email:**
 ```bash
-curl -X POST http://localhost:3100/api/auth/login \
+curl -X POST https://api.sanoraindia.com/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"MyPassword123"}'
+```
+
+**Login with Phone Number:**
+```bash
+curl -X POST https://api.sanoraindia.com/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"phoneNumber":"+1234567890","password":"MyPassword123"}'
 ```
 
 ### Test Google Token Verification:
 
 ```bash
-curl -X POST http://localhost:3100/api/auth/verify-google-token \
+curl -X POST https://api.sanoraindia.com/api/auth/verify-google-token \
   -H "Content-Type: application/json" \
   -d '{"token":"GOOGLE_ID_TOKEN_HERE"}'
+```
+
+### Test Twilio Phone OTP Flow:
+
+```bash
+# Step 1: Send OTP to phone
+curl -X POST https://api.sanoraindia.com/send-otp \
+  -H "Content-Type: application/json" \
+  -d '{"phone":"+1234567890"}'
+
+# Step 2: Verify OTP (use code received via SMS)
+curl -X POST https://api.sanoraindia.com/verify-otp \
+  -H "Content-Type: application/json" \
+  -d '{"phone":"+1234567890","code":"123456"}'
 ```
 
 ---
@@ -874,3 +1018,4 @@ curl -X POST http://localhost:3100/api/auth/verify-google-token \
 - Rate limiting helps prevent abuse and spam
 - For production, ensure all environment variables are properly configured
 - See `OTP_SETUP_GUIDE.md` for email service configuration
+- For Twilio phone OTP, configure `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_VERIFY_SERVICE_SID`
