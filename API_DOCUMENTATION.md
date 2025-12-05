@@ -539,161 +539,15 @@ The verification token proves the email was already verified and allows the user
 
 ---
 
-### 9. Send OTP (For Existing Users - Email)
-
-**Method:** `POST`  
-**URL:** `https://api.sanoraindia.com/api/auth/send-otp`
-
-**Request Body:**
-```json
-{
-  "email": "user@example.com"
-}
-```
-
-**Response (Success - 200):**
-```json
-{
-  "success": true,
-  "message": "OTP sent successfully",
-  "data": {
-    "email": "user@example.com",
-    "expiresAt": "2024-01-01T12:05:00.000Z"
-  }
-}
-```
-
-**Response (Error - 404):**
-```json
-{
-  "success": false,
-  "message": "User not found with this email"
-}
-```
-
-**Response (Error - 429 - Rate limited):**
-```json
-{
-  "success": false,
-  "message": "Too many OTP requests. Please wait 15 minutes before trying again."
-}
-```
-
-**Note:** 
-- Rate limited: 3 requests per 15 minutes per email
-- Only works for existing users
-- OTP expires in 5 minutes (default)
-- Email addresses are automatically normalized to lowercase
-
----
-
-### 10. Verify OTP (For Existing Users - Email)
-
-**Method:** `POST`  
-**URL:** `https://api.sanoraindia.com/api/auth/verify-otp`
-
-**Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "otp": "123456"
-}
-```
-
-**Response (Success - 200):**
-```json
-{
-  "success": true,
-  "message": "OTP verified successfully",
-  "data": {
-    "verificationToken": "short_lived_verification_token",
-    "email": "user@example.com"
-  }
-}
-```
-
-**Response (Error - 400):**
-```json
-{
-  "success": false,
-  "message": "Invalid OTP",
-  "remainingAttempts": 4
-}
-```
-
-**Response (Error - 429 - Rate limited):**
-```json
-{
-  "success": false,
-  "message": "Too many verification attempts. Please wait 15 minutes before trying again."
-}
-```
-
-**Note:** 
-- Rate limited: 5 attempts per 15 minutes per email
-- Use the `verificationToken` in the signin endpoint
-- Token expires in 10 minutes
-- Maximum 5 attempts per OTP
-- Email addresses are automatically normalized to lowercase
-
----
-
-### 11. Sign In (After OTP Verification - For Existing Users)
-
-**Method:** `POST`  
-**URL:** `https://api.sanoraindia.com/api/auth/signin`
-
-**Request Body:**
-```json
-{
-  "verificationToken": "verification_token_from_verify_otp",
-  "password": "yourPassword123"
-}
-```
-
-**Response (Success - 200):**
-```json
-{
-  "success": true,
-  "message": "Signin successful",
-  "data": {
-    "token": "jwt_session_token",
-    "user": {
-      "id": "user_id",
-      "email": "user@example.com",
-      "name": "John Doe"
-    }
-  }
-}
-```
-
-**Response (Error - 401):**
-```json
-{
-  "success": false,
-  "message": "Invalid or expired verification token"
-}
-```
-
-**Response (Error - 401 - Wrong password):**
-```json
-{
-  "success": false,
-  "message": "Invalid password"
-}
-```
-
-**Note:** 
-- Requires OTP verification first
-- Use the `verificationToken` from `/api/auth/verify-otp`
-- Token expires in 10 minutes
-- Returns JWT session token (valid for 7 days)
-
----
-
 ## 🔑 Forgot Password Endpoints
 
-### 10. Send OTP for Password Reset
+**⚠️ IMPORTANT:** OTP verification is **ONLY** used for:
+1. **Signup** (required) - via `/api/auth/send-otp-signup`, `/api/auth/verify-otp-signup`, `/api/auth/send-phone-otp-signup`, `/api/auth/verify-phone-otp-signup`
+2. **Forgot Password** (required) - via `/api/auth/forgot-password/send-otp`, `/api/auth/forgot-password/verify-otp`
+
+OTP verification is **NOT** used for regular login. Login only requires email/phone and password.
+
+### 9. Send OTP for Password Reset
 
 **Method:** `POST`  
 **URL:** `https://api.sanoraindia.com/api/auth/forgot-password/send-otp`
@@ -774,7 +628,7 @@ The verification token proves the email was already verified and allows the user
 
 ---
 
-### 11. Verify OTP for Password Reset
+### 10. Verify OTP for Password Reset
 
 **Method:** `POST`  
 **URL:** `https://api.sanoraindia.com/api/auth/forgot-password/verify-otp`
@@ -861,7 +715,7 @@ The verification token proves the email was already verified and allows the user
 
 ---
 
-### 12. Reset Password
+### 11. Reset Password
 
 **Method:** `POST`  
 **URL:** `https://api.sanoraindia.com/api/auth/forgot-password/reset`
@@ -1338,31 +1192,11 @@ All endpoints return errors in this format:
 
 ---
 
-### OTP Flow (For Existing Users - Login/Password Reset):
+**⚠️ IMPORTANT:** OTP verification is **ONLY** used for:
+1. **Signup** (required) - Both email and phone OTP verification are mandatory
+2. **Forgot Password** (required) - OTP verification is required before password reset
 
-1. **Send OTP:**
-   ```bash
-   POST /api/auth/send-otp
-   Body: { "email": "user@example.com" }
-   ```
-   → OTP sent to email
-
-2. **Verify OTP:**
-   ```bash
-   POST /api/auth/verify-otp
-   Body: { "email": "user@example.com", "otp": "123456" }
-   ```
-   → Returns `verificationToken`
-
-3. **Sign In:**
-   ```bash
-   POST /api/auth/signin
-   Body: {
-     "verificationToken": "token_from_step_2",
-     "password": "yourPassword123"
-   }
-   ```
-   → Returns JWT session token
+**OTP is NOT used for regular login.** Login only requires email/phone and password.
 
 ---
 
