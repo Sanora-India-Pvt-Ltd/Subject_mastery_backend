@@ -16,7 +16,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
         callbackURL: process.env.GOOGLE_CALLBACK_URL || 
              (process.env.NODE_ENV === 'production' 
-               ? 'https://sanora.onrender.com/api/auth/google/callback'
+               ? 'https://api.sanoraindia.com/api/auth/google/callback'
                : 'http://localhost:3100/api/auth/google/callback'),
         passReqToCallback: true,
         scope: ['profile', 'email']
@@ -36,11 +36,12 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
                 const lastName = nameParts.slice(1).join(' ') || 'User';
                 
                 // Create new user with Google OAuth
+                // Note: phoneNumber is optional for Google OAuth users
                 user = await User.create({
                     email,
                     firstName,
                     lastName,
-                    phoneNumber: '', // Google doesn't provide phone number, user can update later
+                    // phoneNumber is omitted for Google OAuth users (optional)
                     gender: 'Other', // Default gender since Google doesn't provide this
                     name: displayName,
                     googleId: id,

@@ -10,7 +10,8 @@
     "deploy": "wrangler deploy",
     "deploy:staging": "wrangler deploy --env staging",
     "dev:worker": "wrangler dev",
-    "worker": "wrangler dev"
+    "worker": "wrangler dev",
+    "test:oauth": "node test-oauth-server.js"
   },
   "keywords": [],
   "author": "",

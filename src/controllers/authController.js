@@ -1,6 +1,6 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
-const { generateToken } = require('../middleware/auth');
+const { generateToken, generateAccessToken, generateRefreshToken } = require('../middleware/auth');
 
 // User Signup (with OTP verification)
 const signup = async (req, res) => {
@@ -150,14 +150,20 @@ const signup = async (req, res) => {
             name: name || `${firstName} ${lastName}`.trim()
         });
 
-        // Generate JWT token
-        const token = generateToken({ id: user._id, email: user.email });
+        // Generate access token and refresh token
+        const accessToken = generateAccessToken({ id: user._id, email: user.email });
+        const refreshToken = generateRefreshToken();
+
+        // Save refresh token to database
+        user.refreshToken = refreshToken;
+        await user.save();
 
         res.status(201).json({
             success: true,
             message: 'User registered successfully',
             data: {
-                token,
+                accessToken,
+                refreshToken,
                 user: {
                     id: user._id,
                     email: user.email,
@@ -216,14 +222,20 @@ const login = async (req, res) => {
             });
         }
 
-        // Generate JWT token
-        const token = generateToken({ id: user._id, email: user.email });
+        // Generate access token and refresh token
+        const accessToken = generateAccessToken({ id: user._id, email: user.email });
+        const refreshToken = generateRefreshToken();
+
+        // Save refresh token to database
+        user.refreshToken = refreshToken;
+        await user.save();
 
         res.status(200).json({
             success: true,
             message: 'Login successful',
             data: {
-                token,
+                accessToken,
+                refreshToken,
                 user: {
                     id: user._id,
                     email: user.email,
@@ -274,30 +286,58 @@ const sendOTPForPasswordReset = async (req, res) => {
             }
         } else if (phone) {
             // Normalize phone number for consistent lookup
-            let normalizedPhone = phone.replace(/[\s\-\(\)]/g, '');
+            let normalizedPhone = phone.replace(/[\s\-\(\)]/g, '').trim();
             if (!normalizedPhone.startsWith('+')) {
                 normalizedPhone = '+' + normalizedPhone;
             }
             
-            // Try to find user with normalized phone number
-            user = await User.findOne({ phoneNumber: normalizedPhone });
+            // Try multiple variations to find the user
+            const phoneVariations = [
+                normalizedPhone,                    // +917300685040
+                phone.trim(),                       // Original format
+                normalizedPhone.replace('+', ''),   // Without +
+                phone.replace(/[\s\-\(\)]/g, ''),  // Without spaces/dashes
+            ];
             
-            // Also try with original format in case it's stored differently
-            if (!user) {
-                user = await User.findOne({ phoneNumber: phone });
+            // Try each variation
+            for (const phoneVar of phoneVariations) {
+                user = await User.findOne({ phoneNumber: phoneVar });
+                if (user) {
+                    console.log(`✅ Found user with phone variation: ${phoneVar}`);
+                    break;
+                }
+            }
+            
+            // If still not found, try regex search (for partial matches in development)
+            if (!user && process.env.NODE_ENV === 'development') {
+                // Try to find users with similar phone numbers for debugging
+                const phoneDigits = normalizedPhone.replace(/\D/g, '');
+                if (phoneDigits.length >= 10) {
+                    const last10Digits = phoneDigits.slice(-10);
+                    const users = await User.find({
+                        phoneNumber: { $regex: last10Digits }
+                    }).limit(5);
+                    
+                    if (users.length > 0) {
+                        console.log(`🔍 Found ${users.length} user(s) with similar phone numbers:`);
+                        users.forEach(u => console.log(`   - ${u.phoneNumber} (${u.email})`));
+                    }
+                }
             }
             
             if (!user) {
                 return res.status(404).json({
                     success: false,
-                    message: 'User not found with this phone number'
+                    message: 'User not found with this phone number',
+                    hint: 'Please verify the phone number is correct, or try using your email address instead',
+                    suggestion: 'You can use email instead: POST /api/auth/forgot-password/send-otp with {"email": "your@email.com"}'
                 });
             }
         }
 
         // If email provided, send OTP via email
         if (email) {
-            const { createOTPRecord } = require('../services/otpService');
+            const { createOTPRecord } = require('../../services/otpService');
             const emailService = require('../../services/emailService');
             
             // Create OTP record (using 'password_reset' as userType)
@@ -344,8 +384,9 @@ const sendOTPForPasswordReset = async (req, res) => {
                 normalizedPhone = '+' + normalizedPhone;
             }
 
-            // Create verification via Twilio Verify (only if user exists)
-            const verification = await twilioClient.verify.services(twilioServiceSid)
+            // Create verification via Twilio Verify v2 (only if user exists)
+            console.log('📱 Using Twilio Verify v2 API to send OTP');
+            const verification = await twilioClient.verify.v2.services(twilioServiceSid)
                 .verifications
                 .create({ to: normalizedPhone, channel: 'sms' });
 
@@ -397,18 +438,39 @@ const verifyOTPForPasswordReset = async (req, res) => {
                 });
             }
 
-            const { validateOTP } = require('../services/otpService');
+            const { validateOTP } = require('../../services/otpService');
             verificationResult = await validateOTP(email.toLowerCase(), 'password_reset', otp);
         }
 
         // If phone provided, verify using Twilio
         if (phone) {
-            user = await User.findOne({ phoneNumber: phone });
+            // Normalize phone number for consistent lookup
+            let normalizedPhoneForLookup = phone.replace(/[\s\-\(\)]/g, '').trim();
+            if (!normalizedPhoneForLookup.startsWith('+')) {
+                normalizedPhoneForLookup = '+' + normalizedPhoneForLookup;
+            }
+            
+            // Try multiple variations to find the user
+            const phoneVariations = [
+                normalizedPhoneForLookup,
+                phone.trim(),
+                normalizedPhoneForLookup.replace('+', ''),
+                phone.replace(/[\s\-\(\)]/g, ''),
+            ];
+            
+            // Try each variation
+            for (const phoneVar of phoneVariations) {
+                user = await User.findOne({ phoneNumber: phoneVar });
+                if (user) {
+                    break;
+                }
+            }
             
             if (!user) {
                 return res.status(404).json({
                     success: false,
-                    message: 'User not found with this phone number'
+                    message: 'User not found with this phone number',
+                    hint: 'Please verify the phone number is correct, or try using your email address instead'
                 });
             }
 
@@ -424,14 +486,12 @@ const verifyOTPForPasswordReset = async (req, res) => {
             const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
             const twilioServiceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
 
-            // Normalize phone number
-            let normalizedPhone = phone.replace(/[\s\-\(\)]/g, '');
-            if (!normalizedPhone.startsWith('+')) {
-                normalizedPhone = '+' + normalizedPhone;
-            }
+            // Use the normalized phone for Twilio (already normalized above)
+            const normalizedPhone = normalizedPhoneForLookup;
 
-            // Verify with Twilio
-            const check = await twilioClient.verify.services(twilioServiceSid)
+            // Verify with Twilio v2
+            console.log('✅ Using Twilio Verify v2 API to verify OTP');
+            const check = await twilioClient.verify.v2.services(twilioServiceSid)
                 .verificationChecks
                 .create({ to: normalizedPhone, code: otp });
 
@@ -562,11 +622,122 @@ const resetPassword = async (req, res) => {
     }
 };
 
+// Get Current User Profile
+const getProfile = async (req, res) => {
+    try {
+        // User is already attached to req.user by the protect middleware
+        const user = req.user;
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'User profile retrieved successfully',
+            data: {
+                user: {
+                    id: user._id,
+                    email: user.email,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    phoneNumber: user.phoneNumber,
+                    gender: user.gender,
+                    name: user.name,
+                    profileImage: user.profileImage,
+                    isGoogleOAuth: user.isGoogleOAuth,
+                    googleId: user.googleId,
+                    createdAt: user.createdAt,
+                    updatedAt: user.updatedAt
+                }
+            }
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching user profile',
+            error: error.message
+        });
+    }
+};
+
+// Refresh Access Token
+const refreshToken = async (req, res) => {
+    try {
+        const { refreshToken } = req.body;
+
+        if (!refreshToken) {
+            return res.status(400).json({
+                success: false,
+                message: 'Refresh token is required'
+            });
+        }
+
+        // Find user by refresh token
+        const user = await User.findOne({ refreshToken });
+
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid refresh token'
+            });
+        }
+
+        // Generate new access token
+        const accessToken = generateAccessToken({ id: user._id, email: user.email });
+
+        res.status(200).json({
+            success: true,
+            message: 'Access token refreshed successfully',
+            data: {
+                accessToken
+            }
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error refreshing token',
+            error: error.message
+        });
+    }
+};
+
+// Logout (Invalidate Refresh Token)
+const logout = async (req, res) => {
+    try {
+        const user = req.user; // From protect middleware
+
+        // Clear refresh token from database
+        user.refreshToken = null;
+        await user.save();
+
+        res.status(200).json({
+            success: true,
+            message: 'Logged out successfully'
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error logging out',
+            error: error.message
+        });
+    }
+};
+
 module.exports = {
     signup,
     login,
     sendOTPForPasswordReset,
     verifyOTPForPasswordReset,
-    resetPassword
+    resetPassword,
+    getProfile,
+    refreshToken,
+    logout
 };
 

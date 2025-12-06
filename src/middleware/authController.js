@@ -145,8 +145,9 @@ const sendPhoneOTPForSignup = async (req, res) => {
         const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         const twilioServiceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
 
-        // Create verification via Twilio Verify
-        const verification = await twilioClient.verify.services(twilioServiceSid)
+        // Create verification via Twilio Verify v2
+        console.log('📱 Using Twilio Verify v2 API to send OTP for signup');
+        const verification = await twilioClient.verify.v2.services(twilioServiceSid)
             .verifications
             .create({ to: normalizedPhone, channel: 'sms' });
 
@@ -216,8 +217,9 @@ const verifyPhoneOTPForSignup = async (req, res) => {
         const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         const twilioServiceSid = process.env.TWILIO_VERIFY_SERVICE_SID;
 
-        // Verify with Twilio
-        const check = await twilioClient.verify.services(twilioServiceSid)
+        // Verify with Twilio v2
+        console.log('✅ Using Twilio Verify v2 API to verify OTP for signup');
+        const check = await twilioClient.verify.v2.services(twilioServiceSid)
             .verificationChecks
             .create({ to: normalizedPhone, code: otp });
 

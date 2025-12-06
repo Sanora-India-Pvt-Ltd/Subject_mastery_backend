@@ -21,7 +21,8 @@ const userSchema = new mongoose.Schema({
     },
     phoneNumber: {
         type: String,
-        required: true
+        required: false, // Optional - validated in controllers for regular signups
+        default: undefined
     },
     gender: {
         type: String,
@@ -44,6 +45,10 @@ const userSchema = new mongoose.Schema({
     isGoogleOAuth: {
         type: Boolean,
         default: false
+    },
+    refreshToken: {
+        type: String,
+        default: null
     }
 }, {
     timestamps: true

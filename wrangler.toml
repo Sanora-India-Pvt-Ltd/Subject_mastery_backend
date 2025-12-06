@@ -1,0 +1,29 @@
+name = "sanora-backend"
+main = "src/worker-hono.js"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Environment variables (set via wrangler secret put or in dashboard)
+# MONGODB_URI - Your MongoDB connection string
+# JWT_SECRET - Your JWT secret
+# GOOGLE_CLIENT_ID - Google OAuth client ID
+# GOOGLE_ANDROID_CLIENT_ID - Google Android client ID
+# GOOGLE_CLIENT_SECRET - Google OAuth client secret
+# EMAIL_HOST - SMTP host
+# EMAIL_PORT - SMTP port
+# EMAIL_USER - SMTP username
+# EMAIL_PASSWORD - SMTP password
+# SESSION_SECRET - Session secret
+
+[env.production]
+name = "sanora-backend"
+
+[env.staging]
+name = "sanora-backend-staging"
+
+# If you want to use Cloudflare D1 database instead of MongoDB
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "sanora-db"
+# database_id = "your-database-id"
+

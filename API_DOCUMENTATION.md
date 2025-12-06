@@ -53,7 +53,8 @@ The verification token proves the email was already verified and allows the user
   "success": true,
   "message": "User registered successfully",
   "data": {
-    "token": "jwt_token_here",
+    "accessToken": "jwt_access_token_here",
+    "refreshToken": "refresh_token_here",
     "user": {
       "id": "user_id",
       "email": "user@example.com",
@@ -66,6 +67,10 @@ The verification token proves the email was already verified and allows the user
   }
 }
 ```
+
+**Note:**
+- `accessToken`: JWT token valid for 15 minutes - use this for API requests in `Authorization: Bearer <accessToken>` header
+- `refreshToken`: Long-lived token (30 days) - store securely and use to get new access tokens when the access token expires
 
 **Response (Error - 400 - Missing fields):**
 ```json
@@ -164,7 +169,8 @@ The verification token proves the email was already verified and allows the user
   "success": true,
   "message": "Login successful",
   "data": {
-    "token": "jwt_token_here",
+    "accessToken": "jwt_access_token_here",
+    "refreshToken": "refresh_token_here",
     "user": {
       "id": "user_id",
       "email": "user@example.com",
@@ -178,6 +184,10 @@ The verification token proves the email was already verified and allows the user
   }
 }
 ```
+
+**Note:**
+- `accessToken`: JWT token valid for 15 minutes - use this for API requests in `Authorization: Bearer <accessToken>` header
+- `refreshToken`: Long-lived token (30 days) - store securely and use to get new access tokens when the access token expires
 
 **Response (Error - 400 - Missing fields):**
 ```json
@@ -848,7 +858,8 @@ https://your-frontend.com/auth/callback?token=JWT_TOKEN&name=User%20Name&email=u
   "success": true,
   "message": "Signup successful via Google OAuth",
   "data": {
-    "token": "jwt_token_here",
+    "accessToken": "jwt_access_token_here",
+    "refreshToken": "refresh_token_here",
     "isNewUser": true,
     "user": {
       "id": "user_id",
@@ -870,7 +881,8 @@ https://your-frontend.com/auth/callback?token=JWT_TOKEN&name=User%20Name&email=u
   "success": true,
   "message": "Login successful via Google OAuth",
   "data": {
-    "token": "jwt_token_here",
+    "accessToken": "jwt_access_token_here",
+    "refreshToken": "refresh_token_here",
     "isNewUser": false,
     "user": {
       "id": "user_id",
@@ -913,9 +925,10 @@ https://your-frontend.com/auth/callback?token=JWT_TOKEN&name=User%20Name&email=u
 - Automatically creates user account if doesn't exist (signup)
 - Logs in existing user if account exists (login)
 - Links Google account to existing email/password account if user exists
-- Returns JWT token valid for 7 days
+- Returns access token (valid for 15 minutes) and refresh token (valid for 30 days)
 - Works for Android, iOS, and Web applications
 - `isNewUser` field indicates if this is a new signup (true) or existing login (false)
+- Use `accessToken` for API requests, use `refreshToken` to get new access tokens when expired
 
 ---
 
@@ -979,6 +992,7 @@ https://your-frontend.com/auth/callback?token=JWT_TOKEN&name=User%20Name&email=u
   "endpoints": {
     "signup": "POST /api/auth/signup",
     "login": "POST /api/auth/login",
+    "profile": "GET /api/auth/profile (protected)",
     "googleAuth": "GET /api/auth/google",
     "verifyGoogleToken": "POST /api/auth/verify-google-token",
     "sendOTPSignup": "POST /api/auth/send-otp-signup",
@@ -1003,6 +1017,195 @@ Authorization: Bearer your_jwt_token_here
 **Example:**
 ```bash
 curl -X GET https://api.sanoraindia.com/api/protected-route \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+---
+
+### 18. Get Current User Profile
+
+**Method:** `GET`  
+**URL:** `https://api.sanoraindia.com/api/auth/profile`
+
+**Authentication:** Required (Protected Route)
+
+**Headers:**
+```
+Authorization: Bearer your_jwt_token_here
+```
+
+**Request:** No body required
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "User profile retrieved successfully",
+  "data": {
+    "user": {
+      "id": "user_id",
+      "email": "user@example.com",
+      "firstName": "John",
+      "lastName": "Doe",
+      "phoneNumber": "+1234567890",
+      "gender": "Male",
+      "name": "John Doe",
+      "profileImage": "https://...",
+      "isGoogleOAuth": false,
+      "googleId": null,
+      "createdAt": "2024-01-01T12:00:00.000Z",
+      "updatedAt": "2024-01-01T12:00:00.000Z"
+    }
+  }
+}
+```
+
+**Response (Error - 401 - No token):**
+```json
+{
+  "success": false,
+  "message": "Not authorized to access this route"
+}
+```
+
+**Response (Error - 401 - Invalid token):**
+```json
+{
+  "success": false,
+  "message": "Not authorized, token failed"
+}
+```
+
+**Response (Error - 404 - User not found):**
+```json
+{
+  "success": false,
+  "message": "User not found"
+}
+```
+
+**Note:** 
+- Requires valid JWT access token in Authorization header
+- Returns complete user profile information
+- Password is automatically excluded from response
+- Access token can be obtained from `/api/auth/login` or `/api/auth/signup` endpoints
+- If access token expires, use `/api/auth/refresh-token` to get a new access token
+
+**Example with curl:**
+```bash
+curl -X GET https://api.sanoraindia.com/api/auth/profile \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+---
+
+### 19. Refresh Access Token
+
+**Method:** `POST`  
+**URL:** `https://api.sanoraindia.com/api/auth/refresh-token`
+
+**Authentication:** Not required (public endpoint)
+
+**Request Body:**
+```json
+{
+  "refreshToken": "refresh_token_from_login_or_signup"
+}
+```
+
+**Required Fields:**
+- `refreshToken` (string): The refresh token received from login or signup
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "Access token refreshed successfully",
+  "data": {
+    "accessToken": "new_jwt_access_token_here"
+  }
+}
+```
+
+**Response (Error - 400 - Missing refresh token):**
+```json
+{
+  "success": false,
+  "message": "Refresh token is required"
+}
+```
+
+**Response (Error - 401 - Invalid refresh token):**
+```json
+{
+  "success": false,
+  "message": "Invalid refresh token"
+}
+```
+
+**Note:** 
+- Use this endpoint when your access token expires (after 15 minutes)
+- Refresh token is valid for 30 days
+- Only returns a new access token (refresh token remains the same)
+- Store the new access token and use it for subsequent API requests
+- If refresh token is invalid or expired, user must login again
+
+**Example with curl:**
+```bash
+curl -X POST https://api.sanoraindia.com/api/auth/refresh-token \
+  -H "Content-Type: application/json" \
+  -d '{"refreshToken":"your_refresh_token_here"}'
+```
+
+---
+
+### 20. Logout
+
+**Method:** `POST`  
+**URL:** `https://api.sanoraindia.com/api/auth/logout`
+
+**Authentication:** Required (Protected Route)
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+```
+
+**Request:** No body required
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "Logged out successfully"
+}
+```
+
+**Response (Error - 401 - No token):**
+```json
+{
+  "success": false,
+  "message": "Not authorized to access this route"
+}
+```
+
+**Response (Error - 401 - Invalid token):**
+```json
+{
+  "success": false,
+  "message": "Not authorized, token failed"
+}
+```
+
+**Note:** 
+- Requires valid JWT access token in Authorization header
+- Invalidates the refresh token stored in the database
+- After logout, the refresh token cannot be used to get new access tokens
+- User must login again to get new tokens
+
+**Example with curl:**
+```bash
+curl -X POST https://api.sanoraindia.com/api/auth/logout \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
 
@@ -1200,6 +1403,84 @@ All endpoints return errors in this format:
 
 ---
 
+## 🔄 Refresh Token Flow
+
+The API uses a two-token authentication system for enhanced security:
+
+### Token Types
+
+1. **Access Token** (Short-lived)
+   - Valid for **15 minutes**
+   - Used for API requests in `Authorization: Bearer <accessToken>` header
+   - Automatically expires after 15 minutes
+
+2. **Refresh Token** (Long-lived)
+   - Valid for **30 days**
+   - Stored securely in the database
+   - Used to obtain new access tokens when the current one expires
+   - Invalidated on logout
+
+### How It Works
+
+1. **On Signup/Login:**
+   - User receives both `accessToken` and `refreshToken`
+   - Store both tokens securely on the client side
+
+2. **Making API Requests:**
+   - Use `accessToken` in the `Authorization: Bearer <accessToken>` header
+   - If the access token expires (after 15 minutes), you'll receive a 401 error
+
+3. **Refreshing Access Token:**
+   - When access token expires, call `/api/auth/refresh-token` with your `refreshToken`
+   - You'll receive a new `accessToken` to use for subsequent requests
+   - The `refreshToken` remains the same
+
+4. **Logout:**
+   - Call `/api/auth/logout` to invalidate the refresh token
+   - After logout, the refresh token cannot be used to get new access tokens
+   - User must login again to get new tokens
+
+### Example Flow
+
+```javascript
+// 1. Login
+const loginResponse = await fetch('/api/auth/login', {
+  method: 'POST',
+  body: JSON.stringify({ email, password })
+});
+const { accessToken, refreshToken } = await loginResponse.json();
+
+// 2. Use access token for API requests
+const profileResponse = await fetch('/api/auth/profile', {
+  headers: { 'Authorization': `Bearer ${accessToken}` }
+});
+
+// 3. When access token expires (401 error), refresh it
+if (profileResponse.status === 401) {
+  const refreshResponse = await fetch('/api/auth/refresh-token', {
+    method: 'POST',
+    body: JSON.stringify({ refreshToken })
+  });
+  const { accessToken: newAccessToken } = await refreshResponse.json();
+  // Use newAccessToken for subsequent requests
+}
+
+// 4. Logout
+await fetch('/api/auth/logout', {
+  method: 'POST',
+  headers: { 'Authorization': `Bearer ${accessToken}` }
+});
+```
+
+### Security Benefits
+
+- **Reduced Attack Window:** Short-lived access tokens limit exposure if compromised
+- **Automatic Rotation:** Access tokens are refreshed regularly
+- **Revocable:** Refresh tokens can be invalidated on logout or security events
+- **Stateless Access:** Access tokens don't require database lookups for validation
+
+---
+
 ## 🔒 Security Features
 
 - **Rate Limiting:**
@@ -1213,7 +1494,10 @@ All endpoints return errors in this format:
   - One-time use only (marked as verified after successful verification)
 
 - **Token Security:**
-  - JWT tokens expire in 7 days
+  - Access tokens expire in 15 minutes (short-lived for security)
+  - Refresh tokens expire in 30 days (long-lived for convenience)
+  - Refresh tokens are stored securely in the database
+  - Refresh tokens are invalidated on logout
   - Verification tokens expire in 20 minutes (allows time to fill signup form)
   - Passwords are hashed using bcrypt
   - Password minimum length: 6 characters
@@ -1270,6 +1554,21 @@ curl -X POST https://api.sanoraindia.com/api/auth/login \
 curl -X POST https://api.sanoraindia.com/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"phoneNumber":"+1234567890","password":"MyPassword123"}'
+```
+
+### Test Get User Profile:
+
+**Step 1: Login to get token**
+```bash
+curl -X POST https://api.sanoraindia.com/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"MyPassword123"}'
+```
+
+**Step 2: Use token to get profile**
+```bash
+curl -X GET https://api.sanoraindia.com/api/auth/profile \
+  -H "Authorization: Bearer YOUR_TOKEN_HERE"
 ```
 
 ### Test Google Token Verification:

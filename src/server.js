@@ -1,4 +1,14 @@
 require('dotenv').config();
+
+// Debug: Check if MONGODB_URI is loaded (only show first part for security)
+if (process.env.MONGODB_URI) {
+    const uriPreview = process.env.MONGODB_URI.substring(0, 30) + '...';
+    console.log('✅ MONGODB_URI loaded:', uriPreview);
+} else {
+    console.warn('⚠️  MONGODB_URI not found in environment variables');
+    console.warn('💡 Make sure you have a .env file in the project root with MONGODB_URI');
+}
+
 const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/db');
@@ -185,22 +195,27 @@ if (client && validClientIds.length > 0) {
             }
             
             // Generate JWT token for your app
-            const jwtToken = jwt.sign(
-                {
-                    id: user._id,
-                    email: user.email,
-                    name: user.name,
-                    isGoogleOAuth: true
-                },
-                process.env.JWT_SECRET || 'your-secret-key',
-                { expiresIn: '7d' }
-            );
+            // Generate access token and refresh token
+            const { generateAccessToken, generateRefreshToken } = require('./middleware/auth');
+            const accessToken = generateAccessToken({
+                id: user._id,
+                email: user.email,
+                name: user.name,
+                isGoogleOAuth: true
+            });
+            const refreshToken = generateRefreshToken();
+            
+            // Save refresh token to database
+            user.refreshToken = refreshToken;
+            await user.save();
             
             res.json({
                 success: true,
                 message: isNewUser ? 'Signup successful via Google OAuth' : 'Login successful via Google OAuth',
                 data: {
-                    token: jwtToken,
+                    accessToken,
+                    refreshToken,
+                    token: accessToken, // For backward compatibility
                     isNewUser: isNewUser,
                     user: {
                         id: user._id,
@@ -384,8 +399,9 @@ try {
                 });
             }
             
-            // Create verification via Twilio Verify (channel sms)
-            const verification = await twilioClient.verify.services(twilioServiceSid)
+            // Create verification via Twilio Verify v2 (channel sms)
+            console.log('📱 Using Twilio Verify v2 API to send OTP');
+            const verification = await twilioClient.verify.v2.services(twilioServiceSid)
                 .verifications
                 .create({ to: phoneValidation.normalized, channel: 'sms' });
             
@@ -486,7 +502,8 @@ try {
                 });
             }
             
-            const check = await twilioClient.verify.services(twilioServiceSid)
+            console.log('✅ Using Twilio Verify v2 API to verify OTP');
+            const check = await twilioClient.verify.v2.services(twilioServiceSid)
                 .verificationChecks
                 .create({ to: phoneValidation.normalized, code: code });
             
