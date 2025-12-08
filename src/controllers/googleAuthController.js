@@ -203,30 +203,35 @@ const googleCallback = (req, res, next) => {
         <a href="sanjaytube://home" class="button" id="openApp">Open App</a>
     </div>
     <script>
-        const deepLink = 'sanjaytube://auth/callback?token=xyz';
-        const statusEl = document.getElementById('status');
-        
-        function openDeepLink() {
-            try {
-                window.location.href = deepLink;
-                statusEl.textContent = 'Opening app...';
-                setTimeout(() => {
-                    statusEl.textContent = 'If the app didn\\'t open, tap the button below';
-                }, 2000);
-            } catch (e) {
-                statusEl.textContent = 'Please tap the button below to open the app';
-            }
+    const token = "{{TOKEN}}";       // backend se token aa raha hoga
+    const email = "{{EMAIL}}";       // backend se email aa rahi hogi
+    const name  = "{{NAME}}";        // backend se name aa raha hoga
+
+    const deepLink = sanjaytube://auth/callback?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)};
+
+    const statusEl = document.getElementById('status');
+    
+    function openDeepLink() {
+        try {
+            window.location.href = deepLink;
+            statusEl.textContent = 'Opening app...';
+            setTimeout(() => {
+                statusEl.textContent = "If the app didn't open, tap the button below";
+            }, 2000);
+        } catch (e) {
+            statusEl.textContent = 'Please tap the button below to open the app';
         }
-        
-        window.onload = function() {
-            setTimeout(openDeepLink, 500);
-        };
-        
-        document.getElementById('openApp').addEventListener('click', function(e) {
-            e.preventDefault();
-            openDeepLink();
-        });
-    </script>
+    }
+    
+    window.onload = function() {
+        setTimeout(openDeepLink, 500);
+    };
+    
+    document.getElementById('openApp').addEventListener('click', function(e) {
+        e.preventDefault();
+        openDeepLink();
+    });
+</script>
 </body>
 </html>`;
             
