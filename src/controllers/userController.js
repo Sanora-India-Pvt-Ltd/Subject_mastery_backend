@@ -1,6 +1,8 @@
 const User = require('../models/User');
+const Media = require('../models/Media');
 const jwt = require('jsonwebtoken');
 const twilio = require('twilio');
+const cloudinary = require('../config/cloudinary');
 
 // Update user profile (name, dob, gender) - no verification needed
 const updateProfile = async (req, res) => {
@@ -553,12 +555,277 @@ const removeAlternatePhone = async (req, res) => {
     }
 };
 
+// Upload media to Cloudinary - ensures it's only associated with the authenticated user
+const uploadMedia = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                message: "No file uploaded"
+            });
+        }
+
+        const user = req.user; // From protect middleware - ensures only authenticated user can upload
+
+        // User-specific folder path to ensure files are organized per user
+        const userFolder = `user_uploads/${user._id}`;
+
+        // Upload to Cloudinary in user-specific folder
+        const result = await cloudinary.uploader.upload(req.file.path, {
+            folder: userFolder,
+            upload_preset: process.env.UPLOAD_PRESET,
+            resource_type: "auto", // auto = images + videos
+        });
+
+        // Save upload record to database - associated with this specific user
+        const mediaRecord = await Media.create({
+            userId: user._id, // Ensures it's only associated with this user
+            url: result.secure_url,
+            public_id: result.public_id,
+            format: result.format,
+            resource_type: result.resource_type,
+            fileSize: result.bytes || req.file.size,
+            originalFilename: req.file.originalname,
+            folder: result.folder || userFolder
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Uploaded successfully",
+            data: {
+                id: mediaRecord._id,
+                url: result.secure_url,
+                public_id: result.public_id,
+                format: result.format,
+                type: result.resource_type,
+                fileSize: result.bytes || req.file.size,
+                uploadedBy: {
+                    userId: user._id,
+                    email: user.email,
+                    name: user.name
+                },
+                uploadedAt: mediaRecord.createdAt
+            }
+        });
+
+    } catch (err) {
+        console.error('Cloudinary upload error:', err);
+        return res.status(500).json({
+            success: false,
+            message: "Cloudinary upload failed",
+            error: err.message
+        });
+    }
+};
+
+// Upload profile image - ensures it's only associated with the authenticated user
+const uploadProfileImage = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                message: "No file uploaded"
+            });
+        }
+
+        const user = req.user; // From protect middleware - ensures only authenticated user can upload
+
+        // Validate that it's an image
+        const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+        if (!allowedMimeTypes.includes(req.file.mimetype)) {
+            return res.status(400).json({
+                success: false,
+                message: "Only image files are allowed for profile pictures (JPEG, PNG, GIF, WebP)"
+            });
+        }
+
+        // User-specific folder path
+        const userFolder = `user_uploads/${user._id}/profile`;
+
+        // Delete old profile image from Cloudinary if it exists
+        if (user.profileImage) {
+            try {
+                // Extract public_id from the old profile image URL
+                const oldPublicId = user.profileImage.split('/').slice(-2).join('/').split('.')[0];
+                // Try to delete the old image
+                await cloudinary.uploader.destroy(oldPublicId, { invalidate: true });
+                
+                // Also delete from Media collection
+                await Media.findOneAndDelete({ 
+                    userId: user._id, 
+                    url: user.profileImage 
+                });
+            } catch (deleteError) {
+                // Log but don't fail if old image deletion fails
+                console.warn('Failed to delete old profile image:', deleteError.message);
+            }
+        }
+
+        // Upload new profile image to user-specific folder
+        const result = await cloudinary.uploader.upload(req.file.path, {
+            folder: userFolder,
+            upload_preset: process.env.UPLOAD_PRESET,
+            resource_type: "image",
+            transformation: [
+                { width: 400, height: 400, crop: "fill", gravity: "face" }, // Optimize for profile images
+                { quality: "auto" }
+            ]
+        });
+
+        // Update user's profileImage field
+        const updatedUser = await User.findByIdAndUpdate(
+            user._id,
+            { profileImage: result.secure_url },
+            { new: true, runValidators: true }
+        ).select('-password -refreshToken');
+
+        // Save upload record to database - associated with this specific user
+        const mediaRecord = await Media.create({
+            userId: user._id, // Ensures it's only associated with this user
+            url: result.secure_url,
+            public_id: result.public_id,
+            format: result.format,
+            resource_type: result.resource_type,
+            fileSize: result.bytes || req.file.size,
+            originalFilename: req.file.originalname,
+            folder: userFolder
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Profile image uploaded successfully",
+            data: {
+                id: mediaRecord._id,
+                url: result.secure_url,
+                public_id: result.public_id,
+                format: result.format,
+                fileSize: result.bytes || req.file.size,
+                user: {
+                    id: updatedUser._id,
+                    email: updatedUser.email,
+                    name: updatedUser.name,
+                    profileImage: updatedUser.profileImage
+                },
+                uploadedAt: mediaRecord.createdAt
+            }
+        });
+
+    } catch (err) {
+        console.error('Profile image upload error:', err);
+        return res.status(500).json({
+            success: false,
+            message: "Profile image upload failed",
+            error: err.message
+        });
+    }
+};
+
+// Get user's media - ensures users can only see their own uploads
+const getUserMedia = async (req, res) => {
+    try {
+        const user = req.user; // From protect middleware
+
+        // Query only media belonging to this specific user
+        const media = await Media.find({ userId: user._id })
+            .sort({ createdAt: -1 })
+            .select('-__v');
+
+        return res.status(200).json({
+            success: true,
+            message: "Media retrieved successfully",
+            data: {
+                count: media.length,
+                media: media.map(item => ({
+                    id: item._id,
+                    url: item.url,
+                    public_id: item.public_id,
+                    format: item.format,
+                    type: item.resource_type,
+                    fileSize: item.fileSize,
+                    originalFilename: item.originalFilename,
+                    folder: item.folder,
+                    uploadedAt: item.createdAt
+                }))
+            }
+        });
+
+    } catch (err) {
+        console.error('Get user media error:', err);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to retrieve media",
+            error: err.message
+        });
+    }
+};
+
+// Delete user's media - ensures users can only delete their own uploads
+const deleteUserMedia = async (req, res) => {
+    try {
+        const user = req.user; // From protect middleware
+        const { mediaId } = req.params;
+
+        if (!mediaId) {
+            return res.status(400).json({
+                success: false,
+                message: "Media ID is required"
+            });
+        }
+
+        // Find media that belongs to this specific user
+        const media = await Media.findOne({ 
+            _id: mediaId, 
+            userId: user._id // Ensure it belongs to the authenticated user
+        });
+
+        if (!media) {
+            return res.status(404).json({
+                success: false,
+                message: "Media not found or you don't have permission to delete it"
+            });
+        }
+
+        // Delete from Cloudinary
+        try {
+            await cloudinary.uploader.destroy(media.public_id, { invalidate: true });
+        } catch (cloudinaryError) {
+            console.warn('Failed to delete from Cloudinary:', cloudinaryError.message);
+            // Continue with database deletion even if Cloudinary deletion fails
+        }
+
+        // Delete from database
+        await Media.findByIdAndDelete(mediaId);
+
+        // If this was the user's profile image, clear it from user record
+        if (user.profileImage === media.url) {
+            await User.findByIdAndUpdate(user._id, { profileImage: '' });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Media deleted successfully"
+        });
+
+    } catch (err) {
+        console.error('Delete user media error:', err);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to delete media",
+            error: err.message
+        });
+    }
+};
+
 module.exports = {
     updateProfile,
     sendOTPForPhoneUpdate,
     verifyOTPAndUpdatePhone,
     sendOTPForAlternatePhone,
     verifyOTPAndUpdateAlternatePhone,
-    removeAlternatePhone
+    removeAlternatePhone,
+    uploadMedia,
+    uploadProfileImage,
+    getUserMedia,
+    deleteUserMedia
 };
 

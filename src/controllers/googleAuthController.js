@@ -13,16 +13,144 @@ const generateToken = (user) => {
     });
 };
 
+
+const { OAuth2Client } = require('google-auth-library');
+
+// Support WEB, Android, and iOS client IDs
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID; // WEB client ID
+const GOOGLE_ANDROID_CLIENT_ID = process.env.GOOGLE_ANDROID_CLIENT_ID; // Android client ID
+const GOOGLE_IOS_CLIENT_ID = process.env.GOOGLE_IOS_CLIENT_ID; // iOS client ID
+
+// Collect all valid client IDs
+const validClientIds = [];
+if (GOOGLE_CLIENT_ID) validClientIds.push(GOOGLE_CLIENT_ID);
+if (GOOGLE_ANDROID_CLIENT_ID) validClientIds.push(GOOGLE_ANDROID_CLIENT_ID);
+if (GOOGLE_IOS_CLIENT_ID) validClientIds.push(GOOGLE_IOS_CLIENT_ID);
+
+const client = validClientIds.length > 0 ? new OAuth2Client() : null;
+
+// MOBILE GOOGLE LOGIN (Android/iOS)
+const googleLoginMobile = async (req, res) => {
+    try {
+        const { idToken, platform } = req.body;
+        
+        // Detect platform from body or headers
+        const detectedPlatform = platform || 
+                                 req.headers['x-platform'] || 
+                                 (req.headers['user-agent']?.toLowerCase().includes('ios') ? 'ios' : 
+                                  req.headers['user-agent']?.toLowerCase().includes('android') ? 'android' : null);
+        
+        if (!idToken) {
+            return res.status(400).json({
+                success: false,
+                message: "idToken is required"
+            });
+        }
+
+        if (!client || validClientIds.length === 0) {
+            return res.status(500).json({
+                success: false,
+                message: "Google OAuth not configured. Please set GOOGLE_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, and/or GOOGLE_IOS_CLIENT_ID"
+            });
+        }
+
+        // Verify Google token against all valid client IDs (Web, Android, iOS)
+        let ticket;
+        let payload;
+        let verified = false;
+        
+        for (const clientId of validClientIds) {
+            try {
+                ticket = await client.verifyIdToken({
+                    idToken,
+                    audience: clientId
+                });
+                payload = ticket.getPayload();
+                verified = true;
+                break; // Successfully verified, exit loop
+            } catch (err) {
+                // Try next client ID
+                continue;
+            }
+        }
+        
+        if (!verified) {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid Google token - token does not match any configured client ID",
+                error: `Please ensure you are using the correct Google Sign-In configuration for your platform (${detectedPlatform || 'Android/iOS'})`
+            });
+        }
+
+        const email = payload.email.toLowerCase();
+        const name = payload.name;
+        const googleId = payload.sub;
+        const picture = payload.picture;
+
+        // Find or create user
+        let user = await User.findOne({ email });
+
+        if (!user) {
+            user = await User.create({
+                email,
+                name,
+                firstName: name.split(" ")[0],
+                lastName: name.split(" ").slice(1).join(" "),
+                googleId,
+                profileImage: picture,
+                isGoogleOAuth: true,
+                password: "oauth-user"
+            });
+        } else {
+            if (!user.googleId) user.googleId = googleId;
+            if (!user.profileImage) user.profileImage = picture;
+            user.isGoogleOAuth = true;
+            await user.save();
+        }
+
+        // Tokens
+        const accessToken = generateAccessToken({
+            id: user._id,
+            email: user.email,
+            name: user.name
+        });
+
+        const { token: refreshToken, expiryDate } = generateRefreshToken();
+        user.refreshToken = refreshToken;
+        user.refreshTokenExpiry = expiryDate;
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Google Sign-in successful",
+            data: {
+                accessToken,
+                refreshToken,
+                user
+            }
+        });
+
+    } catch (err) {
+        console.error("Mobile Google Login Error (Android/iOS):", err);
+        return res.status(500).json({
+            success: false,
+            message: "Invalid Google token",
+            error: err.message,
+            note: "Please ensure you are using the correct Google Sign-In configuration for your platform (Android/iOS)"
+        });
+    }
+};
+
+
 // Initiate Google OAuth
 const googleAuth = (req, res, next) => {
-    // Store platform info in session for callback
-    if (req.query.platform === 'mobile' || req.query.mobile === 'true') {
-        req.session.platform = 'mobile';
+    // Store platform info in session for callback (supports Android, iOS, and web)
+    const platform = req.query.platform || req.headers['x-platform'];
+    if (platform === 'mobile' || platform === 'android' || platform === 'ios' || req.query.mobile === 'true') {
+        req.session.platform = platform || 'mobile';
         if (req.query.deepLink) {
             req.session.deepLink = req.query.deepLink;
         }
-    } else if (req.headers['x-platform'] === 'mobile') {
-        req.session.platform = 'mobile';
     }
     
     passport.authenticate('google', {
@@ -33,15 +161,20 @@ const googleAuth = (req, res, next) => {
 // Google OAuth Callback
 const googleCallback = (req, res, next) => {
     passport.authenticate('google', async (err, user) => {
-        // Check if this is a mobile app request
+        // Check if this is a mobile app request (Android or iOS)
         // Check multiple sources: query params, session, state param, headers
         const stateParam = req.query.state || '';
-        const isMobile = req.query.platform === 'mobile' || 
+        const platform = req.query.platform || req.session?.platform || req.headers['x-platform'] || '';
+        const isMobile = platform === 'mobile' || 
+                        platform === 'android' ||
+                        platform === 'ios' ||
                         req.query.mobile === 'true' ||
-                        req.session?.platform === 'mobile' ||
                         stateParam === 'mobile' ||
+                        stateParam === 'android' ||
+                        stateParam === 'ios' ||
                         req.headers['user-agent']?.toLowerCase().includes('mobile') ||
-                        req.headers['x-platform'] === 'mobile';
+                        req.headers['user-agent']?.toLowerCase().includes('android') ||
+                        req.headers['user-agent']?.toLowerCase().includes('ios');
         
         if (err || !user) {
             console.error('❌ Google OAuth error:', err?.message || 'User not found');
@@ -73,10 +206,11 @@ const googleCallback = (req, res, next) => {
                 name: user.name,
                 isGoogleOAuth: user.googleId ? true : false
             });
-            const refreshToken = generateRefreshToken();
+            const { token: refreshToken, expiryDate: refreshTokenExpiry } = generateRefreshToken();
             
-            // Save refresh token to database
+            // Save refresh token and expiry to database
             user.refreshToken = refreshToken;
+            user.refreshTokenExpiry = refreshTokenExpiry;
             await user.save();
         
             // For backward compatibility, use accessToken as token
@@ -86,7 +220,7 @@ const googleCallback = (req, res, next) => {
             const isNewUser = !user.createdAt || (Date.now() - new Date(user.createdAt).getTime()) < 5000;
             
             console.log(`✅ Google OAuth successful for ${user.email}`);
-            console.log(`📱 Mobile request: ${isMobile ? 'Yes' : 'No'}`);
+            console.log(`📱 Platform: ${isMobile ? (platform || 'mobile') : 'web'}`);
             
             // Check if JSON response is requested (for API clients)
             const wantsJson = req.query.format === 'json' || 
@@ -136,106 +270,101 @@ const googleCallback = (req, res, next) => {
                 
                 // Return HTML page that automatically opens deep link
                 const html = `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Authentication Successful</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #333;
-        }
-        .container {
-            background: white;
-            padding: 2rem;
-            border-radius: 12px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-            text-align: center;
-            max-width: 400px;
-            width: 90%;
-        }
-        .success-icon {
-            font-size: 4rem;
-            margin-bottom: 1rem;
-        }
-        h1 {
-            margin: 0 0 1rem 0;
-            color: #333;
-        }
-        p {
-            color: #666;
-            margin: 0.5rem 0;
-        }
-        .button {
-            display: inline-block;
-            margin-top: 1.5rem;
-            padding: 12px 24px;
-            background: #667eea;
-            color: white;
-            text-decoration: none;
-            border-radius: 6px;
-            font-weight: 600;
-            transition: background 0.3s;
-        }
-        .button:hover {
-            background: #5568d3;
-        }
-        .loading {
-            margin-top: 1rem;
-            color: #999;
-            font-size: 0.9rem;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="success-icon">✅</div>
-        <h1>Authentication Successful!</h1>
-        <p>Redirecting you back to the app...</p>
-        <div class="loading" id="status">Opening app...</div>
-        <a href="sanjaytube://home" class="button" id="openApp">Open App</a>
-    </div>
-    <script>
-    const token = "{{TOKEN}}";       // backend se token aa raha hoga
-    const email = "{{EMAIL}}";       // backend se email aa rahi hogi
-    const name  = "{{NAME}}";        // backend se name aa raha hoga
-
-    const deepLink = sanjaytube://auth/callback?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)};
-
-    const statusEl = document.getElementById('status');
-    
-    function openDeepLink() {
-        try {
-            window.location.href = deepLink;
-            statusEl.textContent = 'Opening app...';
-            setTimeout(() => {
-                statusEl.textContent = "If the app didn't open, tap the button below";
-            }, 2000);
-        } catch (e) {
-            statusEl.textContent = 'Please tap the button below to open the app';
-        }
-    }
-    
-    window.onload = function() {
-        setTimeout(openDeepLink, 500);
-    };
-    
-    document.getElementById('openApp').addEventListener('click', function(e) {
-        e.preventDefault();
-        openDeepLink();
-    });
-</script>
-</body>
-</html>`;
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>Authentication Successful</title>
+                    <style>
+                        body {
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                            display: flex;
+                            justify-content: center;
+                            align-items: center;
+                            min-height: 100vh;
+                            margin: 0;
+                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                            color: #333;
+                        }
+                        .container {
+                            background: white;
+                            padding: 2rem;
+                            border-radius: 12px;
+                            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                            text-align: center;
+                            max-width: 400px;
+                            width: 90%;
+                        }
+                        .success-icon {
+                            font-size: 4rem;
+                            margin-bottom: 1rem;
+                        }
+                        h1 {
+                            margin: 0 0 1rem 0;
+                            color: #333;
+                        }
+                        p {
+                            color: #666;
+                            margin: 0.5rem 0;
+                        }
+                        .button {
+                            display: inline-block;
+                            margin-top: 1.5rem;
+                            padding: 12px 24px;
+                            background: #667eea;
+                            color: white;
+                            text-decoration: none;
+                            border-radius: 6px;
+                            font-weight: 600;
+                            transition: background 0.3s;
+                        }
+                        .button:hover {
+                            background: #5568d3;
+                        }
+                        .loading {
+                            margin-top: 1rem;
+                            color: #999;
+                            font-size: 0.9rem;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="success-icon">✅</div>
+                        <h1>Authentication Successful!</h1>
+                        <p>Redirecting you back to the app...</p>
+                        <div class="loading" id="status">Opening app...</div>
+                        <a href="${deepLinkUrl}" class="button" id="openApp">Open App</a>
+                    </div>
+                    <script>
+                        const deepLink = '${deepLinkUrl}';
+                        const statusEl = document.getElementById('status');
+                        
+                        function openDeepLink() {
+                            try {
+                                window.location.href = deepLink;
+                                statusEl.textContent = 'Opening app...';
+                                setTimeout(() => {
+                                    statusEl.textContent = 'If the app didn\\'t open, tap the button below';
+                                }, 2000);
+                            } catch (e) {
+                                statusEl.textContent = 'Please tap the button below to open the app';
+                            }
+                        }
+                        
+                        window.onload = function() {
+                            setTimeout(openDeepLink, 500);
+                        };
+                        
+                        document.getElementById('openApp').addEventListener('click', function(e) {
+                            e.preventDefault();
+                            openDeepLink();
+                        });
+                    </script>
+                </body>
+                </html>`;
             
-            return res.status(200).send(html);
+                return res.status(200).send(html);
         }
         
         // For web, redirect to frontend
@@ -351,5 +480,6 @@ const checkEmailExists = async (req, res) => {
 module.exports = {
     googleAuth,
     googleCallback,
-    checkEmailExists
+    checkEmailExists,
+    googleLoginMobile   
 };

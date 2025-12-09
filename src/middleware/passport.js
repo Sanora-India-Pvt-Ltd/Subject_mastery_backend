@@ -23,10 +23,11 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     }, async (req, accessToken, refreshToken, profile, done) => {
         try {
             const { id, displayName, emails, photos } = profile;
-            const email = emails[0].value;
+            // Normalize email to lowercase for consistent lookup
+            const email = emails[0].value.toLowerCase().trim();
             const photo = photos[0]?.value;
             
-            // Check if user exists
+            // Check if user exists by email (normalized)
             let user = await User.findOne({ email });
             
             if (!user) {
@@ -49,18 +50,34 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
                     password: 'oauth-user', // Dummy password for OAuth users
                     isGoogleOAuth: true
                 });
-            } else if (!user.googleId) {
-                // Link Google account to existing user
-                // Update name if not already set
-                if (!user.firstName || !user.lastName) {
-                    const nameParts = displayName ? displayName.trim().split(/\s+/) : ['User'];
-                    user.firstName = user.firstName || nameParts[0] || 'User';
-                    user.lastName = user.lastName || nameParts.slice(1).join(' ') || 'User';
+                console.log(`✅ Created new Google OAuth user: ${email}`);
+            } else {
+                // User exists - link Google account if not already linked
+                if (!user.googleId) {
+                    // Link Google account to existing user (from regular signup)
+                    // Update name if not already set
+                    if (!user.firstName || !user.lastName) {
+                        const nameParts = displayName ? displayName.trim().split(/\s+/) : ['User'];
+                        user.firstName = user.firstName || nameParts[0] || 'User';
+                        user.lastName = user.lastName || nameParts.slice(1).join(' ') || 'User';
+                    }
+                    // Update profile image if not set
+                    if (!user.profileImage && photo) {
+                        user.profileImage = photo;
+                    }
+                    user.googleId = id;
+                    user.isGoogleOAuth = true;
+                    await user.save();
+                    console.log(`✅ Linked Google account to existing user: ${email}`);
+                } else {
+                    // User already has Google account linked - just allow login
+                    // Update profile image if provided and different
+                    if (photo && user.profileImage !== photo) {
+                        user.profileImage = photo;
+                        await user.save();
+                    }
+                    console.log(`✅ Google OAuth login for existing user: ${email}`);
                 }
-                user.googleId = id;
-                user.profileImage = photo;
-                user.isGoogleOAuth = true;
-                await user.save();
             }
             
             console.log(`Google OAuth successful for ${email}`);

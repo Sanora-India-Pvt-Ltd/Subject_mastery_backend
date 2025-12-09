@@ -105,7 +105,7 @@ if (client && validClientIds.length > 0) {
             }
             
             // Verify the Google ID token against all valid client IDs
-            // This works for both WEB and Android tokens
+            // This works for WEB, Android, and iOS tokens
             let ticket;
             let payload;
             let verified = false;
@@ -153,8 +153,9 @@ if (client && validClientIds.length > 0) {
                 });
             }
             
-            // Find or create user in database
-            let user = await User.findOne({ email: email.toLowerCase() });
+            // Find or create user in database (normalize email)
+            const normalizedEmail = email.toLowerCase().trim();
+            let user = await User.findOne({ email: normalizedEmail });
             let isNewUser = false;
             
             if (!user) {
@@ -166,7 +167,7 @@ if (client && validClientIds.length > 0) {
                 
                 // New user signup - no OTP needed (Google already verified email)
                 user = await User.create({
-                    email: email.toLowerCase(),
+                    email: normalizedEmail,
                     firstName,
                     lastName,
                     phoneNumber: '', // Google doesn't provide phone number, user can update later
@@ -178,20 +179,39 @@ if (client && validClientIds.length > 0) {
                     isGoogleOAuth: true
                 });
                 isNewUser = true;
-            } else if (!user.googleId) {
-                // Existing user linking Google account
-                // Update name fields if not already set
-                if (!user.firstName || !user.lastName) {
-                    const displayName = name || email.split('@')[0] || 'User';
-                    const nameParts = displayName.trim().split(/\s+/);
-                    user.firstName = user.firstName || nameParts[0] || 'User';
-                    user.lastName = user.lastName || nameParts.slice(1).join(' ') || 'User';
+                console.log(`✅ Created new Google OAuth user: ${normalizedEmail}`);
+            } else {
+                // User exists - link Google account if not already linked
+                if (!user.googleId) {
+                    // Link Google account to existing user (from regular signup)
+                    // Update name fields if not already set
+                    if (!user.firstName || !user.lastName) {
+                        const displayName = name || email.split('@')[0] || 'User';
+                        const nameParts = displayName.trim().split(/\s+/);
+                        user.firstName = user.firstName || nameParts[0] || 'User';
+                        user.lastName = user.lastName || nameParts.slice(1).join(' ') || 'User';
+                    }
+                    // Update profile image if not set
+                    if (!user.profileImage && picture) {
+                        user.profileImage = picture;
+                    }
+                    // Update name if not set
+                    if (!user.name && name) {
+                        user.name = name;
+                    }
+                    user.googleId = googleId;
+                    user.isGoogleOAuth = true;
+                    await user.save();
+                    console.log(`✅ Linked Google account to existing user: ${normalizedEmail}`);
+                } else {
+                    // User already has Google account linked - just allow login
+                    // Update profile image if provided and different
+                    if (picture && user.profileImage !== picture) {
+                        user.profileImage = picture;
+                        await user.save();
+                    }
+                    console.log(`✅ Google OAuth login for existing user: ${normalizedEmail}`);
                 }
-                user.googleId = googleId;
-                if (picture) user.profileImage = picture;
-                if (name) user.name = name;
-                user.isGoogleOAuth = true;
-                await user.save();
             }
             
             // Generate JWT token for your app
@@ -203,10 +223,11 @@ if (client && validClientIds.length > 0) {
                 name: user.name,
                 isGoogleOAuth: true
             });
-            const refreshToken = generateRefreshToken();
+            const { token: refreshToken, expiryDate: refreshTokenExpiry } = generateRefreshToken();
             
-            // Save refresh token to database
+            // Save refresh token and expiry to database
             user.refreshToken = refreshToken;
+            user.refreshTokenExpiry = refreshTokenExpiry;
             await user.save();
             
             res.json({
@@ -233,7 +254,7 @@ if (client && validClientIds.length > 0) {
         } catch (error) {
             console.error('Google token verification error:', error);
             
-            // Provide more specific error messages for Android developers
+            // Provide more specific error messages for mobile developers (Android/iOS)
             let errorMessage = 'Invalid Google token';
             let errorDetails = error.message;
             
@@ -300,6 +321,16 @@ try {
     console.log('✅ User routes loaded successfully');
 } catch (error) {
     console.error('❌ Error loading user routes:', error.message);
+    console.error('Stack:', error.stack);
+}
+
+// Media upload routes
+try {
+    console.log('🔄 Loading media upload routes...');
+    app.use('/api/media', require('./routes/uploadRoutes'));
+    console.log('✅ Media upload routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading media upload routes:', error.message);
     console.error('Stack:', error.stack);
     // Don't crash - create a fallback route
     app.use('/api/user', (req, res) => {
@@ -631,6 +662,7 @@ app.get('/', (req, res) => {
             refreshToken: 'POST /api/auth/refresh-token',
             logout: 'POST /api/auth/logout (protected)',
             googleAuth: 'GET /api/auth/google',
+            googleAuthMobile: 'POST /api/auth/google/mobile',
             verifyGoogleToken: 'POST /api/auth/verify-google-token',
             sendOTPSignup: 'POST /api/auth/send-otp-signup',
             verifyOTPSignup: 'POST /api/auth/verify-otp-signup',
@@ -722,6 +754,7 @@ app.listen(PORT, () => {
     console.log('Environment Variables Check:');
     console.log('GOOGLE_CLIENT_ID (WEB):', process.env.GOOGLE_CLIENT_ID ? 'SET' : 'NOT SET');
     console.log('GOOGLE_ANDROID_CLIENT_ID:', process.env.GOOGLE_ANDROID_CLIENT_ID ? 'SET' : 'NOT SET');
+    console.log('GOOGLE_IOS_CLIENT_ID:', process.env.GOOGLE_IOS_CLIENT_ID ? 'SET' : 'NOT SET');
     console.log('GOOGLE_CLIENT_SECRET:', process.env.GOOGLE_CLIENT_SECRET ? 'SET' : 'NOT SET');
     console.log('GOOGLE_CALLBACK_URL:', process.env.GOOGLE_CALLBACK_URL || 'NOT SET');
     console.log('\n📧 Email Configuration:');

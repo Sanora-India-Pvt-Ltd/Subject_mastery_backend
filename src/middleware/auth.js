@@ -11,9 +11,12 @@ const generateAccessToken = (payload) => {
     );
 };
 
-// Generate Refresh Token (long-lived - 30 days)
+// Generate Refresh Token (long-lived - 90 days)
 const generateRefreshToken = () => {
-    return crypto.randomBytes(40).toString('hex'); // Secure random token
+    const token = crypto.randomBytes(40).toString('hex'); // Secure random token
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + 90); // 90 days from now
+    return { token, expiryDate };
 };
 
 // Legacy function for backward compatibility (now generates access token)
@@ -79,6 +82,19 @@ const verifyRefreshToken = async (req, res, next) => {
             return res.status(401).json({
                 success: false,
                 message: 'Invalid refresh token'
+            });
+        }
+
+        // Check if refresh token has expired
+        if (user.refreshTokenExpiry && new Date() > user.refreshTokenExpiry) {
+            // Clear expired token
+            user.refreshToken = null;
+            user.refreshTokenExpiry = null;
+            await user.save();
+            
+            return res.status(401).json({
+                success: false,
+                message: 'Refresh token has expired. Please login again.'
             });
         }
 

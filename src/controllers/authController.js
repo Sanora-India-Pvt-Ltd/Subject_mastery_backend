@@ -152,10 +152,11 @@ const signup = async (req, res) => {
 
         // Generate access token and refresh token
         const accessToken = generateAccessToken({ id: user._id, email: user.email });
-        const refreshToken = generateRefreshToken();
+        const { token: refreshToken, expiryDate: refreshTokenExpiry } = generateRefreshToken();
 
-        // Save refresh token to database
+        // Save refresh token and expiry to database
         user.refreshToken = refreshToken;
+        user.refreshTokenExpiry = refreshTokenExpiry;
         await user.save();
 
         res.status(201).json({
@@ -225,10 +226,11 @@ const login = async (req, res) => {
 
         // Generate access token and refresh token
         const accessToken = generateAccessToken({ id: user._id, email: user.email });
-        const refreshToken = generateRefreshToken();
+        const { token: refreshToken, expiryDate: refreshTokenExpiry } = generateRefreshToken();
 
-        // Save refresh token to database
+        // Save refresh token and expiry to database
         user.refreshToken = refreshToken;
+        user.refreshTokenExpiry = refreshTokenExpiry;
         await user.save();
 
         res.status(200).json({
@@ -701,6 +703,19 @@ const refreshToken = async (req, res) => {
             });
         }
 
+        // Check if refresh token has expired
+        if (user.refreshTokenExpiry && new Date() > user.refreshTokenExpiry) {
+            // Clear expired token
+            user.refreshToken = null;
+            user.refreshTokenExpiry = null;
+            await user.save();
+            
+            return res.status(401).json({
+                success: false,
+                message: 'Refresh token has expired. Please login again.'
+            });
+        }
+
         // Generate new access token
         const accessToken = generateAccessToken({ id: user._id, email: user.email });
 
@@ -726,8 +741,9 @@ const logout = async (req, res) => {
     try {
         const user = req.user; // From protect middleware
 
-        // Clear refresh token from database
+        // Clear refresh token and expiry from database
         user.refreshToken = null;
+        user.refreshTokenExpiry = null;
         await user.save();
 
         res.status(200).json({

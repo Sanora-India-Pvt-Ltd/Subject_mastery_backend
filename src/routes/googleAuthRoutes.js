@@ -3,6 +3,10 @@ const { googleAuth, googleCallback, checkEmailExists } = require('../controllers
 
 const router = express.Router();
 
+const { googleLoginMobile } = require('../controllers/googleAuthController');
+
+router.post('/google/mobile', googleLoginMobile);
+
 // Check if email exists
 router.post('/check-email', checkEmailExists);
 

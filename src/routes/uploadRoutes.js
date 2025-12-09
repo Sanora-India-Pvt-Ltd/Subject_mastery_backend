@@ -1,0 +1,25 @@
+const express = require("express");
+const upload = require("../middleware/upload");
+const { protect } = require("../middleware/auth");
+const { 
+    uploadMedia, 
+    uploadProfileImage, 
+    getUserMedia, 
+    deleteUserMedia 
+} = require("../controllers/userController");
+
+const router = express.Router();
+
+// Upload route requires authentication
+router.post("/upload", protect, upload.single("media"), uploadMedia);
+
+// Profile image upload route - ensures image is only associated with the authenticated user
+router.post("/profile-image", protect, upload.single("profileImage"), uploadProfileImage);
+
+// Get user's media - ensures users can only see their own uploads
+router.get("/my-media", protect, getUserMedia);
+
+// Delete user's media - ensures users can only delete their own uploads
+router.delete("/:mediaId", protect, deleteUserMedia);
+
+module.exports = router;
