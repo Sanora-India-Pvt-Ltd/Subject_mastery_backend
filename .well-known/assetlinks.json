@@ -1,0 +1,14 @@
+[
+    {
+      "relation": [
+        "delegate_permission/common.handle_all_urls"
+      ],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "com.sanjay_tube.sanjay_ube",
+        "sha256_cert_fingerprints": [
+          "16:05:E1:B0:E3:61:90:11:57:71:B7:B6:2D:69:14:66:1E:27:E5:7E:EF:EC:7A:D3:44:5F:A3:C7:D8:E5:91:1C"
+        ]
+      }
+    }
+  ]

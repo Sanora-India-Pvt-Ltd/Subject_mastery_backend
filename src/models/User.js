@@ -51,6 +51,151 @@ const userSchema = new mongoose.Schema({
         type: String,
         default: ''
     },
+    bio: {
+        type: String,
+        default: ''
+    },
+    currentCity: {
+        type: String,
+        default: ''
+    },
+    hometown: {
+        type: String,
+        required: false,
+        default: ''
+    },
+    relationshipStatus: {
+        type: String,
+        required: false,
+        enum: ['Single', 'In a relationship', 'Engaged', 'Married', 'In a civil partnership', 'In a domestic partnership', 'In an open relationship', "It's complicated", 'Separated', 'Divorced', 'Widowed'],
+        default: null
+    },
+    workplace: [{
+        company: {
+            type: String,
+            required: true
+        },
+        position: {
+            type: String,
+            required: true
+        },
+        startDate: {
+            type: Date,
+            required: true
+        },
+        endDate: {
+            type: Date,
+            default: null
+        },
+        isCurrent: {
+            type: Boolean,
+            default: false
+        }
+    }],
+    education: {
+        graduation: {
+            institution: {
+                type: String,
+                default: ''
+            },
+            degree: {
+                type: String,
+                default: ''
+            },
+            percent: {
+                type: Number,
+                default: undefined
+            },
+            cgpa: {
+                type: Number,
+                default: undefined
+            },
+            grade: {
+                type: String,
+                default: ''
+            }
+        },
+        postGraduation: {
+            institution: {
+                type: String,
+                default: ''
+            },
+            degree: {
+                type: String,
+                default: ''
+            },
+            percent: {
+                type: Number,
+                default: undefined
+            },
+            cgpa: {
+                type: Number,
+                default: undefined
+            },
+            grade: {
+                type: String,
+                default: ''
+            }
+        },
+        phd: {
+            institution: {
+                type: String,
+                default: ''
+            },
+            degree: {
+                type: String,
+                default: ''
+            },
+            percent: {
+                type: Number,
+                default: undefined
+            },
+            cgpa: {
+                type: Number,
+                default: undefined
+            },
+            grade: {
+                type: String,
+                default: ''
+            }
+        },
+        interSchool: {
+            institution: {
+                type: String,
+                default: ''
+            },
+            percent: {
+                type: Number,
+                default: undefined
+            },
+            cgpa: {
+                type: Number,
+                default: undefined
+            },
+            grade: {
+                type: String,
+                default: ''
+            }
+        },
+        highSchool: {
+            institution: {
+                type: String,
+                default: ''
+            },
+            percent: {
+                type: Number,
+                default: undefined
+            },
+            cgpa: {
+                type: Number,
+                default: undefined
+            },
+            grade: {
+                type: String,
+                default: ''
+            }
+        }
+    },
     isGoogleOAuth: {
         type: Boolean,
         default: false

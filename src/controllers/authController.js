@@ -706,6 +706,12 @@ const getProfile = async (req, res) => {
                     name: user.name,
                     dob: user.dob,
                     profileImage: user.profileImage,
+                    bio: user.bio,
+                    currentCity: user.currentCity,
+                    hometown: user.hometown,
+                    relationshipStatus: user.relationshipStatus,
+                    workplace: user.workplace,
+                    education: user.education,
                     isGoogleOAuth: user.isGoogleOAuth,
                     googleId: user.googleId,
                     createdAt: user.createdAt,
@@ -891,7 +897,7 @@ const logout = async (req, res) => {
 const updateProfile = async (req, res) => {
     try {
         const user = req.user; // From protect middleware
-        const { firstName, lastName, phoneNumber, gender, dob, alternatePhoneNumber, profileImage, age } = req.body;
+        const { firstName, lastName, phoneNumber, gender, dob, alternatePhoneNumber, profileImage, age, bio, currentCity, hometown, relationshipStatus, workplace, education } = req.body;
 
         // List of allowed fields to update
         const allowedUpdates = {};
@@ -960,6 +966,137 @@ const updateProfile = async (req, res) => {
             allowedUpdates.dob = new Date(birthYear, today.getMonth(), today.getDate());
         }
 
+        // Handle bio
+        if (bio !== undefined) {
+            allowedUpdates.bio = bio.trim();
+        }
+
+        // Handle currentCity
+        if (currentCity !== undefined) {
+            allowedUpdates.currentCity = currentCity.trim();
+        }
+
+        // Handle hometown
+        if (hometown !== undefined) {
+            allowedUpdates.hometown = hometown.trim();
+        }
+
+        // Handle relationshipStatus (optional field)
+        if (relationshipStatus !== undefined) {
+            if (relationshipStatus === null || relationshipStatus === '') {
+                // Allow explicitly setting to null/empty to clear the field
+                allowedUpdates.relationshipStatus = null;
+            } else {
+                const validStatuses = ['Single', 'In a relationship', 'Engaged', 'Married', 'In a civil partnership', 'In a domestic partnership', 'In an open relationship', "It's complicated", 'Separated', 'Divorced', 'Widowed'];
+                if (!validStatuses.includes(relationshipStatus)) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Relationship status must be one of: ${validStatuses.join(', ')}`
+                    });
+                }
+                allowedUpdates.relationshipStatus = relationshipStatus;
+            }
+        }
+
+        // Handle workplace (array of work experiences)
+        if (workplace !== undefined) {
+            if (!Array.isArray(workplace)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Workplace must be an array'
+                });
+            }
+            // Validate each workplace entry
+            for (const work of workplace) {
+                if (!work.company || !work.position || !work.startDate) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Each workplace entry must have company, position, and startDate'
+                    });
+                }
+                if (work.startDate && isNaN(new Date(work.startDate).getTime())) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Invalid startDate format'
+                    });
+                }
+                if (work.endDate && isNaN(new Date(work.endDate).getTime())) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Invalid endDate format'
+                    });
+                }
+                // Convert dates to Date objects
+                work.startDate = new Date(work.startDate);
+                if (work.endDate) {
+                    work.endDate = new Date(work.endDate);
+                }
+            }
+            allowedUpdates.workplace = workplace;
+        }
+
+        // Handle education
+        if (education !== undefined) {
+            if (typeof education !== 'object' || Array.isArray(education)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Education must be an object'
+                });
+            }
+            
+            const educationLevels = ['graduation', 'postGraduation', 'phd', 'interSchool', 'highSchool'];
+            const updatedEducation = user.education || {};
+            
+            for (const level of educationLevels) {
+                if (education[level] !== undefined) {
+                    if (typeof education[level] !== 'object' || Array.isArray(education[level])) {
+                        return res.status(400).json({
+                            success: false,
+                            message: `Education ${level} must be an object`
+                        });
+                    }
+                    
+                    // Initialize if doesn't exist
+                    if (!updatedEducation[level]) {
+                        updatedEducation[level] = {};
+                    }
+                    
+                    // Update fields
+                    if (education[level].institution !== undefined) {
+                        updatedEducation[level].institution = education[level].institution.trim();
+                    }
+                    if (education[level].degree !== undefined && (level === 'graduation' || level === 'postGraduation' || level === 'phd')) {
+                        updatedEducation[level].degree = education[level].degree.trim();
+                    }
+                    if (education[level].percent !== undefined) {
+                        const percent = parseFloat(education[level].percent);
+                        if (isNaN(percent) || percent < 0 || percent > 100) {
+                            return res.status(400).json({
+                                success: false,
+                                message: `Education ${level} percent must be a number between 0 and 100`
+                            });
+                        }
+                        updatedEducation[level].percent = percent;
+                    }
+                    if (education[level].cgpa !== undefined) {
+                        const cgpa = parseFloat(education[level].cgpa);
+                        if (isNaN(cgpa) || cgpa < 0 || cgpa > 10) {
+                            return res.status(400).json({
+                                success: false,
+                                message: `Education ${level} CGPA must be a number between 0 and 10`
+                            });
+                        }
+                        updatedEducation[level].cgpa = cgpa;
+                    }
+                    if (education[level].grade !== undefined) {
+                        updatedEducation[level].grade = education[level].grade.trim();
+                    }
+                }
+            }
+            
+            allowedUpdates.education = updatedEducation;
+        }
+
         // Update name field if firstName or lastName changed
         if (allowedUpdates.firstName || allowedUpdates.lastName) {
             const updatedFirstName = allowedUpdates.firstName || user.firstName;
@@ -994,6 +1131,12 @@ const updateProfile = async (req, res) => {
                     name: user.name,
                     dob: user.dob,
                     profileImage: user.profileImage,
+                    bio: user.bio,
+                    currentCity: user.currentCity,
+                    hometown: user.hometown,
+                    relationshipStatus: user.relationshipStatus,
+                    workplace: user.workplace,
+                    education: user.education,
                     isGoogleOAuth: user.isGoogleOAuth,
                     googleId: user.googleId,
                     createdAt: user.createdAt,

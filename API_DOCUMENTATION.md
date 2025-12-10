@@ -420,6 +420,61 @@ Authorization: Bearer your_access_token_here
       "name": "John Doe",
       "dob": "1999-01-15T00:00:00.000Z",
       "profileImage": "https://...",
+      "bio": "Software developer passionate about building great products",
+      "currentCity": "San Francisco, CA",
+      "hometown": "New York, NY",
+      "relationshipStatus": "Single",
+      "workplace": [
+        {
+          "company": "Tech Corp",
+          "position": "Senior Software Engineer",
+          "startDate": "2020-01-15T00:00:00.000Z",
+          "endDate": null,
+          "isCurrent": true
+        },
+        {
+          "company": "Startup Inc",
+          "position": "Software Engineer",
+          "startDate": "2018-06-01T00:00:00.000Z",
+          "endDate": "2019-12-31T00:00:00.000Z",
+          "isCurrent": false
+        }
+      ],
+      "education": {
+        "graduation": {
+          "institution": "University of Technology",
+          "degree": "Bachelor of Science in Computer Science",
+          "percent": 85.5,
+          "cgpa": 8.5,
+          "grade": "A"
+        },
+        "postGraduation": {
+          "institution": "Advanced University",
+          "degree": "Master of Science",
+          "percent": 90.0,
+          "cgpa": 9.0,
+          "grade": "A+"
+        },
+        "phd": {
+          "institution": "",
+          "degree": "",
+          "percent": null,
+          "cgpa": null,
+          "grade": ""
+        },
+        "interSchool": {
+          "institution": "City College",
+          "percent": 88.0,
+          "cgpa": 8.8,
+          "grade": "A"
+        },
+        "highSchool": {
+          "institution": "High School Name",
+          "percent": 92.0,
+          "cgpa": 9.2,
+          "grade": "A+"
+        }
+      },
       "isGoogleOAuth": false,
       "googleId": null,
       "createdAt": "2024-01-01T12:00:00.000Z",
@@ -457,7 +512,55 @@ Authorization: Bearer your_access_token_here
   "lastName": "Doe",
   "name": "John Doe",
   "dob": "1999-01-15",
-  "gender": "Male"
+  "gender": "Male",
+  "bio": "Software developer passionate about building great products",
+  "currentCity": "San Francisco, CA",
+  "hometown": "New York, NY",
+  "relationshipStatus": "Single",
+  "workplace": [
+    {
+      "company": "Tech Corp",
+      "position": "Senior Software Engineer",
+      "startDate": "2020-01-15",
+      "endDate": null,
+      "isCurrent": true
+    }
+  ],
+  "education": {
+    "graduation": {
+      "institution": "University of Technology",
+      "degree": "Bachelor of Science in Computer Science",
+      "percent": 85.5,
+      "cgpa": 8.5,
+      "grade": "A"
+    },
+    "postGraduation": {
+      "institution": "Advanced University",
+      "degree": "Master of Science",
+      "percent": 90.0,
+      "cgpa": 9.0,
+      "grade": "A+"
+    },
+    "phd": {
+      "institution": "Research University",
+      "degree": "Doctor of Philosophy",
+      "percent": 95.0,
+      "cgpa": 9.5,
+      "grade": "A+"
+    },
+    "interSchool": {
+      "institution": "City College",
+      "percent": 88.0,
+      "cgpa": 8.8,
+      "grade": "A"
+    },
+    "highSchool": {
+      "institution": "High School Name",
+      "percent": 92.0,
+      "cgpa": 9.2,
+      "grade": "A+"
+    }
+  }
 }
 ```
 
@@ -467,8 +570,37 @@ Authorization: Bearer your_access_token_here
 - `name` (string, optional): Full name (auto-updated if firstName/lastName changed)
 - `dob` (string, optional): Date of birth in ISO 8601 format (YYYY-MM-DD). Must be a valid date, not in the future, and not more than 150 years ago
 - `gender` (string, optional): One of: "Male", "Female", "Other", "Prefer not to say"
+- `bio` (string, optional): User's biography/description
+- `currentCity` (string, optional): Current city or address
+- `hometown` (string, optional): User's hometown
+- `relationshipStatus` (string, optional): One of: "Single", "In a relationship", "Engaged", "Married", "In a civil partnership", "In a domestic partnership", "In an open relationship", "It's complicated", "Separated", "Divorced", "Widowed". Can be set to `null` or empty string to clear.
+- `workplace` (array, optional): Array of work experiences. Each entry must have:
+  - `company` (string, required): Company name
+  - `position` (string, required): Job position/title
+  - `startDate` (string, required): Start date in ISO 8601 format (YYYY-MM-DD)
+  - `endDate` (string, optional): End date in ISO 8601 format (YYYY-MM-DD). Set to `null` for current position
+  - `isCurrent` (boolean, optional): Whether this is the current job (default: false)
+- `education` (object, optional): Education details with the following levels:
+  - `graduation` (object, optional): Graduation details
+    - `institution` (string, optional): Institution name
+    - `degree` (string, optional): Degree name
+    - `percent` (number, optional): Percentage scored (0-100)
+    - `cgpa` (number, optional): CGPA scored (0-10)
+    - `grade` (string, optional): Grade scored
+  - `postGraduation` (object, optional): Post-graduation details (same structure as graduation)
+  - `phd` (object, optional): PhD details (same structure as graduation)
+  - `interSchool` (object, optional): Intermediate/School details
+    - `institution` (string, optional): Institution name
+    - `percent` (number, optional): Percentage scored (0-100)
+    - `cgpa` (number, optional): CGPA scored (0-10)
+    - `grade` (string, optional): Grade scored
+  - `highSchool` (object, optional): High school details (same structure as interSchool)
 
-**Note:** You can update any combination of these fields. Only provided fields will be updated.
+**Note:** 
+- You can update any combination of these fields. Only provided fields will be updated.
+- For education, you can update individual levels independently (e.g., only update `graduation` without affecting other levels)
+- For workplace, you can replace the entire array or update individual entries
+- `relationshipStatus` and `hometown` are optional and can be set to `null` or empty string to clear
 
 **Success Response (200):**
 ```json
@@ -487,6 +619,54 @@ Authorization: Bearer your_access_token_here
       "alternatePhoneNumber": "+1987654321",
       "gender": "Male",
       "profileImage": "https://...",
+      "bio": "Software developer passionate about building great products",
+      "currentCity": "San Francisco, CA",
+      "hometown": "New York, NY",
+      "relationshipStatus": "Single",
+      "workplace": [
+        {
+          "company": "Tech Corp",
+          "position": "Senior Software Engineer",
+          "startDate": "2020-01-15T00:00:00.000Z",
+          "endDate": null,
+          "isCurrent": true
+        }
+      ],
+      "education": {
+        "graduation": {
+          "institution": "University of Technology",
+          "degree": "Bachelor of Science in Computer Science",
+          "percent": 85.5,
+          "cgpa": 8.5,
+          "grade": "A"
+        },
+        "postGraduation": {
+          "institution": "Advanced University",
+          "degree": "Master of Science",
+          "percent": 90.0,
+          "cgpa": 9.0,
+          "grade": "A+"
+        },
+        "phd": {
+          "institution": "",
+          "degree": "",
+          "percent": null,
+          "cgpa": null,
+          "grade": ""
+        },
+        "interSchool": {
+          "institution": "City College",
+          "percent": 88.0,
+          "cgpa": 8.8,
+          "grade": "A"
+        },
+        "highSchool": {
+          "institution": "High School Name",
+          "percent": 92.0,
+          "cgpa": 9.2,
+          "grade": "A+"
+        }
+      },
       "createdAt": "2024-01-01T12:00:00.000Z",
       "updatedAt": "2024-01-01T12:30:00.000Z"
     }
@@ -495,7 +675,7 @@ Authorization: Bearer your_access_token_here
 ```
 
 **Error Responses:**
-- `400`: Invalid date of birth (must be valid date, not in future, not more than 150 years ago), invalid gender, empty name fields
+- `400`: Invalid date of birth (must be valid date, not in future, not more than 150 years ago), invalid gender, empty name fields, invalid relationship status, invalid workplace structure, invalid education structure, invalid percent/CGPA values (percent must be 0-100, CGPA must be 0-10)
 - `401`: No token, invalid token, expired token
 
 ---
@@ -1968,7 +2148,7 @@ curl -X GET https://api.sanoraindia.com/api/auth/profile \
 ### Update User Profile
 
 ```bash
-# Update profile (name, dob, gender)
+# Update basic profile (name, dob, gender)
 curl -X PUT https://api.sanoraindia.com/api/user/profile \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
@@ -1977,6 +2157,49 @@ curl -X PUT https://api.sanoraindia.com/api/user/profile \
     "lastName": "Doe",
     "dob": "1999-01-15",
     "gender": "Male"
+  }'
+
+# Update profile with new fields (bio, location, relationship status)
+curl -X PUT https://api.sanoraindia.com/api/user/profile \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "bio": "Software developer passionate about building great products",
+    "currentCity": "San Francisco, CA",
+    "hometown": "New York, NY",
+    "relationshipStatus": "Single"
+  }'
+
+# Update workplace
+curl -X PUT https://api.sanoraindia.com/api/user/profile \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workplace": [
+      {
+        "company": "Tech Corp",
+        "position": "Senior Software Engineer",
+        "startDate": "2020-01-15",
+        "endDate": null,
+        "isCurrent": true
+      }
+    ]
+  }'
+
+# Update education (example: graduation only)
+curl -X PUT https://api.sanoraindia.com/api/user/profile \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "education": {
+      "graduation": {
+        "institution": "University of Technology",
+        "degree": "Bachelor of Science in Computer Science",
+        "percent": 85.5,
+        "cgpa": 8.5,
+        "grade": "A"
+      }
+    }
   }'
 ```
 
@@ -2237,9 +2460,58 @@ curl -X DELETE https://api.sanoraindia.com/api/media/MEDIA_ID \
 1. **Update Basic Info (No Verification Required):**
    ```bash
    PUT /api/user/profile
-   Body: { "firstName": "John", "dob": "1999-01-15", "gender": "Male" }
+   Body: { 
+     "firstName": "John", 
+     "lastName": "Doe",
+     "dob": "1999-01-15", 
+     "gender": "Male",
+     "bio": "Software developer",
+     "currentCity": "San Francisco, CA",
+     "hometown": "New York, NY",
+     "relationshipStatus": "Single"
+   }
    ```
-   → Updates name, date of birth, gender immediately
+   → Updates name, date of birth, gender, bio, location, relationship status immediately
+
+2. **Update Workplace:**
+   ```bash
+   PUT /api/user/profile
+   Body: {
+     "workplace": [
+       {
+         "company": "Tech Corp",
+         "position": "Senior Software Engineer",
+         "startDate": "2020-01-15",
+         "endDate": null,
+         "isCurrent": true
+       }
+     ]
+   }
+   ```
+   → Updates work experience (can include multiple entries for current and past jobs)
+
+3. **Update Education:**
+   ```bash
+   PUT /api/user/profile
+   Body: {
+     "education": {
+       "graduation": {
+         "institution": "University of Technology",
+         "degree": "Bachelor of Science",
+         "percent": 85.5,
+         "cgpa": 8.5,
+         "grade": "A"
+       },
+       "highSchool": {
+         "institution": "High School Name",
+         "percent": 92.0,
+         "cgpa": 9.2,
+         "grade": "A+"
+       }
+     }
+   }
+   ```
+   → Updates education details (can update individual levels: graduation, postGraduation, phd, interSchool, highSchool)
 
 ### Update Phone Number Flow
 

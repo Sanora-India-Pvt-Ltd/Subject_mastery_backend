@@ -25,6 +25,9 @@ connectDB();
 
 const app = express();
 
+// well-known route for asset links
+app.use('/.well-known', express.static('.well-known'));
+
 // Middleware
 app.use(cors({
     origin: true,
