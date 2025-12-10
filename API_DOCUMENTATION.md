@@ -12,7 +12,8 @@
    - [Login](#2-login)
    - [Refresh Token](#3-refresh-access-token)
    - [Logout](#4-logout)
-   - [Get User Profile](#5-get-current-user-profile)
+   - [Get Logged-In Devices](#5-get-logged-in-devices)
+   - [Get User Profile](#6-get-current-user-profile)
 3. [User Profile Management](#-user-profile-management)
    - [Update Profile](#17-update-user-profile)
    - [Update Phone Number](#18-update-phone-number)
@@ -249,19 +250,149 @@ if (profile.status === 401) {
 Authorization: Bearer your_access_token_here
 ```
 
+**Request Body (Optional):**
+```json
+{
+  "refreshToken": "specific_refresh_token_to_logout",  // Optional: logout from specific device
+  "deviceId": 1  // Optional: logout device by ID (from getDevices response)
+}
+```
+
+**Note:** 
+- If no `refreshToken` or `deviceId` is provided, logs out from **all devices**
+- If `refreshToken` or `deviceId` is provided, logs out only from that specific device
+- Use `deviceId` from the `/api/auth/devices` endpoint for easier device management
+
+**Success Response (200) - Logout from specific device:**
+```json
+{
+  "success": true,
+  "message": "Logged out successfully from this device",
+  "data": {
+    "loggedOutDevice": {
+      "deviceName": "Windows - Chrome",
+      "deviceType": "Desktop",
+      "browser": "Chrome",
+      "os": "Windows"
+    },
+    "remainingDevices": 2
+  }
+}
+```
+
+**Success Response (200) - Logout from all devices:**
+```json
+{
+  "success": true,
+  "message": "Logged out successfully from all devices",
+  "data": {
+    "remainingDevices": 0
+  }
+}
+```
+
+**Note:** Invalidates the refresh token(s). User must login again to get new tokens.
+
+---
+
+### 5. Get Logged-In Devices
+
+**Method:** `GET`  
+**URL:** `/api/auth/devices`  
+**Authentication:** Required
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+```
+
+**Optional Headers (to identify current device):**
+```
+X-Refresh-Token: your_refresh_token_here
+```
+
+**Optional Request Body (to identify current device):**
+```json
+{
+  "refreshToken": "your_refresh_token_here"
+}
+```
+
 **Success Response (200):**
 ```json
 {
   "success": true,
-  "message": "Logged out successfully"
+  "message": "Devices retrieved successfully",
+  "data": {
+    "totalDevices": 3,
+    "devices": [
+      {
+        "id": 1,
+        "deviceInfo": {
+          "deviceName": "Windows - Chrome",
+          "deviceType": "Desktop",
+          "browser": "Chrome",
+          "os": "Windows",
+          "raw": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36..."
+        },
+        "loggedInAt": "2024-01-15T10:30:00.000Z",
+        "isCurrentDevice": true,
+        "tokenId": "a1b2c3d4e5f6g7h8"
+      },
+      {
+        "id": 2,
+        "deviceInfo": {
+          "deviceName": "Mobile (iOS) - Safari",
+          "deviceType": "Mobile",
+          "browser": "Safari",
+          "os": "iOS",
+          "raw": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)..."
+        },
+        "loggedInAt": "2024-01-14T08:20:00.000Z",
+        "isCurrentDevice": false,
+        "tokenId": "x9y8z7w6v5u4t3s2"
+      },
+      {
+        "id": 3,
+        "deviceInfo": {
+          "deviceName": "Android - Chrome",
+          "deviceType": "Mobile",
+          "browser": "Chrome",
+          "os": "Android",
+          "raw": "Mozilla/5.0 (Linux; Android 13; SM-G991B)..."
+        },
+        "loggedInAt": "2024-01-13T15:45:00.000Z",
+        "isCurrentDevice": false,
+        "tokenId": "m1n2o3p4q5r6s7t8"
+      }
+    ]
+  }
 }
 ```
 
-**Note:** Invalidates the refresh token. User must login again to get new tokens.
+**Response Fields:**
+- `id`: Sequential device ID (use this for logout by `deviceId`)
+- `deviceInfo`: Parsed device information
+  - `deviceName`: Human-readable device name
+  - `deviceType`: "Desktop", "Mobile", or "Tablet"
+  - `browser`: Browser name (Chrome, Firefox, Safari, Edge, etc.)
+  - `os`: Operating system (Windows, macOS, Linux, Android, iOS)
+  - `raw`: Original user-agent string
+- `loggedInAt`: When the device logged in
+- `isCurrentDevice`: `true` if this is the device making the request (requires `refreshToken` in header or body)
+- `tokenId`: First 16 characters of the refresh token (for identification, not the full token)
+
+**Error Responses:**
+- `401`: No token, invalid token, expired token
+
+**Note:** 
+- Devices are sorted by most recent login first
+- Each login from a different device/browser creates a new device entry
+- Use the `deviceId` from this response to logout from specific devices via the logout endpoint
 
 ---
 
-### 5. Get Current User Profile
+### 6. Get Current User Profile
 
 **Method:** `GET`  
 **URL:** `/api/auth/profile`  
