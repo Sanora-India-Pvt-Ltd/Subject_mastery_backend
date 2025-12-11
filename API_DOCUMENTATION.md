@@ -17,6 +17,9 @@
    - [Get User's MediaGet User Profile](#6-get-current-user-profile)
 3. [User Profile Management](#-user-profile-management)
    - [Update Profile](#17-update-user-profile)
+   - [Update Profile Media (Bio, Cover Photo, Profile Image)](#171-update-profile-media-bio-cover-photo-profile-image)
+   - [Update Personal Information](#172-update-personal-information)
+   - [Update Location and Details](#173-update-location-and-details)
    - [Update Phone Number](#18-update-phone-number)
    - [Update Alternate Phone Number](#19-update-alternate-phone-number)
    - [Remove Alternate Phone Number](#20-remove-alternate-phone-number)
@@ -694,6 +697,269 @@ Authorization: Bearer your_access_token_here
 **Error Responses:**
 - `400`: Invalid date of birth (must be valid date, not in future, not more than 150 years ago), invalid gender, empty name fields, invalid cover photo URL, invalid relationship status, invalid workplace structure, invalid education structure, invalid year format (startYear and endYear must be valid years between 1900 and current year + 10)
 - `401`: No token, invalid token, expired token
+
+---
+
+### 17.1. Update Profile Media (Bio, Cover Photo, Profile Image)
+
+**Method:** `PUT`  
+**URL:** `/api/user/profile/media`  
+**Authentication:** Required
+
+**Description:**  
+Update bio, cover photo, profile image, and cover image. This endpoint accepts URL strings for images. For file uploads, use the dedicated upload endpoints: [Upload Profile Image](#23-upload-profile-image) and [Upload Cover Photo](#18-upload-cover-photo).
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "bio": "Software developer passionate about building great products",
+  "coverPhoto": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/cover/cover123.jpg",
+  "profileImage": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/profile/profile123.jpg",
+  "coverImage": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/cover/cover123.jpg"
+}
+```
+
+**Fields:**
+- `bio` (string, optional): User's biography/description
+- `coverPhoto` (string, optional): URL of the cover photo. Must be a valid URL format. Can be set to `null` or empty string to clear.
+- `profileImage` (string, optional): URL of the profile image. Must be a valid URL format. Can be set to `null` or empty string to clear.
+- `coverImage` (string, optional): Alias for `coverPhoto`. If provided, updates the cover photo. Must be a valid URL format. Can be set to `null` or empty string to clear.
+
+**Note:** 
+- You can update any combination of these fields. Only provided fields will be updated.
+- All image URLs must be valid URLs. The system validates URL format.
+- For file uploads, use the dedicated endpoints: `/api/media/profile-image` and `/api/media/cover-photo`
+- `coverImage` is an alias for `coverPhoto` - both update the same field
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Profile media updated successfully",
+  "data": {
+    "user": {
+      "id": "user_id",
+      "bio": "Software developer passionate about building great products",
+      "coverPhoto": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/cover/cover123.jpg",
+      "profileImage": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/profile/profile123.jpg",
+      "updatedAt": "2024-01-01T12:35:00.000Z"
+    }
+  }
+}
+```
+
+**Error Responses:**
+- `400`: Invalid URL format for images, no fields provided to update
+- `401`: No token, invalid token, expired token
+- `500`: Error updating profile media
+
+---
+
+### 17.2. Update Personal Information
+
+**Method:** `PUT`  
+**URL:** `/api/user/profile/personal-info`  
+**Authentication:** Required
+
+**Description:**  
+Update personal information including name, gender, date of birth, and phone numbers. Note: Phone number updates via this endpoint do not require OTP verification. For OTP-verified phone updates, use the dedicated endpoints: [Update Phone Number](#19-update-phone-number) and [Update Alternate Phone Number](#20-update-alternate-phone-number).
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "firstName": "John",
+  "lastName": "Doe",
+  "gender": "Male",
+  "dob": "1999-01-15",
+  "phoneNumber": "+1234567890",
+  "alternatePhoneNumber": "+1987654321"
+}
+```
+
+**Fields:**
+- `firstName` (string, optional): User's first name. Cannot be empty if provided.
+- `lastName` (string, optional): User's last name. Cannot be empty if provided.
+- `gender` (string, optional): One of: "Male", "Female", "Other", "Prefer not to say"
+- `dob` (string, optional): Date of birth in ISO 8601 format (YYYY-MM-DD). Must be a valid date, not in the future, and not more than 150 years ago
+- `phoneNumber` (string, optional): Phone number in E.164 format (e.g., +1234567890). Can be set to `null` or empty string to clear. Must not be already registered by another user.
+- `alternatePhoneNumber` (string, optional): Alternate phone number in E.164 format. Can be set to `null` or empty string to clear. Must be different from primary phone number and not already registered by another user.
+
+**Note:** 
+- You can update any combination of these fields. Only provided fields will be updated.
+- The `name` field is automatically updated when `firstName` or `lastName` changes.
+- Phone numbers are automatically normalized to E.164 format (e.g., +1234567890).
+- Phone number updates via this endpoint do NOT require OTP verification. For OTP-verified updates, use the dedicated phone update endpoints.
+- Phone numbers must not be already registered by another user.
+- Alternate phone number must be different from primary phone number.
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Personal information updated successfully",
+  "data": {
+    "user": {
+      "id": "user_id",
+      "firstName": "John",
+      "lastName": "Doe",
+      "name": "John Doe",
+      "gender": "Male",
+      "dob": "1999-01-15T00:00:00.000Z",
+      "phoneNumber": "+1234567890",
+      "alternatePhoneNumber": "+1987654321",
+      "updatedAt": "2024-01-01T12:40:00.000Z"
+    }
+  }
+}
+```
+
+**Error Responses:**
+- `400`: Invalid date of birth, invalid gender, empty name fields, phone number already registered, alternate phone same as primary phone, no fields provided to update
+- `401`: No token, invalid token, expired token
+- `500`: Error updating personal information
+
+---
+
+### 17.3. Update Location and Details
+
+**Method:** `PUT`  
+**URL:** `/api/user/profile/location-details`  
+**Authentication:** Required
+
+**Description:**  
+Update location information, workplace, pronouns, education, relationship status, and hometown. This endpoint handles complex data structures like workplace and education arrays, automatically creating companies and institutions if they don't exist.
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "currentCity": "San Francisco, CA",
+  "hometown": "New York, NY",
+  "pronouns": "he/him",
+  "relationshipStatus": "Single",
+  "workplace": [
+    {
+      "company": "Tech Corp",
+      "position": "Senior Software Engineer",
+      "startDate": "2020-01-15",
+      "endDate": null,
+      "isCurrent": true
+    }
+  ],
+  "education": [
+    {
+      "institution": "Delhi Public School",
+      "degree": "B.Tech",
+      "field": "Computer Science",
+      "startYear": 2020,
+      "endYear": 2024,
+      "institutionType": "school"
+    }
+  ]
+}
+```
+
+**Fields:**
+- `currentCity` (string, optional): Current city or address
+- `hometown` (string, optional): User's hometown
+- `pronouns` (string, optional): User's pronouns (e.g., "he/him", "she/her", "they/them")
+- `relationshipStatus` (string, optional): One of: "Single", "In a relationship", "Engaged", "Married", "In a civil partnership", "In a domestic partnership", "In an open relationship", "It's complicated", "Separated", "Divorced", "Widowed". Can be set to `null` or empty string to clear.
+- `workplace` (array, optional): Array of work experiences. Each entry must have:
+  - `company` (string, required): Company name. **Note:** If the company doesn't exist in the system, it will be automatically created when you update your profile.
+  - `position` (string, required): Job position/title
+  - `startDate` (string, required): Start date in ISO 8601 format (YYYY-MM-DD)
+  - `endDate` (string, optional): End date in ISO 8601 format (YYYY-MM-DD). Set to `null` for current position
+  - `isCurrent` (boolean, optional): Whether this is the current job (default: false)
+- `education` (array, optional): Array of education entries. Each entry can have:
+  - `institution` (string or ObjectId, required if entry provided): Institution name or ObjectId. **Note:** If the institution doesn't exist in the system, it will be automatically created when you update your profile.
+  - `degree` (string, optional): Degree name (e.g., "B.Tech", "Bachelor of Science")
+  - `field` (string, optional): Field of study (e.g., "Computer Science", "Engineering")
+  - `startYear` (number, required if entry provided): Start year (must be a valid year between 1900 and current year + 10)
+  - `endYear` (number, optional): End year (must be a valid year between 1900 and current year + 10). Set to `null` for ongoing education
+  - `institutionType` (string, optional): Type of institution - "school", "college", or "university" (default: "school"). Only used when creating a new institution.
+  - `city` (string, optional): City where institution is located. Only used when creating a new institution.
+  - `country` (string, optional): Country where institution is located. Only used when creating a new institution.
+  - `logo` (string, optional): Logo URL for the institution. Only used when creating a new institution.
+
+**Note:** 
+- You can update any combination of these fields. Only provided fields will be updated.
+- **Multiple Education Entries:** You can provide multiple education entries in the array. Each entry represents a different educational qualification. The system will process all entries and create institutions automatically if they don't exist.
+- **Multiple Workplaces:** You can provide multiple workplace entries in the array. Each entry represents a different work experience. The system will process all entries and create companies automatically if they don't exist.
+- **Institution Auto-Creation:** When you provide an institution name in the `education` array, the system automatically checks if the institution exists. If it doesn't exist, it will be created automatically.
+- **Company Auto-Creation:** When you provide a company name in the `workplace` array, the system automatically checks if the company exists. If it doesn't exist, it will be created automatically.
+- **Education is Optional:** The education field is completely optional. You can provide an empty array `[]` to clear all education, or omit it entirely to leave education unchanged.
+- `relationshipStatus` and `hometown` are optional and can be set to `null` or empty string to clear
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Location and details updated successfully",
+  "data": {
+    "user": {
+      "id": "user_id",
+      "currentCity": "San Francisco, CA",
+      "hometown": "New York, NY",
+      "pronouns": "he/him",
+      "relationshipStatus": "Single",
+      "workplace": [
+        {
+          "company": {
+            "id": "507f1f77bcf86cd799439011",
+            "name": "Tech Corp",
+            "isCustom": true
+          },
+          "position": "Senior Software Engineer",
+          "startDate": "2020-01-15T00:00:00.000Z",
+          "endDate": null,
+          "isCurrent": true
+        }
+      ],
+      "education": [
+        {
+          "institution": {
+            "id": "507f1f77bcf86cd799439020",
+            "name": "Delhi Public School",
+            "type": "school",
+            "city": "New Delhi",
+            "country": "India",
+            "logo": "",
+            "verified": false,
+            "isCustom": true
+          },
+          "degree": "B.Tech",
+          "field": "Computer Science",
+          "startYear": 2020,
+          "endYear": 2024
+        }
+      ],
+      "updatedAt": "2024-01-01T12:45:00.000Z"
+    }
+  }
+}
+```
+
+**Error Responses:**
+- `400`: Invalid relationship status, invalid workplace structure, invalid education structure, invalid year format (startYear and endYear must be valid years between 1900 and current year + 10), no fields provided to update
+- `401`: No token, invalid token, expired token
+- `500`: Error updating location and details
 
 ---
 
@@ -2129,7 +2395,83 @@ GET /api/posts/all?page=1&limit=10
 
 ---
 
-### 32. Get User Posts
+### 32. Get My Posts
+
+**Method:** `GET`  
+**URL:** `/api/posts/me`  
+**Authentication:** Required (Bearer Token)
+
+**Description:**  
+Retrieve all posts for the currently authenticated user. No user ID needed - automatically uses the authenticated user's ID from the token. Results are sorted by newest first and include pagination support.
+
+**Query Parameters:**
+- `page` (number, optional): Page number (default: 1)
+- `limit` (number, optional): Number of posts per page (default: 10)
+
+**Example Request:**
+```bash
+GET /api/posts/me?page=1&limit=10
+Authorization: Bearer <your_access_token>
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "My posts retrieved successfully",
+  "data": {
+    "user": {
+      "id": "693921193dc3d5315a43a12c",
+      "name": "Mohd Zeeshan",
+      "email": "fzeeshankhan637@gmail.com",
+      "profileImage": "https://..."
+    },
+    "posts": [
+      {
+        "id": "post_id_1",
+        "userId": "693921193dc3d5315a43a12c",
+        "user": {
+          "id": "693921193dc3d5315a43a12c",
+          "firstName": "Mohd",
+          "lastName": "Zeeshan",
+          "name": "Mohd Zeeshan",
+          "email": "fzeeshankhan637@gmail.com",
+          "profileImage": "https://..."
+        },
+        "caption": "My first post!",
+        "media": [],
+        "likes": [],
+        "comments": [],
+        "likeCount": 0,
+        "commentCount": 0,
+        "createdAt": "2024-01-15T10:30:00.000Z",
+        "updatedAt": "2024-01-15T10:30:00.000Z"
+      }
+    ],
+    "pagination": {
+      "currentPage": 1,
+      "totalPages": 2,
+      "totalPosts": 15,
+      "hasNextPage": true,
+      "hasPrevPage": false
+    }
+  }
+}
+```
+
+**Error Responses:**
+- `401`: Unauthorized (missing or invalid token)
+- `500`: Failed to retrieve posts
+
+**Note:** 
+- Results are sorted by creation date (newest first)
+- User information, likes, and comments are automatically populated
+- This endpoint requires authentication - it automatically uses the authenticated user's ID
+- Use this endpoint instead of `/api/posts/user/:id` when you want to get your own posts
+
+---
+
+### 33. Get User Posts
 
 **Method:** `GET`  
 **URL:** `/api/posts/user/:id`  
@@ -2139,7 +2481,7 @@ GET /api/posts/all?page=1&limit=10
 Retrieve all posts by a specific user. Results are sorted by newest first and include pagination support.
 
 **URL Parameters:**
-- `id` (string, required): User ID
+- `id` (string, required): User ID (the `_id` field from the user document)
 
 **Query Parameters:**
 - `page` (number, optional): Page number (default: 1)
@@ -3047,6 +3389,100 @@ curl -X PUT https://api.sanoraindia.com/api/user/profile \
   }'
 ```
 
+### Update Profile Media (Bio, Cover Photo, Profile Image)
+
+```bash
+# Update bio and cover photo
+curl -X PUT https://api.sanoraindia.com/api/user/profile/media \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "bio": "Software developer passionate about building great products",
+    "coverPhoto": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/cover/cover123.jpg",
+    "profileImage": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/profile/profile123.jpg"
+  }'
+
+# Update only bio
+curl -X PUT https://api.sanoraindia.com/api/user/profile/media \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "bio": "Updated bio text"
+  }'
+```
+
+### Update Personal Information
+
+```bash
+# Update name, gender, and date of birth
+curl -X PUT https://api.sanoraindia.com/api/user/profile/personal-info \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "firstName": "John",
+    "lastName": "Doe",
+    "gender": "Male",
+    "dob": "1999-01-15"
+  }'
+
+# Update phone numbers (no OTP required via this endpoint)
+curl -X PUT https://api.sanoraindia.com/api/user/profile/personal-info \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phoneNumber": "+1234567890",
+    "alternatePhoneNumber": "+1987654321"
+  }'
+```
+
+### Update Location and Details
+
+```bash
+# Update location, pronouns, and relationship status
+curl -X PUT https://api.sanoraindia.com/api/user/profile/location-details \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "currentCity": "San Francisco, CA",
+    "hometown": "New York, NY",
+    "pronouns": "he/him",
+    "relationshipStatus": "Single"
+  }'
+
+# Update workplace
+curl -X PUT https://api.sanoraindia.com/api/user/profile/location-details \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workplace": [
+      {
+        "company": "Tech Corp",
+        "position": "Senior Software Engineer",
+        "startDate": "2020-01-15",
+        "endDate": null,
+        "isCurrent": true
+      }
+    ]
+  }'
+
+# Update education
+curl -X PUT https://api.sanoraindia.com/api/user/profile/location-details \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "education": [
+      {
+        "institution": "Delhi Public School",
+        "degree": "B.Tech",
+        "field": "Computer Science",
+        "startYear": 2020,
+        "endYear": 2024,
+        "institutionType": "school"
+      }
+    ]
+  }'
+```
+
 ### Update Phone Number
 
 ```bash
@@ -3450,6 +3886,50 @@ curl -X GET "https://api.sanoraindia.com/api/posts/user/user_id_123?page=1&limit
    }
    ```
    → Updates education details (can add multiple education entries). Institutions are automatically created if they don't exist.
+
+### Alternative Profile Update Endpoints
+
+The following endpoints provide more focused ways to update specific profile information:
+
+1. **Update Profile Media (Bio, Cover Photo, Profile Image):**
+   ```bash
+   PUT /api/user/profile/media
+   Body: { 
+     "bio": "Software developer",
+     "coverPhoto": "https://...",
+     "profileImage": "https://...",
+     "coverImage": "https://..."
+   }
+   ```
+   → Updates bio, cover photo, and profile image. Accepts URL strings for images.
+
+2. **Update Personal Information:**
+   ```bash
+   PUT /api/user/profile/personal-info
+   Body: { 
+     "firstName": "John", 
+     "lastName": "Doe",
+     "gender": "Male",
+     "dob": "1999-01-15",
+     "phoneNumber": "+1234567890",
+     "alternatePhoneNumber": "+1987654321"
+   }
+   ```
+   → Updates name, gender, date of birth, and phone numbers. Note: Phone number updates via this endpoint do NOT require OTP verification.
+
+3. **Update Location and Details:**
+   ```bash
+   PUT /api/user/profile/location-details
+   Body: { 
+     "currentCity": "San Francisco, CA",
+     "hometown": "New York, NY",
+     "pronouns": "he/him",
+     "relationshipStatus": "Single",
+     "workplace": [...],
+     "education": [...]
+   }
+   ```
+   → Updates location, pronouns, relationship status, workplace, and education. Handles complex data structures and auto-creates companies/institutions.
 
 ### Update Phone Number Flow
 

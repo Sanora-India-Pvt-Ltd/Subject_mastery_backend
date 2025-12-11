@@ -4,6 +4,7 @@ const upload = require('../middleware/upload');
 const {
     createPost,
     getAllPosts,
+    getMyPosts,
     getUserPosts,
     uploadPostMedia
 } = require('../controllers/postController');
@@ -22,6 +23,10 @@ router.post('/create', protect, createPost);
 // GET /api/posts/all?page=1&limit=10
 router.get('/all', getAllPosts);
 
+// Get posts for the currently authenticated user - pagination supported
+// GET /api/posts/me?page=1&limit=10
+router.get('/me', protect, getMyPosts);
+
 // Get posts by user ID - pagination supported
 // GET /api/posts/user/:id?page=1&limit=10
 router.get('/user/:id', getUserPosts);
@@ -31,6 +36,7 @@ console.log('📋 Post routes registered:');
 console.log('  POST   /api/posts/upload-media (protected)');
 console.log('  POST   /api/posts/create (protected)');
 console.log('  GET    /api/posts/all');
+console.log('  GET    /api/posts/me (protected)');
 console.log('  GET    /api/posts/user/:id');
 
 module.exports = router;

@@ -167,6 +167,81 @@ const getAllPosts = async (req, res) => {
     }
 };
 
+// Get posts for the currently authenticated user (no user ID needed)
+const getMyPosts = async (req, res) => {
+    try {
+        const user = req.user; // From protect middleware
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+
+        // Get posts for the authenticated user
+        const posts = await Post.find({ userId: user._id })
+            .populate('userId', 'firstName lastName name email profileImage')
+            .populate('likes.userId', 'firstName lastName name profileImage')
+            .populate('comments.userId', 'firstName lastName name profileImage')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        // Get total count for pagination
+        const totalPosts = await Post.countDocuments({ userId: user._id });
+
+        return res.status(200).json({
+            success: true,
+            message: 'My posts retrieved successfully',
+            data: {
+                user: {
+                    id: user._id.toString(),
+                    name: user.name,
+                    email: user.email,
+                    profileImage: user.profileImage
+                },
+                posts: posts.map(post => {
+                    const userIdString = post.userId._id ? post.userId._id.toString() : post.userId.toString();
+                    const userInfo = post.userId._id ? {
+                        id: post.userId._id.toString(),
+                        firstName: post.userId.firstName,
+                        lastName: post.userId.lastName,
+                        name: post.userId.name,
+                        email: post.userId.email,
+                        profileImage: post.userId.profileImage
+                    } : null;
+
+                    return {
+                        id: post._id.toString(),
+                        userId: userIdString,
+                        user: userInfo,
+                        caption: post.caption,
+                        media: post.media,
+                        likes: post.likes || [],
+                        comments: post.comments || [],
+                        likeCount: post.likeCount,
+                        commentCount: post.commentCount,
+                        createdAt: post.createdAt,
+                        updatedAt: post.updatedAt
+                    };
+                }),
+                pagination: {
+                    currentPage: page,
+                    totalPages: Math.ceil(totalPosts / limit),
+                    totalPosts: totalPosts,
+                    hasNextPage: page < Math.ceil(totalPosts / limit),
+                    hasPrevPage: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get my posts error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve my posts',
+            error: error.message
+        });
+    }
+};
+
 // Get posts by user ID with pagination
 const getUserPosts = async (req, res) => {
     try {
@@ -323,6 +398,7 @@ const uploadPostMedia = async (req, res) => {
 module.exports = {
     createPost,
     getAllPosts,
+    getMyPosts,
     getUserPosts,
     uploadPostMedia
 };

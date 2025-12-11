@@ -68,6 +68,11 @@ const userSchema = new mongoose.Schema({
         required: false,
         default: ''
     },
+    pronouns: {
+        type: String,
+        required: false,
+        default: ''
+    },
     relationshipStatus: {
         type: String,
         required: false,
