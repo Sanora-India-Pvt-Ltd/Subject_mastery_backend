@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const Media = require('../models/Media');
+const Company = require('../models/Company');
 const jwt = require('jsonwebtoken');
 const twilio = require('twilio');
 const cloudinary = require('../config/cloudinary');
@@ -8,7 +9,7 @@ const cloudinary = require('../config/cloudinary');
 const updateProfile = async (req, res) => {
     try {
         const user = req.user; // From protect middleware
-        const { firstName, lastName, name, dob, gender, bio, currentCity, hometown, relationshipStatus, workplace, education } = req.body;
+        const { firstName, lastName, name, dob, gender, bio, currentCity, hometown, relationshipStatus, workplace, education, coverPhoto } = req.body;
 
         // Build update object with only provided fields
         const updateData = {};
@@ -95,6 +96,25 @@ const updateProfile = async (req, res) => {
             updateData.hometown = hometown.trim();
         }
 
+        // Handle coverPhoto (optional field - accepts URL string)
+        if (coverPhoto !== undefined) {
+            if (coverPhoto === null || coverPhoto === '') {
+                // Allow explicitly setting to null/empty to clear the field
+                updateData.coverPhoto = '';
+            } else {
+                // Validate that it's a valid URL format
+                try {
+                    new URL(coverPhoto);
+                    updateData.coverPhoto = coverPhoto.trim();
+                } catch (urlError) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Cover photo must be a valid URL'
+                    });
+                }
+            }
+        }
+
         // Handle relationshipStatus (optional field)
         if (relationshipStatus !== undefined) {
             if (relationshipStatus === null || relationshipStatus === '') {
@@ -120,7 +140,8 @@ const updateProfile = async (req, res) => {
                     message: 'Workplace must be an array'
                 });
             }
-            // Validate each workplace entry
+            // Validate each workplace entry and ensure companies exist
+            const processedWorkplace = [];
             for (const work of workplace) {
                 if (!work.company || !work.position || !work.startDate) {
                     return res.status(400).json({
@@ -140,13 +161,54 @@ const updateProfile = async (req, res) => {
                         message: 'Invalid endDate format'
                     });
                 }
-                // Convert dates to Date objects
-                work.startDate = new Date(work.startDate);
-                if (work.endDate) {
-                    work.endDate = new Date(work.endDate);
+
+                // Ensure company exists in Company collection
+                const companyName = work.company.trim();
+                const normalizedCompanyName = companyName.toLowerCase();
+                
+                let company = await Company.findOne({
+                    $or: [
+                        { name: companyName },
+                        { normalizedName: normalizedCompanyName }
+                    ]
+                });
+
+                // If company doesn't exist, create it
+                if (!company) {
+                    try {
+                        company = await Company.create({
+                            name: companyName,
+                            normalizedName: normalizedCompanyName,
+                            isCustom: true,
+                            createdBy: user._id
+                        });
+                        console.log(`✅ Created new company: ${companyName}`);
+                    } catch (error) {
+                        // Handle race condition - company might have been created by another request
+                        if (error.code === 11000) {
+                            company = await Company.findOne({
+                                $or: [
+                                    { name: companyName },
+                                    { normalizedName: normalizedCompanyName }
+                                ]
+                            });
+                        } else {
+                            throw error;
+                        }
+                    }
                 }
+
+                // Convert dates to Date objects
+                const processedWork = {
+                    company: company._id, // Store company ObjectID reference
+                    position: work.position,
+                    startDate: new Date(work.startDate),
+                    endDate: work.endDate ? new Date(work.endDate) : null,
+                    isCurrent: work.isCurrent || false
+                };
+                processedWorkplace.push(processedWork);
             }
-            updateData.workplace = workplace;
+            updateData.workplace = processedWorkplace;
         }
 
         // Handle education
@@ -224,7 +286,22 @@ const updateProfile = async (req, res) => {
             user._id,
             updateData,
             { new: true, runValidators: true }
-        ).select('-password -refreshToken');
+        )
+        .populate('workplace.company', 'name isCustom')
+        .select('-password -refreshToken');
+
+        // Format workplace to include company name
+        const formattedWorkplace = updatedUser.workplace.map(work => ({
+            company: work.company ? {
+                id: work.company._id,
+                name: work.company.name,
+                isCustom: work.company.isCustom
+            } : null,
+            position: work.position,
+            startDate: work.startDate,
+            endDate: work.endDate,
+            isCurrent: work.isCurrent
+        }));
 
         res.status(200).json({
             success: true,
@@ -241,11 +318,12 @@ const updateProfile = async (req, res) => {
                     alternatePhoneNumber: updatedUser.alternatePhoneNumber,
                     gender: updatedUser.gender,
                     profileImage: updatedUser.profileImage,
+                    coverPhoto: updatedUser.coverPhoto,
                     bio: updatedUser.bio,
                     currentCity: updatedUser.currentCity,
                     hometown: updatedUser.hometown,
                     relationshipStatus: updatedUser.relationshipStatus,
-                    workplace: updatedUser.workplace,
+                    workplace: formattedWorkplace,
                     education: updatedUser.education,
                     createdAt: updatedUser.createdAt,
                     updatedAt: updatedUser.updatedAt
@@ -712,6 +790,7 @@ const uploadMedia = async (req, res) => {
             folder: userFolder,
             upload_preset: process.env.UPLOAD_PRESET,
             resource_type: "auto", // auto = images + videos
+            quality: "100"
         });
 
         // Save upload record to database - associated with this specific user
@@ -805,7 +884,7 @@ const uploadProfileImage = async (req, res) => {
             resource_type: "image",
             transformation: [
                 { width: 400, height: 400, crop: "fill", gravity: "face" }, // Optimize for profile images
-                { quality: "auto" }
+                { quality: "100" }
             ]
         });
 
@@ -852,6 +931,108 @@ const uploadProfileImage = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Profile image upload failed",
+            error: err.message
+        });
+    }
+};
+
+// Upload cover photo - ensures it's only associated with the authenticated user
+const uploadCoverPhoto = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                message: "No file uploaded"
+            });
+        }
+
+        const user = req.user; // From protect middleware - ensures only authenticated user can upload
+
+        // Validate that it's an image
+        const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+        if (!allowedMimeTypes.includes(req.file.mimetype)) {
+            return res.status(400).json({
+                success: false,
+                message: "Only image files are allowed for cover photos (JPEG, PNG, GIF, WebP)"
+            });
+        }
+
+        // User-specific folder path
+        const userFolder = `user_uploads/${user._id}/cover`;
+
+        // Delete old cover photo from Cloudinary if it exists
+        if (user.coverPhoto) {
+            try {
+                // Extract public_id from the old cover photo URL
+                const oldPublicId = user.coverPhoto.split('/').slice(-2).join('/').split('.')[0];
+                // Try to delete the old image
+                await cloudinary.uploader.destroy(oldPublicId, { invalidate: true });
+                
+                // Also delete from Media collection
+                await Media.findOneAndDelete({ 
+                    userId: user._id, 
+                    url: user.coverPhoto 
+                });
+            } catch (deleteError) {
+                // Log but don't fail if old image deletion fails
+                console.warn('Failed to delete old cover photo:', deleteError.message);
+            }
+        }
+
+        // Upload new cover photo to user-specific folder
+        const result = await cloudinary.uploader.upload(req.file.path, {
+            folder: userFolder,
+            upload_preset: process.env.UPLOAD_PRESET,
+            resource_type: "image",
+            transformation: [
+                { width: 1200, height: 400, crop: "fill", gravity: "auto" }, // Optimize for cover photos (wider aspect ratio)
+                { quality: "100" }
+            ]
+        });
+
+        // Update user's coverPhoto field
+        const updatedUser = await User.findByIdAndUpdate(
+            user._id,
+            { coverPhoto: result.secure_url },
+            { new: true, runValidators: true }
+        ).select('-password -refreshToken');
+
+        // Save upload record to database - associated with this specific user
+        const mediaRecord = await Media.create({
+            userId: user._id, // Ensures it's only associated with this user
+            url: result.secure_url,
+            public_id: result.public_id,
+            format: result.format,
+            resource_type: result.resource_type,
+            fileSize: result.bytes || req.file.size,
+            originalFilename: req.file.originalname,
+            folder: userFolder
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Cover photo uploaded successfully",
+            data: {
+                id: mediaRecord._id,
+                url: result.secure_url,
+                public_id: result.public_id,
+                format: result.format,
+                fileSize: result.bytes || req.file.size,
+                user: {
+                    id: updatedUser._id,
+                    email: updatedUser.email,
+                    name: updatedUser.name,
+                    coverPhoto: updatedUser.coverPhoto
+                },
+                uploadedAt: mediaRecord.createdAt
+            }
+        });
+
+    } catch (err) {
+        console.error('Cover photo upload error:', err);
+        return res.status(500).json({
+            success: false,
+            message: "Cover photo upload failed",
             error: err.message
         });
     }
@@ -938,6 +1119,11 @@ const deleteUserMedia = async (req, res) => {
             await User.findByIdAndUpdate(user._id, { profileImage: '' });
         }
 
+        // If this was the user's cover photo, clear it from user record
+        if (user.coverPhoto === media.url) {
+            await User.findByIdAndUpdate(user._id, { coverPhoto: '' });
+        }
+
         return res.status(200).json({
             success: true,
             message: "Media deleted successfully"
@@ -962,6 +1148,7 @@ module.exports = {
     removeAlternatePhone,
     uploadMedia,
     uploadProfileImage,
+    uploadCoverPhoto,
     getUserMedia,
     deleteUserMedia
 };

@@ -13,17 +13,20 @@
    - [Refresh Token](#3-refresh-access-token)
    - [Logout](#4-logout)
    - [Get Logged-In Devices](#5-get-logged-in-devices)
-   - [Get User Profile](#6-get-current-user-profile)
+   - [Upload Profile Image](#22-upload-profile-image)
+   - [Get User's MediaGet User Profile](#6-get-current-user-profile)
 3. [User Profile Management](#-user-profile-management)
    - [Update Profile](#17-update-user-profile)
    - [Update Phone Number](#18-update-phone-number)
    - [Update Alternate Phone Number](#19-update-alternate-phone-number)
    - [Remove Alternate Phone Number](#20-remove-alternate-phone-number)
    - [Upload Media](#21-upload-media-to-cloudinary)
-   - [Upload Profile Image](#22-upload-profile-image)
-   - [Get User's Media](#23-get-users-media)
+   - [](#23-get-users-media)
    - [Delete User's Media](#24-delete-users-media)
-4. [OTP Verification](#-otp-verification)
+4. [Company Management](#-company-management)
+   - [Search Companies](#25-search-companies)
+   - [Create Company](#26-create-company)
+5. [OTP Verification](#-otp-verification)
    - [Send OTP for Signup (Email)](#6-send-otp-for-signup-email)
    - [Verify OTP for Signup (Email)](#7-verify-otp-for-signup-email)
    - [Send Phone OTP for Signup](#8-send-phone-otp-for-signup)
@@ -31,16 +34,16 @@
    - [Send OTP for Password Reset](#10-send-otp-for-password-reset)
    - [Verify OTP for Password Reset](#11-verify-otp-for-password-reset)
    - [Reset Password](#12-reset-password)
-5. [Google OAuth](#-google-oauth)
+6. [Google OAuth](#-google-oauth)
    - [Web OAuth](#13-google-oauth-web-redirect-flow)
    - [OAuth Callback](#14-google-oauth-callback)
    - [Mobile OAuth](#15-google-oauth-mobile-androidios)
    - [Verify Google Token](#16-verify-google-token-androidiosweb)
    - [Check Email](#18-check-email-exists)
-6. [Authentication Flows](#-authentication-flows)
-7. [Error Handling](#-error-handling)
-8. [Security Features](#-security-features)
-9. [Testing Examples](#-testing-examples)
+7. [Authentication Flows](#-authentication-flows)
+8. [Error Handling](#-error-handling)
+9. [Security Features](#-security-features)
+10. [Testing Examples](#-testing-examples)
 
 ---
 
@@ -420,6 +423,7 @@ Authorization: Bearer your_access_token_here
       "name": "John Doe",
       "dob": "1999-01-15T00:00:00.000Z",
       "profileImage": "https://...",
+      "coverPhoto": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/cover/cover123.jpg",
       "bio": "Software developer passionate about building great products",
       "currentCity": "San Francisco, CA",
       "hometown": "New York, NY",
@@ -516,16 +520,24 @@ Authorization: Bearer your_access_token_here
   "bio": "Software developer passionate about building great products",
   "currentCity": "San Francisco, CA",
   "hometown": "New York, NY",
+  "coverPhoto": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/cover/cover123.jpg",
   "relationshipStatus": "Single",
-  "workplace": [
-    {
-      "company": "Tech Corp",
-      "position": "Senior Software Engineer",
-      "startDate": "2020-01-15",
-      "endDate": null,
-      "isCurrent": true
-    }
-  ],
+      "workplace": [
+        {
+          "company": "Tech Corp",
+          "position": "Senior Software Engineer",
+          "startDate": "2020-01-15",
+          "endDate": null,
+          "isCurrent": true
+        },
+        {
+          "company": "Startup Inc",
+          "position": "Software Engineer",
+          "startDate": "2018-06-01",
+          "endDate": "2019-12-31",
+          "isCurrent": false
+        }
+      ],
   "education": {
     "graduation": {
       "institution": "University of Technology",
@@ -573,9 +585,10 @@ Authorization: Bearer your_access_token_here
 - `bio` (string, optional): User's biography/description
 - `currentCity` (string, optional): Current city or address
 - `hometown` (string, optional): User's hometown
+- `coverPhoto` (string, optional): URL of the cover photo. Must be a valid URL format. Can be set to `null` or empty string to clear.
 - `relationshipStatus` (string, optional): One of: "Single", "In a relationship", "Engaged", "Married", "In a civil partnership", "In a domestic partnership", "In an open relationship", "It's complicated", "Separated", "Divorced", "Widowed". Can be set to `null` or empty string to clear.
 - `workplace` (array, optional): Array of work experiences. Each entry must have:
-  - `company` (string, required): Company name
+  - `company` (string, required): Company name. **Note:** If the company doesn't exist in the system, it will be automatically created when you update your profile. You can also search for companies using the [Search Companies](#25-search-companies) endpoint before updating your profile.
   - `position` (string, required): Job position/title
   - `startDate` (string, required): Start date in ISO 8601 format (YYYY-MM-DD)
   - `endDate` (string, optional): End date in ISO 8601 format (YYYY-MM-DD). Set to `null` for current position
@@ -599,7 +612,9 @@ Authorization: Bearer your_access_token_here
 **Note:** 
 - You can update any combination of these fields. Only provided fields will be updated.
 - For education, you can update individual levels independently (e.g., only update `graduation` without affecting other levels)
+- **Multiple Workplaces:** You can provide multiple workplace entries in the array. Each entry represents a different work experience. The system will process all entries and create companies automatically if they don't exist.
 - For workplace, you can replace the entire array or update individual entries
+- **Company Auto-Creation:** When you provide a company name in the `workplace` array, the system automatically checks if the company exists. If it doesn't exist, it will be created automatically. You don't need to create companies separately before updating your profile, though you can use the [Search Companies](#25-search-companies) endpoint to find existing companies first.
 - `relationshipStatus` and `hometown` are optional and can be set to `null` or empty string to clear
 
 **Success Response (200):**
@@ -619,17 +634,33 @@ Authorization: Bearer your_access_token_here
       "alternatePhoneNumber": "+1987654321",
       "gender": "Male",
       "profileImage": "https://...",
+      "coverPhoto": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/cover/cover123.jpg",
       "bio": "Software developer passionate about building great products",
       "currentCity": "San Francisco, CA",
       "hometown": "New York, NY",
       "relationshipStatus": "Single",
       "workplace": [
         {
-          "company": "Tech Corp",
+          "company": {
+            "id": "507f1f77bcf86cd799439011",
+            "name": "Tech Corp",
+            "isCustom": false
+          },
           "position": "Senior Software Engineer",
           "startDate": "2020-01-15T00:00:00.000Z",
           "endDate": null,
           "isCurrent": true
+        },
+        {
+          "company": {
+            "id": "507f1f77bcf86cd799439012",
+            "name": "Startup Inc",
+            "isCustom": true
+          },
+          "position": "Software Engineer",
+          "startDate": "2018-06-01T00:00:00.000Z",
+          "endDate": "2019-12-31T00:00:00.000Z",
+          "isCurrent": false
         }
       ],
       "education": {
@@ -675,12 +706,132 @@ Authorization: Bearer your_access_token_here
 ```
 
 **Error Responses:**
-- `400`: Invalid date of birth (must be valid date, not in future, not more than 150 years ago), invalid gender, empty name fields, invalid relationship status, invalid workplace structure, invalid education structure, invalid percent/CGPA values (percent must be 0-100, CGPA must be 0-10)
+- `400`: Invalid date of birth (must be valid date, not in future, not more than 150 years ago), invalid gender, empty name fields, invalid cover photo URL, invalid relationship status, invalid workplace structure, invalid education structure, invalid percent/CGPA values (percent must be 0-100, CGPA must be 0-10)
 - `401`: No token, invalid token, expired token
 
 ---
 
-### 18. Update Phone Number
+### 18. Upload Cover Photo
+
+**Method:** `POST`  
+**URL:** `/api/media/cover-photo`  
+**Authentication:** Required
+
+**Description:**  
+Upload a cover photo for the authenticated user. The image is automatically optimized (1200x400px), stored in a user-specific folder (`user_uploads/{userId}/cover`), and updates the user's `coverPhoto` field. If the user already has a cover photo, the old one is automatically deleted from Cloudinary. **Cover photos are only associated with the authenticated user who uploads them.**
+
+**Content-Type:** `multipart/form-data`
+
+**Request:**
+- **Field Name:** `coverPhoto` (required)
+- **File Types:** Images only (JPEG, PNG, GIF, WebP)
+- **Max File Size:** 20MB
+
+**Example using cURL:**
+```bash
+curl -X POST https://api.sanoraindia.com/api/media/cover-photo \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -F "coverPhoto=@/path/to/your/cover.jpg"
+```
+
+**Example using JavaScript (FormData):**
+```javascript
+const formData = new FormData();
+formData.append('coverPhoto', fileInput.files[0]);
+
+const response = await fetch('https://api.sanoraindia.com/api/media/cover-photo', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`
+  },
+  body: formData
+});
+
+const result = await response.json();
+```
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Cover photo uploaded successfully",
+  "data": {
+    "id": "media_record_id",
+    "url": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/cover/abc123.jpg",
+    "public_id": "user_uploads/user_id/cover/abc123",
+    "format": "jpg",
+    "fileSize": 245678,
+    "user": {
+      "id": "user_id",
+      "email": "user@example.com",
+      "name": "John Doe",
+      "coverPhoto": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/cover/abc123.jpg"
+    },
+    "uploadedAt": "2024-01-15T10:30:00.000Z"
+  }
+}
+```
+
+**Response Fields:**
+- `id` (string): Database record ID for the upload
+- `url` (string): Secure HTTPS URL of the uploaded cover photo
+- `public_id` (string): Cloudinary public ID
+- `format` (string): File format (e.g., "jpg", "png")
+- `fileSize` (number): File size in bytes
+- `user` (object): Updated user information including the new cover photo URL
+- `uploadedAt` (string): ISO 8601 timestamp of when the file was uploaded
+
+**Error Responses:**
+
+**400 - No File Uploaded:**
+```json
+{
+  "success": false,
+  "message": "No file uploaded"
+}
+```
+
+**400 - Invalid File Type:**
+```json
+{
+  "success": false,
+  "message": "Only image files are allowed for cover photos (JPEG, PNG, GIF, WebP)"
+}
+```
+
+**401 - Not Authenticated:**
+```json
+{
+  "success": false,
+  "message": "Not authorized to access this route"
+}
+```
+
+**500 - Upload Failed:**
+```json
+{
+  "success": false,
+  "message": "Cover photo upload failed",
+  "error": "Error details (in development mode)"
+}
+```
+
+**Notes:**
+- **Authentication Required:** This endpoint requires a valid access token in the Authorization header
+- **User-Specific:** Cover photos are stored in `user_uploads/{userId}/cover` folder
+- **Automatic Optimization:** Images are automatically resized to 1200x400px (wider aspect ratio for cover photos)
+- **Old Image Cleanup:** Previous cover photos are automatically deleted when a new one is uploaded
+- **User Association:** The cover photo is automatically associated with the authenticated user's account
+- Only the authenticated user can upload their own cover photo
+
+---
+
+### 19. Update Phone Number
 
 **⚠️ IMPORTANT:** Phone number updates require OTP verification via Twilio.
 
@@ -784,7 +935,7 @@ Authorization: Bearer your_access_token_here
 
 ---
 
-### 19. Update Alternate Phone Number
+### 20. Update Alternate Phone Number
 
 **⚠️ IMPORTANT:** Alternate phone number updates require OTP verification via Twilio.
 
@@ -888,7 +1039,7 @@ Authorization: Bearer your_access_token_here
 
 ---
 
-### 20. Remove Alternate Phone Number
+### 21. Remove Alternate Phone Number
 
 **Method:** `DELETE`  
 **URL:** `/api/user/alternate-phone`  
@@ -928,7 +1079,7 @@ Authorization: Bearer your_access_token_here
 
 ---
 
-### 21. Upload Media to Cloudinary
+### 22. Upload Media to Cloudinary
 
 **Method:** `POST`  
 **URL:** `/api/media/upload`  
@@ -1076,7 +1227,7 @@ Authorization: Bearer your_access_token_here
 
 ---
 
-### 22. Upload Profile Image
+### 23. Upload Profile Image
 
 **Method:** `POST`  
 **URL:** `/api/media/profile-image`  
@@ -1369,6 +1520,163 @@ const result = await response.json();
 - **Automatic Cleanup:** If the deleted media was the user's profile image, the `profileImage` field is automatically cleared
 - **Cloudinary Deletion:** The file is deleted from Cloudinary and the database record is removed
 - **Security:** Attempting to delete another user's media will return a 404 error (not revealing that the media exists)
+
+---
+
+## 🏢 Company Management
+
+### 25. Search Companies
+
+**Method:** `GET`  
+**URL:** `/api/company/search`  
+**Authentication:** Not required
+
+**Query Parameters:**
+- `query` (string, required): Company name to search for
+
+**Example Request:**
+```bash
+GET /api/company/search?query=BlueSky Innovations
+```
+
+**Success Response (200) - Companies Found:**
+```json
+{
+  "success": true,
+  "message": "Found 2 company/companies",
+  "data": {
+    "companies": [
+      {
+        "id": "507f1f77bcf86cd799439011",
+        "name": "BlueSky Innovations",
+        "isCustom": true,
+        "createdAt": "2024-01-15T10:30:00.000Z"
+      },
+      {
+        "id": "507f1f77bcf86cd799439012",
+        "name": "BlueSky Technologies Pvt Ltd",
+        "isCustom": false,
+        "createdAt": "2024-01-10T08:20:00.000Z"
+      }
+    ],
+    "canAddCustom": false,
+    "suggestedName": null
+  }
+}
+```
+
+**Success Response (200) - No Companies Found:**
+```json
+{
+  "success": true,
+  "message": "No companies found",
+  "data": {
+    "companies": [],
+    "canAddCustom": true,
+    "suggestedName": "BlueSky Innovations Pvt Ltd"
+  }
+}
+```
+
+**Error Response (400):**
+```json
+{
+  "success": false,
+  "message": "Search query is required"
+}
+```
+
+**Notes:**
+- **Case-Insensitive Search:** The search is case-insensitive and matches partial company names
+- **No Authentication Required:** This endpoint is public and can be used without authentication
+- **Custom Entry Flag:** When `canAddCustom: true`, the frontend should show an option to add the company as a custom entry
+- **Suggested Name:** When no matches are found, `suggestedName` contains the exact search query for easy creation
+- **Result Limit:** Maximum of 20 companies are returned, sorted alphabetically
+
+---
+
+### 26. Create Company
+
+**Method:** `POST`  
+**URL:** `/api/company`  
+**Authentication:** Required
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "name": "BlueSky Innovations Pvt Ltd"
+}
+```
+
+**Success Response (201) - Company Created:**
+```json
+{
+  "success": true,
+  "message": "Company created successfully",
+  "data": {
+    "company": {
+      "id": "507f1f77bcf86cd799439013",
+      "name": "BlueSky Innovations Pvt Ltd",
+      "isCustom": true,
+      "createdAt": "2024-01-15T12:00:00.000Z"
+    }
+  }
+}
+```
+
+**Success Response (200) - Company Already Exists:**
+```json
+{
+  "success": true,
+  "message": "Company already exists",
+  "data": {
+    "company": {
+      "id": "507f1f77bcf86cd799439011",
+      "name": "BlueSky Innovations Pvt Ltd",
+      "isCustom": true,
+      "createdAt": "2024-01-15T10:30:00.000Z"
+    }
+  }
+}
+```
+
+**Error Response (400):**
+```json
+{
+  "success": false,
+  "message": "Company name is required"
+}
+```
+
+**Error Response (500):**
+```json
+{
+  "success": false,
+  "message": "Error creating company",
+  "error": "Error details (only in development)"
+}
+```
+
+**Notes:**
+- **Authentication Required:** This endpoint requires a valid access token
+- **Case-Insensitive Duplicates:** The system prevents duplicate companies (case-insensitive). If a company with the same name (ignoring case) already exists, it returns the existing company
+- **Auto-Normalization:** Company names are automatically normalized and stored consistently
+- **Custom Flag:** All user-created companies are marked as `isCustom: true`
+- **Automatic Creation:** Companies are also automatically created when users update their profile with workplace information (see [Update Profile](#17-update-user-profile))
+
+**Frontend Flow Example:**
+1. User types: "BlueSky Innovations Pvt Ltd"
+2. Frontend calls: `GET /api/company/search?query=BlueSky Innovations Pvt Ltd`
+3. If `canAddCustom: true` → Show: "Add BlueSky Innovations Pvt Ltd?"
+4. When user selects it → Frontend calls: `POST /api/company` with `{ "name": "BlueSky Innovations Pvt Ltd" }`
+5. Backend creates the company and returns it
+6. Frontend can now use this company in profile updates
 
 ---
 

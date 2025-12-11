@@ -51,6 +51,10 @@ const userSchema = new mongoose.Schema({
         type: String,
         default: ''
     },
+    coverPhoto: {
+        type: String,
+        default: ''
+    },
     bio: {
         type: String,
         default: ''
@@ -72,7 +76,8 @@ const userSchema = new mongoose.Schema({
     },
     workplace: [{
         company: {
-            type: String,
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Company',
             required: true
         },
         position: {

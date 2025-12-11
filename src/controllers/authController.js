@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const Company = require('../models/Company');
 const bcrypt = require('bcryptjs');
 const { generateToken, generateAccessToken, generateRefreshToken } = require('../middleware/auth');
 
@@ -691,6 +692,22 @@ const getProfile = async (req, res) => {
             });
         }
 
+        // Populate company data
+        await user.populate('workplace.company', 'name isCustom');
+
+        // Format workplace to include company name
+        const formattedWorkplace = user.workplace.map(work => ({
+            company: work.company ? {
+                id: work.company._id,
+                name: work.company.name,
+                isCustom: work.company.isCustom
+            } : null,
+            position: work.position,
+            startDate: work.startDate,
+            endDate: work.endDate,
+            isCurrent: work.isCurrent
+        }));
+
         res.status(200).json({
             success: true,
             message: 'User profile retrieved successfully',
@@ -706,11 +723,12 @@ const getProfile = async (req, res) => {
                     name: user.name,
                     dob: user.dob,
                     profileImage: user.profileImage,
+                    coverPhoto: user.coverPhoto,
                     bio: user.bio,
                     currentCity: user.currentCity,
                     hometown: user.hometown,
                     relationshipStatus: user.relationshipStatus,
-                    workplace: user.workplace,
+                    workplace: formattedWorkplace,
                     education: user.education,
                     isGoogleOAuth: user.isGoogleOAuth,
                     googleId: user.googleId,
@@ -1006,7 +1024,8 @@ const updateProfile = async (req, res) => {
                     message: 'Workplace must be an array'
                 });
             }
-            // Validate each workplace entry
+            // Validate each workplace entry and ensure companies exist
+            const processedWorkplace = [];
             for (const work of workplace) {
                 if (!work.company || !work.position || !work.startDate) {
                     return res.status(400).json({
@@ -1026,13 +1045,54 @@ const updateProfile = async (req, res) => {
                         message: 'Invalid endDate format'
                     });
                 }
-                // Convert dates to Date objects
-                work.startDate = new Date(work.startDate);
-                if (work.endDate) {
-                    work.endDate = new Date(work.endDate);
+
+                // Ensure company exists in Company collection
+                const companyName = work.company.trim();
+                const normalizedCompanyName = companyName.toLowerCase();
+                
+                let company = await Company.findOne({
+                    $or: [
+                        { name: companyName },
+                        { normalizedName: normalizedCompanyName }
+                    ]
+                });
+
+                // If company doesn't exist, create it
+                if (!company) {
+                    try {
+                        company = await Company.create({
+                            name: companyName,
+                            normalizedName: normalizedCompanyName,
+                            isCustom: true,
+                            createdBy: user._id
+                        });
+                        console.log(`✅ Created new company: ${companyName}`);
+                    } catch (error) {
+                        // Handle race condition - company might have been created by another request
+                        if (error.code === 11000) {
+                            company = await Company.findOne({
+                                $or: [
+                                    { name: companyName },
+                                    { normalizedName: normalizedCompanyName }
+                                ]
+                            });
+                        } else {
+                            throw error;
+                        }
+                    }
                 }
+
+                // Convert dates to Date objects
+                const processedWork = {
+                    company: company._id, // Store company ObjectID reference
+                    position: work.position,
+                    startDate: new Date(work.startDate),
+                    endDate: work.endDate ? new Date(work.endDate) : null,
+                    isCurrent: work.isCurrent || false
+                };
+                processedWorkplace.push(processedWork);
             }
-            allowedUpdates.workplace = workplace;
+            allowedUpdates.workplace = processedWorkplace;
         }
 
         // Handle education
@@ -1116,6 +1176,22 @@ const updateProfile = async (req, res) => {
         Object.assign(user, allowedUpdates);
         await user.save();
 
+        // Populate company data for response
+        await user.populate('workplace.company', 'name isCustom');
+
+        // Format workplace to include company name
+        const formattedWorkplace = user.workplace.map(work => ({
+            company: work.company ? {
+                id: work.company._id,
+                name: work.company.name,
+                isCustom: work.company.isCustom
+            } : null,
+            position: work.position,
+            startDate: work.startDate,
+            endDate: work.endDate,
+            isCurrent: work.isCurrent
+        }));
+
         res.status(200).json({
             success: true,
             message: 'Profile updated successfully',
@@ -1135,7 +1211,7 @@ const updateProfile = async (req, res) => {
                     currentCity: user.currentCity,
                     hometown: user.hometown,
                     relationshipStatus: user.relationshipStatus,
-                    workplace: user.workplace,
+                    workplace: formattedWorkplace,
                     education: user.education,
                     isGoogleOAuth: user.isGoogleOAuth,
                     googleId: user.googleId,

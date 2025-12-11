@@ -3,7 +3,8 @@ const upload = require("../middleware/upload");
 const { protect } = require("../middleware/auth");
 const { 
     uploadMedia, 
-    uploadProfileImage, 
+    uploadProfileImage,
+    uploadCoverPhoto, 
     getUserMedia, 
     deleteUserMedia 
 } = require("../controllers/userController");
@@ -15,6 +16,9 @@ router.post("/upload", protect, upload.single("media"), uploadMedia);
 
 // Profile image upload route - ensures image is only associated with the authenticated user
 router.post("/profile-image", protect, upload.single("profileImage"), uploadProfileImage);
+
+// Cover photo upload route - ensures image is only associated with the authenticated user
+router.post("/cover-photo", protect, upload.single("coverPhoto"), uploadCoverPhoto);
 
 // Get user's media - ensures users can only see their own uploads
 router.get("/my-media", protect, getUserMedia);
