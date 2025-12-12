@@ -481,6 +481,176 @@ const cancelSentRequest = async (req, res) => {
     }
 };
 
+// Get friend suggestions based on mutual friends
+const getFriendSuggestions = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const limit = parseInt(req.query.limit) || 10;
+
+        // Get current user with friends
+        const user = await User.findById(userId).select('friends');
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        // If user has no friends, return empty suggestions or random users
+        if (!user.friends || user.friends.length === 0) {
+            // Return random users (excluding current user)
+            const randomUsers = await User.find({
+                _id: { $ne: userId }
+            })
+            .select('firstName lastName name profileImage email bio currentCity hometown')
+            .limit(limit);
+
+            return res.json({
+                success: true,
+                message: 'Friend suggestions retrieved successfully',
+                data: {
+                    suggestions: randomUsers.map(u => ({
+                        user: u,
+                        mutualFriends: 0,
+                        mutualFriendsList: []
+                    })),
+                    count: randomUsers.length
+                }
+            });
+        }
+
+        // Get all friends of current user's friends (friends of friends)
+        const friendsOfFriends = await User.find({
+            _id: { $in: user.friends }
+        })
+        .select('friends')
+        .lean();
+
+        // Build a map of potential friends and their mutual friend count
+        const suggestionMap = new Map();
+        const userIdStr = userId.toString();
+
+        // Iterate through each friend
+        for (const friend of friendsOfFriends) {
+            if (!friend.friends || friend.friends.length === 0) continue;
+
+            // For each friend of this friend
+            for (const friendOfFriendId of friend.friends) {
+                const friendOfFriendIdStr = friendOfFriendId.toString();
+
+                // Skip if it's the current user
+                if (friendOfFriendIdStr === userIdStr) continue;
+
+                // Skip if already a friend
+                if (user.friends.some(f => f.toString() === friendOfFriendIdStr)) continue;
+
+                // Count mutual friends
+                if (!suggestionMap.has(friendOfFriendIdStr)) {
+                    suggestionMap.set(friendOfFriendIdStr, {
+                        userId: friendOfFriendId,
+                        mutualFriends: [],
+                        count: 0
+                    });
+                }
+
+                const suggestion = suggestionMap.get(friendOfFriendIdStr);
+                // Add the mutual friend (the friend who connects them)
+                const mutualFriend = friendsOfFriends.find(f => 
+                    f._id.toString() === friend._id.toString()
+                );
+                if (mutualFriend && !suggestion.mutualFriends.some(mf => 
+                    mf._id.toString() === mutualFriend._id.toString()
+                )) {
+                    suggestion.mutualFriends.push(mutualFriend._id);
+                    suggestion.count = suggestion.mutualFriends.length;
+                }
+            }
+        }
+
+        // Get pending requests to exclude
+        const pendingRequests = await FriendRequest.find({
+            $or: [
+                { sender: userId, status: 'pending' },
+                { receiver: userId, status: 'pending' }
+            ]
+        }).select('sender receiver').lean();
+
+        const excludedUserIds = new Set();
+        pendingRequests.forEach(req => {
+            if (req.sender.toString() === userIdStr) {
+                excludedUserIds.add(req.receiver.toString());
+            } else {
+                excludedUserIds.add(req.sender.toString());
+            }
+        });
+
+        // Filter out users with pending requests
+        const filteredSuggestions = Array.from(suggestionMap.values())
+            .filter(s => !excludedUserIds.has(s.userId.toString()))
+            .sort((a, b) => b.count - a.count) // Sort by mutual friends count (descending)
+            .slice(0, limit);
+
+        // Get user details for suggestions
+        const suggestionUserIds = filteredSuggestions.map(s => s.userId);
+        const suggestedUsers = await User.find({
+            _id: { $in: suggestionUserIds }
+        })
+        .select('firstName lastName name profileImage email bio currentCity hometown')
+        .lean();
+
+        // Get mutual friend details
+        const allMutualFriendIds = new Set();
+        filteredSuggestions.forEach(s => {
+            s.mutualFriends.forEach(mf => allMutualFriendIds.add(mf.toString()));
+        });
+
+        const mutualFriendsDetails = await User.find({
+            _id: { $in: Array.from(allMutualFriendIds) }
+        })
+        .select('firstName lastName name profileImage')
+        .lean();
+
+        const mutualFriendsMap = new Map();
+        mutualFriendsDetails.forEach(mf => {
+            mutualFriendsMap.set(mf._id.toString(), mf);
+        });
+
+        // Build final suggestions with user details and mutual friends
+        const finalSuggestions = filteredSuggestions.map(suggestion => {
+            const userDetails = suggestedUsers.find(u => 
+                u._id.toString() === suggestion.userId.toString()
+            );
+
+            const mutualFriendsList = suggestion.mutualFriends
+                .map(mfId => mutualFriendsMap.get(mfId.toString()))
+                .filter(Boolean)
+                .slice(0, 3); // Show up to 3 mutual friends
+
+            return {
+                user: userDetails,
+                mutualFriendsCount: suggestion.count,
+                mutualFriends: mutualFriendsList
+            };
+        });
+
+        res.json({
+            success: true,
+            message: 'Friend suggestions retrieved successfully',
+            data: {
+                suggestions: finalSuggestions,
+                count: finalSuggestions.length
+            }
+        });
+    } catch (error) {
+        console.error('Get friend suggestions error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve friend suggestions',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     sendFriendRequest,
     acceptFriendRequest,
@@ -489,6 +659,7 @@ module.exports = {
     listReceivedRequests,
     listSentRequests,
     unfriend,
-    cancelSentRequest
+    cancelSentRequest,
+    getFriendSuggestions
 };
 

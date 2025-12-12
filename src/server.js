@@ -417,6 +417,24 @@ try {
     });
 }
 
+// Story routes - for creating and fetching stories
+try {
+    console.log('🔄 Loading story routes...');
+    app.use('/api/stories', require('./routes/storyRoutes'));
+    console.log('✅ Story routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading story routes:', error.message);
+    console.error('Stack:', error.stack);
+    // Don't crash - create a fallback route
+    app.use('/api/stories', (req, res) => {
+        res.status(500).json({
+            success: false,
+            message: 'Story routes failed to load. Check server logs.',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    });
+}
+
 // Twilio OTP endpoints (phone verification)
 try {
     console.log('🔄 Loading Twilio OTP routes...');

@@ -8,7 +8,8 @@ const {
     listReceivedRequests,
     listSentRequests,
     unfriend,
-    cancelSentRequest
+    cancelSentRequest,
+    getFriendSuggestions
 } = require('../controllers/friendController');
 
 const router = express.Router();
@@ -23,6 +24,7 @@ router.post('/reject/:requestId', rejectFriendRequest);
 router.get('/list', listFriends);
 router.get('/requests/received', listReceivedRequests);
 router.get('/requests/sent', listSentRequests);
+router.get('/suggestions', getFriendSuggestions);
 
 // Optional endpoints
 router.delete('/unfriend/:friendId', unfriend);
@@ -36,6 +38,7 @@ console.log('  POST   /api/friend/reject/:requestId (protected)');
 console.log('  GET    /api/friend/list (protected)');
 console.log('  GET    /api/friend/requests/received (protected)');
 console.log('  GET    /api/friend/requests/sent (protected)');
+console.log('  GET    /api/friend/suggestions (protected)');
 console.log('  DELETE /api/friend/unfriend/:friendId (protected)');
 console.log('  DELETE /api/friend/cancel/:requestId (protected)');
 

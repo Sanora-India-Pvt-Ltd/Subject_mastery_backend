@@ -9,7 +9,8 @@ const {
     removeAlternatePhone,
     updateProfileMedia,
     updatePersonalInfo,
-    updateLocationAndDetails
+    updateLocationAndDetails,
+    getProfileScore
 } = require('../controllers/userController');
 const { limitOTPRequests, limitVerifyRequests } = require('../middleware/rateLimiter');
 
@@ -27,6 +28,9 @@ router.put('/profile/personal-info', updatePersonalInfo);
 
 // API 3: Update currentCity, workplace, pronouns, education, relationshipStatus, hometown
 router.put('/profile/location-details', updateLocationAndDetails);
+
+// Get profile score
+router.get('/profile/score', getProfileScore);
 
 // Update profile (name, age, gender) - no verification needed (less specific, comes after)
 router.put('/profile', updateProfile);
@@ -51,6 +55,7 @@ console.log('  DELETE /api/user/alternate-phone (protected)');
 console.log('  PUT    /api/user/profile/media (protected)');
 console.log('  PUT    /api/user/profile/personal-info (protected)');
 console.log('  PUT    /api/user/profile/location-details (protected)');
+console.log('  GET    /api/user/profile/score (protected)');
 
 module.exports = router;
 

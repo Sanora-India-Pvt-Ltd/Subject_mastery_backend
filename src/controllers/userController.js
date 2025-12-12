@@ -1818,6 +1818,195 @@ const updateLocationAndDetails = async (req, res) => {
     }
 };
 
+// Get user profile score
+const getProfileScore = async (req, res) => {
+    try {
+        const user = req.user; // From protect middleware
+
+        // Populate user data
+        await user.populate('workplace.company', 'name isCustom');
+        await user.populate('education.institution', 'name type city country logo verified isCustom');
+
+        let totalScore = 0;
+        const scoreBreakdown = {
+            profile: 0,
+            education: 0,
+            company: 0,
+            location: 0
+        };
+
+        // 1. Profile Completeness Score (0-100 points, converted to percentage)
+        let profilePoints = 0;
+        let profileMaxPoints = 0;
+
+        // Check various profile fields
+        const profileFields = [
+            { field: 'firstName', points: 5 },
+            { field: 'lastName', points: 5 },
+            { field: 'name', points: 5 },
+            { field: 'email', points: 5 },
+            { field: 'phoneNumber', points: 10 },
+            { field: 'gender', points: 5 },
+            { field: 'dob', points: 10 },
+            { field: 'bio', points: 10 },
+            { field: 'profileImage', points: 15 },
+            { field: 'coverPhoto', points: 10 },
+            { field: 'currentCity', points: 10 },
+            { field: 'hometown', points: 5 },
+            { field: 'pronouns', points: 5 }
+        ];
+
+        profileFields.forEach(({ field, points }) => {
+            profileMaxPoints += points;
+            if (user[field] && user[field] !== '' && user[field] !== null) {
+                profilePoints += points;
+            }
+        });
+
+        // Calculate profile completeness percentage
+        const profileCompleteness = profileMaxPoints > 0 
+            ? (profilePoints / profileMaxPoints) * 100 
+            : 0;
+        
+        scoreBreakdown.profile = Math.round(profileCompleteness * 100) / 100;
+
+        // 2. Education Score
+        let educationScore = 0;
+        if (user.education && user.education.length > 0) {
+            // Get the highest degree
+            let highestDegree = '';
+            user.education.forEach(edu => {
+                if (edu.degree) {
+                    const degreeLower = edu.degree.toLowerCase();
+                    if (degreeLower.includes('phd') || degreeLower.includes('doctorate') || degreeLower.includes('ph.d')) {
+                        highestDegree = 'phd';
+                    } else if ((degreeLower.includes('master') || degreeLower.includes('mba') || degreeLower.includes('ms') || degreeLower.includes('m.sc') || degreeLower.includes('m.a')) && highestDegree !== 'phd') {
+                        highestDegree = 'masters';
+                    } else if ((degreeLower.includes('bachelor') || degreeLower.includes('bachelor') || degreeLower.includes('bs') || degreeLower.includes('b.sc') || degreeLower.includes('b.a') || degreeLower.includes('be') || degreeLower.includes('b.tech')) && highestDegree !== 'phd' && highestDegree !== 'masters') {
+                        highestDegree = 'bachelors';
+                    }
+                }
+            });
+
+            // Assign score based on highest degree
+            if (highestDegree === 'phd') {
+                educationScore = 12;
+            } else if (highestDegree === 'masters') {
+                educationScore = 10;
+            } else if (highestDegree === 'bachelors') {
+                educationScore = 5;
+            }
+        }
+        scoreBreakdown.education = educationScore;
+
+        // 3. Company Score (4% to 15% based on number of employees)
+        let companyScore = 0;
+        if (user.workplace && user.workplace.length > 0) {
+            // Get current company (isCurrent: true) or most recent company
+            const currentWorkplace = user.workplace.find(w => w.isCurrent) || 
+                                    user.workplace.sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
+            
+            if (currentWorkplace && currentWorkplace.company) {
+                const companyId = currentWorkplace.company._id || currentWorkplace.company;
+                
+                // Count how many users work at this company
+                const employeeCount = await User.countDocuments({
+                    'workplace.company': companyId,
+                    _id: { $ne: user._id } // Exclude current user
+                });
+                
+                // Calculate score: 4% minimum, up to 15% based on employee count
+                // Scale: 0 employees = 4%, 100+ employees = 15%
+                // Linear scaling: 4 + (employeeCount / 100) * 11
+                companyScore = Math.min(15, Math.max(4, 4 + (employeeCount / 100) * 11));
+            }
+        }
+        scoreBreakdown.company = Math.round(companyScore * 100) / 100;
+
+        // 4. Location Score (High-end society or expensive city)
+        let locationScore = 0;
+        if (user.currentCity) {
+            // List of expensive/high-end cities (you can expand this list)
+            const expensiveCities = [
+                // US Cities
+                'new york', 'san francisco', 'los angeles', 'boston', 'seattle', 
+                'washington', 'chicago', 'miami', 'san diego', 'denver',
+                // International Cities
+                'london', 'paris', 'tokyo', 'singapore', 'hong kong', 'sydney',
+                'zurich', 'geneva', 'mumbai', 'delhi', 'bangalore', 'dubai',
+                'toronto', 'vancouver', 'amsterdam', 'copenhagen', 'stockholm',
+                'oslo', 'vienna', 'munich', 'frankfurt', 'brussels', 'madrid',
+                'barcelona', 'rome', 'milan', 'athens', 'istanbul', 'doha',
+                // Indian High-end areas
+                'gurgaon', 'noida', 'pune', 'hyderabad', 'chennai', 'kolkata',
+                'ahmedabad', 'jaipur', 'chandigarh', 'goa'
+            ];
+
+            const cityLower = user.currentCity.toLowerCase().trim();
+            
+            // Check if city matches any expensive city (exact or contains)
+            const isExpensiveCity = expensiveCities.some(expensiveCity => 
+                cityLower === expensiveCity || 
+                cityLower.includes(expensiveCity) || 
+                expensiveCity.includes(cityLower)
+            );
+
+            if (isExpensiveCity) {
+                locationScore = 15; // Fixed 15% for expensive cities
+            }
+        }
+        scoreBreakdown.location = locationScore;
+
+        // Calculate total score
+        // Profile provides base score (0-50%), then add bonuses from other factors
+        const baseProfileScore = (scoreBreakdown.profile / 100) * 50; // Convert to 0-50 scale
+        const bonuses = scoreBreakdown.education + scoreBreakdown.company + scoreBreakdown.location;
+        
+        totalScore = baseProfileScore + bonuses;
+
+        // Cap total score at 100%
+        totalScore = Math.min(100, totalScore);
+        
+        // Update profile score in breakdown to show base contribution
+        scoreBreakdown.profile = Math.round(baseProfileScore * 100) / 100;
+
+        res.status(200).json({
+            success: true,
+            message: 'Profile score calculated successfully',
+            data: {
+                totalScore: Math.round(totalScore * 100) / 100,
+                scoreBreakdown: {
+                    profile: {
+                        score: scoreBreakdown.profile,
+                        description: 'Base score from profile completeness (0-50% based on filled fields)'
+                    },
+                    education: {
+                        score: scoreBreakdown.education,
+                        description: 'Education bonus: Bachelor\'s (5%), Master\'s (10%), PhD (12%)'
+                    },
+                    company: {
+                        score: scoreBreakdown.company,
+                        description: 'Company bonus based on number of employees (4% to 15%)'
+                    },
+                    location: {
+                        score: scoreBreakdown.location,
+                        description: 'Location bonus for high-end/expensive cities (15%)'
+                    }
+                },
+                maxPossibleScore: 100
+            }
+        });
+
+    } catch (error) {
+        console.error('Get profile score error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error calculating profile score',
+            error: error.message
+        });
+    }
+};
+
 module.exports = {
     updateProfile,
     sendOTPForPhoneUpdate,
@@ -1832,6 +2021,7 @@ module.exports = {
     deleteUserMedia,
     updateProfileMedia,
     updatePersonalInfo,
-    updateLocationAndDetails
+    updateLocationAndDetails,
+    getProfileScore
 };
 

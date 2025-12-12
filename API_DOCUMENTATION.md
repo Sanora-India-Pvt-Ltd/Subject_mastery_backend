@@ -37,16 +37,22 @@
    - [Create Post](#30-create-post)
    - [Get All Posts](#31-get-all-posts)
    - [Get User Posts](#32-get-user-posts)
-7. [Friend Management](#-friend-management)
-   - [Send Friend Request](#33-send-friend-request)
-   - [Accept Friend Request](#34-accept-friend-request)
-   - [Reject Friend Request](#35-reject-friend-request)
-   - [List Friends](#36-list-friends)
-   - [List Received Requests](#37-list-received-friend-requests)
-   - [List Sent Requests](#38-list-sent-friend-requests)
-   - [Unfriend User](#39-unfriend-user)
-   - [Cancel Sent Request](#40-cancel-sent-friend-request)
-8. [OTP Verification](#-otp-verification)
+7. [Stories Management](#-stories-management)
+   - [Upload Story Media](#42-upload-story-media)
+   - [Create Story](#43-create-story)
+   - [Get User Stories](#44-get-user-stories)
+   - [Get All Friends Stories](#45-get-all-friends-stories)
+8. [Friend Management](#-friend-management)
+   - [Send Friend Request](#46-send-friend-request)
+   - [Accept Friend Request](#47-accept-friend-request)
+   - [Reject Friend Request](#48-reject-friend-request)
+   - [List Friends](#49-list-friends)
+   - [List Received Requests](#50-list-received-friend-requests)
+   - [List Sent Requests](#51-list-sent-friend-requests)
+   - [Get Friend Suggestions](#54-get-friend-suggestions)
+   - [Unfriend User](#52-unfriend-user)
+   - [Cancel Sent Request](#53-cancel-sent-friend-request)
+9. [OTP Verification](#-otp-verification)
    - [Send OTP for Signup (Email)](#6-send-otp-for-signup-email)
    - [Verify OTP for Signup (Email)](#7-verify-otp-for-signup-email)
    - [Send Phone OTP for Signup](#8-send-phone-otp-for-signup)
@@ -54,16 +60,16 @@
    - [Send OTP for Password Reset](#10-send-otp-for-password-reset)
    - [Verify OTP for Password Reset](#11-verify-otp-for-password-reset)
    - [Reset Password](#12-reset-password)
-9. [Google OAuth](#-google-oauth)
+10. [Google OAuth](#-google-oauth)
    - [Web OAuth](#13-google-oauth-web-redirect-flow)
    - [OAuth Callback](#14-google-oauth-callback)
    - [Mobile OAuth](#15-google-oauth-mobile-androidios)
    - [Verify Google Token](#16-verify-google-token-androidiosweb)
    - [Check Email](#18-check-email-exists)
-10. [Authentication Flows](#-authentication-flows)
-11. [Error Handling](#-error-handling)
-12. [Security Features](#-security-features)
-13. [Testing Examples](#-testing-examples)
+11. [Authentication Flows](#-authentication-flows)
+12. [Error Handling](#-error-handling)
+13. [Security Features](#-security-features)
+14. [Testing Examples](#-testing-examples)
 
 ---
 
@@ -2558,9 +2564,352 @@ GET /api/posts/user/user_id_123?page=1&limit=10
 
 ---
 
+## 📖 Stories Management
+
+Stories are temporary posts that automatically expire after 24 hours. Stories can contain images or videos and are grouped by user, similar to Instagram/Facebook stories.
+
+### 42. Upload Story Media
+
+**Method:** `POST`  
+**URL:** `/api/stories/upload-media`  
+**Authentication:** Required
+
+**Description:**  
+Upload images or videos for stories. Files are uploaded to Cloudinary in user-specific folders (`user_uploads/{userId}/stories`). This endpoint is used as part of the story creation flow - upload media first, then create the story with the returned URLs.
+
+**Content-Type:** `multipart/form-data`
+
+**Request:**
+- **Field Name:** `media` (required)
+- **File Types:** Images (JPEG, PNG, GIF, WebP, etc.) and Videos (MP4, MOV, AVI, etc.)
+- **Max File Size:** 20MB
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+```
+
+**Example using cURL:**
+```bash
+curl -X POST https://api.sanoraindia.com/api/stories/upload-media \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -F "media=@/path/to/your/image.jpg"
+```
+
+**Example using JavaScript (FormData):**
+```javascript
+const formData = new FormData();
+formData.append('media', fileInput.files[0]);
+
+const response = await fetch('https://api.sanoraindia.com/api/stories/upload-media', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`
+  },
+  body: formData
+});
+
+const result = await response.json();
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Story media uploaded successfully",
+  "data": {
+    "url": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/stories/abc123.jpg",
+    "publicId": "user_uploads/user_id/stories/abc123",
+    "type": "image",
+    "format": "jpg",
+    "fileSize": 245678
+  }
+}
+```
+
+**Response Fields:**
+- `url` (string): Secure HTTPS URL of the uploaded file
+- `publicId` (string): Cloudinary public ID
+- `type` (string): Media type - "image" or "video"
+- `format` (string): File format (e.g., "jpg", "png", "mp4")
+- `fileSize` (number): File size in bytes
+
+**Error Responses:**
+- `400`: No file uploaded
+- `401`: Not authenticated
+- `500`: Upload failed
+
+**Note:** Use the returned `url`, `publicId`, and `type` in the create story endpoint.
+
+---
+
+### 43. Create Story
+
+**Method:** `POST`  
+**URL:** `/api/stories/create`  
+**Authentication:** Required
+
+**Description:**  
+Create a new story. Stories automatically expire after 24 hours. Stories must contain media (image or video). Media URLs should be obtained from the upload story media endpoint first.
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "url": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/stories/abc123.jpg",
+  "publicId": "user_uploads/user_id/stories/abc123",
+  "type": "image",
+  "format": "jpg"
+}
+```
+
+**Fields:**
+- `url` (string, required): Media URL from upload endpoint
+- `publicId` (string, required): Cloudinary public ID from upload endpoint
+- `type` (string, required): "image" or "video"
+- `format` (string, optional): File format (e.g., "jpg", "mp4")
+
+**Success Response (201):**
+```json
+{
+  "success": true,
+  "message": "Story created successfully",
+  "data": {
+    "story": {
+      "id": "story_id",
+      "userId": "user_id",
+      "user": {
+        "id": "user_id",
+        "firstName": "John",
+        "lastName": "Doe",
+        "name": "John Doe",
+        "email": "user@example.com",
+        "profileImage": "https://..."
+      },
+      "media": {
+        "url": "https://res.cloudinary.com/...",
+        "publicId": "user_uploads/user_id/stories/abc123",
+        "type": "image",
+        "format": "jpg"
+      },
+      "createdAt": "2024-01-15T10:30:00.000Z",
+      "expiresAt": "2024-01-16T10:30:00.000Z"
+    }
+  }
+}
+```
+
+**Error Responses:**
+- `400`: Missing required fields, invalid media type
+- `401`: Not authenticated
+- `500`: Failed to create story
+
+**Note:** 
+- Stories automatically expire 24 hours after creation (MongoDB TTL index)
+- Stories must contain media (image or video)
+- Media URLs should come from the `/api/stories/upload-media` endpoint
+- Expired stories are automatically deleted by MongoDB
+
+---
+
+### 44. Get User Stories
+
+**Method:** `GET`  
+**URL:** `/api/stories/user/:id`  
+**Authentication:** Not required
+
+**Description:**  
+Retrieve all active (non-expired) stories for a specific user. Only stories that haven't expired (expiresAt > now) are returned.
+
+**URL Parameters:**
+- `id` (string, required): User ID (the `_id` field from the user document)
+
+**Example Request:**
+```bash
+GET /api/stories/user/user_id_123
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "User stories retrieved successfully",
+  "data": {
+    "user": {
+      "id": "user_id",
+      "name": "John Doe",
+      "email": "user@example.com",
+      "profileImage": "https://..."
+    },
+    "stories": [
+      {
+        "id": "story_id_1",
+        "userId": "user_id",
+        "user": {
+          "id": "user_id",
+          "firstName": "John",
+          "lastName": "Doe",
+          "name": "John Doe",
+          "email": "user@example.com",
+          "profileImage": "https://..."
+        },
+        "media": {
+          "url": "https://res.cloudinary.com/...",
+          "publicId": "user_uploads/user_id/stories/abc123",
+          "type": "image",
+          "format": "jpg"
+        },
+        "createdAt": "2024-01-15T10:30:00.000Z",
+        "expiresAt": "2024-01-16T10:30:00.000Z"
+      }
+    ],
+    "count": 1
+  }
+}
+```
+
+**Response Fields:**
+- `user` (object): User information
+- `stories` (array): Array of active story objects
+- `count` (number): Number of active stories
+
+**Error Responses:**
+- `400`: Invalid user ID
+- `404`: User not found
+- `500`: Failed to retrieve user stories
+
+**Note:** 
+- Only returns active stories (expiresAt > now)
+- Results are sorted by creation date (newest first)
+- Expired stories are automatically filtered out
+- This endpoint is public (no authentication required)
+
+---
+
+### 45. Get All Friends Stories
+
+**Method:** `GET`  
+**URL:** `/api/stories/all`  
+**Authentication:** Required
+
+**Description:**  
+Retrieve all active stories from friends (and your own stories), grouped by user. Stories are grouped by user and sorted by most recent story first, similar to Instagram/Facebook stories. Only active (non-expired) stories are returned.
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+```
+
+**Example Request:**
+```bash
+GET /api/stories/all
+Authorization: Bearer YOUR_ACCESS_TOKEN
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Friends stories retrieved successfully",
+  "data": {
+    "stories": [
+      {
+        "user": {
+          "id": "user_id_1",
+          "firstName": "John",
+          "lastName": "Doe",
+          "name": "John Doe",
+          "email": "john@example.com",
+          "profileImage": "https://..."
+        },
+        "stories": [
+          {
+            "id": "story_id_1",
+            "userId": "user_id_1",
+            "media": {
+              "url": "https://res.cloudinary.com/...",
+              "publicId": "user_uploads/user_id_1/stories/abc123",
+              "type": "image",
+              "format": "jpg"
+            },
+            "createdAt": "2024-01-15T10:30:00.000Z",
+            "expiresAt": "2024-01-16T10:30:00.000Z"
+          },
+          {
+            "id": "story_id_2",
+            "userId": "user_id_1",
+            "media": {
+              "url": "https://res.cloudinary.com/...",
+              "publicId": "user_uploads/user_id_1/stories/def456",
+              "type": "video",
+              "format": "mp4"
+            },
+            "createdAt": "2024-01-15T09:00:00.000Z",
+            "expiresAt": "2024-01-16T09:00:00.000Z"
+          }
+        ]
+      },
+      {
+        "user": {
+          "id": "user_id_2",
+          "firstName": "Jane",
+          "lastName": "Smith",
+          "name": "Jane Smith",
+          "email": "jane@example.com",
+          "profileImage": "https://..."
+        },
+        "stories": [
+          {
+            "id": "story_id_3",
+            "userId": "user_id_2",
+            "media": {
+              "url": "https://res.cloudinary.com/...",
+              "publicId": "user_uploads/user_id_2/stories/ghi789",
+              "type": "image",
+              "format": "png"
+            },
+            "createdAt": "2024-01-15T08:00:00.000Z",
+            "expiresAt": "2024-01-16T08:00:00.000Z"
+          }
+        ]
+      }
+    ],
+    "count": 2,
+    "totalStories": 3
+  }
+}
+```
+
+**Response Fields:**
+- `stories` (array): Array of user objects, each containing:
+  - `user` (object): User information
+  - `stories` (array): Array of active stories for that user
+- `count` (number): Number of users with active stories
+- `totalStories` (number): Total number of active stories across all friends
+
+**Error Responses:**
+- `401`: Not authenticated
+- `500`: Failed to retrieve friends stories
+
+**Note:** 
+- Returns stories from friends list + your own stories
+- Only returns active stories (expiresAt > now)
+- Stories are grouped by user
+- Users are sorted by most recent story first (Instagram/Facebook style)
+- Stories within each user are sorted by creation date (newest first)
+- Expired stories are automatically filtered out
+- This endpoint requires authentication
+
+---
+
 ## 👥 Friend Management
 
-### 33. Send Friend Request
+### 46. Send Friend Request
 
 **Method:** `POST`  
 **URL:** `/api/friend/send/:receiverId`  
@@ -2620,7 +2969,7 @@ Authorization: Bearer <your_access_token>
 
 ---
 
-### 34. Accept Friend Request
+### 47. Accept Friend Request
 
 **Method:** `POST`  
 **URL:** `/api/friend/accept/:requestId`  
@@ -2681,7 +3030,7 @@ Authorization: Bearer <your_access_token>
 
 ---
 
-### 35. Reject Friend Request
+### 48. Reject Friend Request
 
 **Method:** `POST`  
 **URL:** `/api/friend/reject/:requestId`  
@@ -2741,7 +3090,7 @@ Authorization: Bearer <your_access_token>
 
 ---
 
-### 36. List Friends
+### 49. List Friends
 
 **Method:** `GET`  
 **URL:** `/api/friend/list`  
@@ -2801,7 +3150,7 @@ Authorization: Bearer <your_access_token>
 
 ---
 
-### 37. List Received Friend Requests
+### 50. List Received Friend Requests
 
 **Method:** `GET`  
 **URL:** `/api/friend/requests/received`  
@@ -2857,7 +3206,7 @@ Authorization: Bearer <your_access_token>
 
 ---
 
-### 38. List Sent Friend Requests
+### 51. List Sent Friend Requests
 
 **Method:** `GET`  
 **URL:** `/api/friend/requests/sent`  
@@ -2913,7 +3262,147 @@ Authorization: Bearer <your_access_token>
 
 ---
 
-### 39. Unfriend User
+### 54. Get Friend Suggestions
+
+**Method:** `GET`  
+**URL:** `/api/friend/suggestions`  
+**Authentication:** Required (Bearer Token)
+
+**Description:**  
+Get friend suggestions based on mutual friends. The system finds people who are friends with your friends (but not yet your friends) and ranks them by the number of mutual friends. If you have no friends, it returns random user suggestions.
+
+**Query Parameters:**
+- `limit` (number, optional): Maximum number of suggestions to return (default: 10)
+
+**Example Request:**
+```bash
+GET /api/friend/suggestions?limit=20
+Authorization: Bearer <your_access_token>
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Friend suggestions retrieved successfully",
+  "data": {
+    "suggestions": [
+      {
+        "user": {
+          "_id": "suggested_user_id",
+          "firstName": "Alice",
+          "lastName": "Johnson",
+          "name": "Alice Johnson",
+          "email": "alice@example.com",
+          "profileImage": "https://...",
+          "bio": "Photographer and traveler",
+          "currentCity": "San Francisco",
+          "hometown": "Seattle"
+        },
+        "mutualFriendsCount": 3,
+        "mutualFriends": [
+          {
+            "_id": "mutual_friend_1",
+            "firstName": "John",
+            "lastName": "Doe",
+            "name": "John Doe",
+            "profileImage": "https://..."
+          },
+          {
+            "_id": "mutual_friend_2",
+            "firstName": "Jane",
+            "lastName": "Smith",
+            "name": "Jane Smith",
+            "profileImage": "https://..."
+          },
+          {
+            "_id": "mutual_friend_3",
+            "firstName": "Bob",
+            "lastName": "Wilson",
+            "name": "Bob Wilson",
+            "profileImage": "https://..."
+          }
+        ]
+      },
+      {
+        "user": {
+          "_id": "suggested_user_id_2",
+          "firstName": "Charlie",
+          "lastName": "Brown",
+          "name": "Charlie Brown",
+          "email": "charlie@example.com",
+          "profileImage": "https://...",
+          "bio": "",
+          "currentCity": "New York",
+          "hometown": ""
+        },
+        "mutualFriendsCount": 2,
+        "mutualFriends": [
+          {
+            "_id": "mutual_friend_1",
+            "firstName": "John",
+            "lastName": "Doe",
+            "name": "John Doe",
+            "profileImage": "https://..."
+          },
+          {
+            "_id": "mutual_friend_2",
+            "firstName": "Jane",
+            "lastName": "Smith",
+            "name": "Jane Smith",
+            "profileImage": "https://..."
+          }
+        ]
+      }
+    ],
+    "count": 2
+  }
+}
+```
+
+**Response for Users with No Friends:**
+If you have no friends, the API returns random user suggestions:
+```json
+{
+  "success": true,
+  "message": "Friend suggestions retrieved successfully",
+  "data": {
+    "suggestions": [
+      {
+        "user": {
+          "_id": "random_user_id",
+          "firstName": "David",
+          "lastName": "Lee",
+          "name": "David Lee",
+          "email": "david@example.com",
+          "profileImage": "https://...",
+          "bio": "Software developer",
+          "currentCity": "Los Angeles",
+          "hometown": "Chicago"
+        },
+        "mutualFriends": 0,
+        "mutualFriendsList": []
+      }
+    ],
+    "count": 1
+  }
+}
+```
+
+**Error Responses:**
+- `404`: User not found
+- `500`: Failed to retrieve friend suggestions
+
+**Note:** 
+- Suggestions are sorted by number of mutual friends (most mutual friends first)
+- Users with pending friend requests (sent or received) are excluded from suggestions
+- Already friends are automatically excluded
+- Up to 3 mutual friends are shown per suggestion (sorted by relevance)
+- If you have no friends, random users are suggested instead
+
+---
+
+### 52. Unfriend User
 
 **Method:** `DELETE`  
 **URL:** `/api/friend/unfriend/:friendId`  
@@ -2950,7 +3439,7 @@ Authorization: Bearer <your_access_token>
 
 ---
 
-### 40. Cancel Sent Friend Request
+### 53. Cancel Sent Friend Request
 
 **Method:** `DELETE`  
 **URL:** `/api/friend/cancel/:requestId`  
@@ -4041,7 +4530,11 @@ curl -X DELETE https://api.sanoraindia.com/api/friend/cancel/REQUEST_ID \
 curl -X GET https://api.sanoraindia.com/api/friend/list \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 
-# 8. Unfriend a user
+# 8. Get friend suggestions
+curl -X GET "https://api.sanoraindia.com/api/friend/suggestions?limit=20" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+# 9. Unfriend a user
 curl -X DELETE https://api.sanoraindia.com/api/friend/unfriend/FRIEND_USER_ID \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
@@ -4275,6 +4768,93 @@ curl -X GET "https://api.sanoraindia.com/api/posts/user/user_id_123?page=1&limit
 - Media must be uploaded first using `/api/posts/upload-media`
 - Get posts endpoints are public (no authentication required)
 - All posts include pagination support
+
+### Create Story
+
+```bash
+# 1. Upload media for story
+ACCESS_TOKEN=$(curl -X POST https://api.sanoraindia.com/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"MyPassword123"}' \
+  | jq -r '.data.accessToken')
+
+# Upload story media
+STORY_MEDIA_RESPONSE=$(curl -X POST https://api.sanoraindia.com/api/stories/upload-media \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -F "media=@/path/to/image.jpg")
+
+# Extract media URL and publicId from response
+STORY_MEDIA_URL=$(echo $STORY_MEDIA_RESPONSE | jq -r '.data.url')
+STORY_PUBLIC_ID=$(echo $STORY_MEDIA_RESPONSE | jq -r '.data.publicId')
+STORY_MEDIA_TYPE=$(echo $STORY_MEDIA_RESPONSE | jq -r '.data.type')
+STORY_FORMAT=$(echo $STORY_MEDIA_RESPONSE | jq -r '.data.format')
+
+# 2. Create story with media
+curl -X POST https://api.sanoraindia.com/api/stories/create \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"url\": \"$STORY_MEDIA_URL\",
+    \"publicId\": \"$STORY_PUBLIC_ID\",
+    \"type\": \"$STORY_MEDIA_TYPE\",
+    \"format\": \"$STORY_FORMAT\"
+  }"
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Story created successfully",
+  "data": {
+    "story": {
+      "id": "story_id",
+      "userId": "user_id",
+      "user": {
+        "id": "user_id",
+        "firstName": "John",
+        "lastName": "Doe",
+        "name": "John Doe",
+        "email": "user@example.com",
+        "profileImage": "https://..."
+      },
+      "media": {
+        "url": "https://res.cloudinary.com/...",
+        "publicId": "user_uploads/user_id/stories/abc123",
+        "type": "image",
+        "format": "jpg"
+      },
+      "createdAt": "2024-01-15T10:30:00.000Z",
+      "expiresAt": "2024-01-16T10:30:00.000Z"
+    }
+  }
+}
+```
+
+### Get User Stories
+
+```bash
+# Get stories for a specific user
+curl -X GET "https://api.sanoraindia.com/api/stories/user/user_id_123"
+```
+
+### Get All Friends Stories
+
+```bash
+# Get all stories from friends (grouped by user)
+curl -X GET https://api.sanoraindia.com/api/stories/all \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+**Important Notes:**
+- Story creation requires authentication
+- Stories must contain media (image or video)
+- Media must be uploaded first using `/api/stories/upload-media`
+- Stories automatically expire after 24 hours (MongoDB TTL index)
+- Get user stories endpoint is public (no authentication required)
+- Get all friends stories requires authentication
+- Stories are grouped by user (Instagram/Facebook style)
+- Only active (non-expired) stories are returned
 
 ---
 
