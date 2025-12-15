@@ -94,12 +94,12 @@ const createCompany = async (req, res) => {
                 success: true,
                 message: 'Company already exists',
                 data: {
-                    company: {
-                        id: existingCompany._id,
-                        name: existingCompany.name,
-                        isCustom: existingCompany.isCustom,
-                        createdAt: existingCompany.createdAt
-                    }
+                company: {
+                    id: existingCompany._id,
+                    name: existingCompany.name,
+                    isCustom: existingCompany.isCustom,
+                    createdAt: existingCompany.createdAt
+                }
                 }
             });
         }
@@ -145,12 +145,12 @@ const createCompany = async (req, res) => {
                     success: true,
                     message: 'Company already exists',
                     data: {
-                        company: {
-                            id: existingCompany._id,
-                            name: existingCompany.name,
-                            isCustom: existingCompany.isCustom,
-                            createdAt: existingCompany.createdAt
-                        }
+                company: {
+                    id: existingCompany._id,
+                    name: existingCompany.name,
+                    isCustom: existingCompany.isCustom,
+                    createdAt: existingCompany.createdAt
+                }
                     }
                 });
             }

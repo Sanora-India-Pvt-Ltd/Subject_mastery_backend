@@ -10,7 +10,7 @@ const {
     updateProfileMedia,
     updatePersonalInfo,
     updateLocationAndDetails,
-    getProfileScore
+    searchUsers
 } = require('../controllers/userController');
 const { limitOTPRequests, limitVerifyRequests } = require('../middleware/rateLimiter');
 
@@ -18,6 +18,9 @@ const router = express.Router();
 
 // All routes require authentication
 router.use(protect);
+
+// Search users by name
+router.get('/search', searchUsers);
 
 // More specific routes first to avoid conflicts
 // API 1: Update Bio, Cover Photo, Profile Image, and Cover Image
@@ -28,9 +31,6 @@ router.put('/profile/personal-info', updatePersonalInfo);
 
 // API 3: Update currentCity, workplace, pronouns, education, relationshipStatus, hometown
 router.put('/profile/location-details', updateLocationAndDetails);
-
-// Get profile score
-router.get('/profile/score', getProfileScore);
 
 // Update profile (name, age, gender) - no verification needed (less specific, comes after)
 router.put('/profile', updateProfile);
@@ -46,6 +46,7 @@ router.delete('/alternate-phone', removeAlternatePhone);
 
 // Debug: Log all registered routes
 console.log('📋 User routes registered:');
+console.log('  GET    /api/user/search (protected)');
 console.log('  PUT    /api/user/profile (protected)');
 console.log('  POST   /api/user/phone/send-otp (protected)');
 console.log('  POST   /api/user/phone/verify-otp (protected)');
@@ -55,7 +56,6 @@ console.log('  DELETE /api/user/alternate-phone (protected)');
 console.log('  PUT    /api/user/profile/media (protected)');
 console.log('  PUT    /api/user/profile/personal-info (protected)');
 console.log('  PUT    /api/user/profile/location-details (protected)');
-console.log('  GET    /api/user/profile/score (protected)');
 
 module.exports = router;
 

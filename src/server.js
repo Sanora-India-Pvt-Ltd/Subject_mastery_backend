@@ -400,6 +400,23 @@ try {
     });
 }
 
+// Reel routes - logical clusters via contentType
+try {
+    console.log('🔄 Loading reel routes...');
+    app.use('/api/reels', require('./routes/reelRoutes'));
+    console.log('✅ Reel routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading reel routes:', error.message);
+    console.error('Stack:', error.stack);
+    app.use('/api/reels', (req, res) => {
+        res.status(500).json({
+            success: false,
+            message: 'Reel routes failed to load. Check server logs.',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    });
+}
+
 // Friend routes - for friend requests and friendships
 try {
     console.log('🔄 Loading friend routes...');
@@ -828,6 +845,10 @@ app.use((req, res) => {
     });
 });
 
+// Error handler middleware (must be last)
+const errorHandler = require('./middleware/errorhandler');
+app.use(errorHandler);
+
 const PORT = process.env.PORT || 3100;
 
 // Log all registered routes before starting server
@@ -897,14 +918,23 @@ const { initSocketServer } = require('./socket/socketServer');
     } else {
         console.log('✅ Email configuration looks good!');
     }
-    if (!process.env.REDIS_URL) {
-        console.log('⚠️  WARNING: Redis not configured. WebSocket scaling will be limited.');
-        console.log('   Set REDIS_URL environment variable for multi-server support.');
-    }
+    console.log('ℹ️  Redis disabled - using in-memory cache and presence tracking');
+    console.log('   This is suitable for single-server deployments.');
         });
     } catch (error) {
         console.error('❌ Failed to initialize Socket.IO server:', error);
         process.exit(1);
     }
 })();
+
+// ✅ Graceful shutdown: Redis connections are handled by stub (no-op)
+process.on('SIGTERM', async () => {
+    console.log('🛑 SIGTERM received, shutting down gracefully...');
+    process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+    console.log('🛑 SIGINT received, shutting down gracefully...');
+    process.exit(0);
+});
 

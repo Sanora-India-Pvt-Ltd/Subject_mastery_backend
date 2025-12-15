@@ -3,9 +3,28 @@ const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const User = require('../models/User');
 
 console.log('=== Loading Passport Configuration ===');
+console.log('NODE_ENV:', process.env.NODE_ENV || 'not set (defaults to development)');
 console.log('GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID ? 'Set' : 'Not Set');
 console.log('GOOGLE_CLIENT_SECRET:', process.env.GOOGLE_CLIENT_SECRET ? 'Set' : 'Not Set');
-console.log('GOOGLE_CALLBACK_URL:', process.env.GOOGLE_CALLBACK_URL || 'Using default');
+
+// Determine callback URL
+const callbackURL = process.env.GOOGLE_CALLBACK_URL || 
+     (process.env.NODE_ENV === 'production' && process.env.BACKEND_URL
+       ? `${process.env.BACKEND_URL}/api/auth/google/callback`
+       : process.env.NODE_ENV === 'production'
+       ? 'https://api.ulearnandearn.com/api/auth/google/callback'
+       : `http://localhost:${process.env.PORT || 3100}/api/auth/google/callback`);
+
+console.log('GOOGLE_CALLBACK_URL:', callbackURL);
+
+// Warn if misconfigured
+if (process.env.NODE_ENV === 'production' && callbackURL.includes('localhost')) {
+    console.warn('⚠️  WARNING: NODE_ENV is "production" but using localhost URL!');
+    console.warn('   This will cause DNS errors. Set BACKEND_URL or use production domain.');
+} else if (!process.env.NODE_ENV && callbackURL.includes('api.ulearnandearn.com')) {
+    console.warn('⚠️  WARNING: Using production URL without NODE_ENV=production');
+    console.warn('   Set NODE_ENV=development for local development');
+}
 
 // Only configure Google Strategy if required environment variables are present
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
@@ -14,10 +33,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     passport.use('google', new GoogleStrategy({
         clientID: process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        callbackURL: process.env.GOOGLE_CALLBACK_URL || 
-             (process.env.NODE_ENV === 'production' 
-               ? 'https://api.sanoraindia.com/api/auth/google/callback'
-               : 'http://localhost:3100/api/auth/google/callback'),
+        callbackURL: callbackURL,
         passReqToCallback: true,
         scope: ['profile', 'email']
     }, async (req, accessToken, refreshToken, profile, done) => {

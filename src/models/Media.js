@@ -4,8 +4,8 @@ const mediaSchema = new mongoose.Schema({
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true,
-        index: true // Index for faster queries
+        required: true
+        // Index removed - covered by compound index { userId: 1, createdAt: -1 }
     },
     url: {
         type: String,

@@ -19,9 +19,7 @@ router.use(protect);
 router.get('/conversations', getConversations);
 
 // Get or create a conversation with a specific user
-// Support both singular and plural forms for better API usability
 router.get('/conversation/:participantId', limitConversationRequests, getOrCreateConversation);
-router.get('/conversations/:participantId', limitConversationRequests, getOrCreateConversation);
 
 // Get messages for a conversation
 router.get('/conversation/:conversationId/messages', getMessages);

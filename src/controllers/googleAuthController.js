@@ -3,6 +3,23 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { generateAccessToken, generateRefreshToken } = require('../middleware/auth');
 
+// Maximum number of devices a user can be logged in on simultaneously
+const MAX_DEVICES = 5;
+
+// Helper function to manage device limit - removes oldest device if limit is reached
+const manageDeviceLimit = (user) => {
+    if (!user.refreshTokens) {
+        user.refreshTokens = [];
+    }
+    
+    // If we've reached the limit, remove the oldest device (sorted by createdAt)
+    if (user.refreshTokens.length >= MAX_DEVICES) {
+        // Sort by createdAt (oldest first) and remove the first one
+        user.refreshTokens.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        user.refreshTokens.shift(); // Remove the oldest device
+    }
+};
+
 // Generate JWT Token (legacy - now uses access token)
 const generateToken = (user) => {
     return generateAccessToken({
@@ -96,6 +113,7 @@ const googleLoginMobile = async (req, res) => {
                 name,
                 firstName: name.split(" ")[0],
                 lastName: name.split(" ").slice(1).join(" "),
+                gender: 'Other', // Default gender since Google doesn't provide this
                 googleId,
                 profileImage: picture,
                 isGoogleOAuth: true,
@@ -125,7 +143,10 @@ const googleLoginMobile = async (req, res) => {
             user.refreshTokens = [];
         }
 
-        // Add new refresh token to array (allows multiple devices)
+        // Manage device limit - remove oldest device if limit is reached
+        manageDeviceLimit(user);
+
+        // Add new refresh token to array (allows multiple devices, max 5)
         user.refreshTokens.push({
             token: refreshToken,
             expiryDate: expiryDate,
@@ -241,7 +262,10 @@ const googleCallback = (req, res, next) => {
                 user.refreshTokens = [];
             }
 
-            // Add new refresh token to array (allows multiple devices)
+            // Manage device limit - remove oldest device if limit is reached
+            manageDeviceLimit(user);
+
+            // Add new refresh token to array (allows multiple devices, max 5)
             user.refreshTokens.push({
                 token: refreshToken,
                 expiryDate: refreshTokenExpiry,
@@ -252,6 +276,7 @@ const googleCallback = (req, res, next) => {
             // Note: We no longer clean up tokens automatically
             // Tokens only expire when user explicitly logs out
             // This allows users to stay logged in indefinitely
+            // Maximum of 5 devices are allowed - oldest device is removed when limit is reached
 
             // Keep backward compatibility - set single token fields
             user.refreshToken = refreshToken;
@@ -420,12 +445,13 @@ const googleCallback = (req, res, next) => {
                 : 'http://localhost:5500');
         
         // Prevent redirecting to backend URL
+        // Default to localhost unless explicitly in production with BACKEND_URL set
         const backendUrl = process.env.BACKEND_URL || 
-            (process.env.NODE_ENV === 'production' 
-                ? 'https://api.sanoraindia.com' 
+            (process.env.NODE_ENV === 'production' && !process.env.BACKEND_URL
+                ? 'https://api.ulearnandearn.com' 
                 : `http://localhost:${process.env.PORT || 3100}`);
         
-        if (frontendUrl.includes('api.sanoraindia.com') || frontendUrl.includes('localhost:3100')) {
+        if (frontendUrl.includes('api.ulearnandearn.com') || frontendUrl.includes('localhost:3100')) {
             console.warn('⚠️  WARNING: FRONTEND_URL appears to be pointing to backend URL!');
             console.warn(`   Backend URL: ${backendUrl}`);
             console.warn(`   Frontend URL: ${frontendUrl}`);

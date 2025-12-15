@@ -4,20 +4,20 @@ const friendRequestSchema = new mongoose.Schema({
     sender: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true,
-        index: true
+        required: true
+        // Index removed - covered by compound indexes starting with sender
     },
     receiver: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true,
-        index: true
+        required: true
+        // Index removed - covered by compound indexes starting with receiver
     },
     status: {
         type: String,
         enum: ['pending', 'accepted', 'rejected'],
-        default: 'pending',
-        index: true
+        default: 'pending'
+        // Index removed - covered by compound indexes containing status
     }
 }, {
     timestamps: true

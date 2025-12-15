@@ -1,6 +1,6 @@
 # Sanora API Documentation
 
-**Base URL:** `https://api.sanoraindia.com`
+**Base URL:** `https://api.ulearnandearn.com`
 
 ---
 
@@ -14,8 +14,9 @@
    - [Logout](#4-logout)
    - [Get Logged-In Devices](#5-get-logged-in-devices)
    - [Upload Profile Image](#22-upload-profile-image)
-   - [Get User's MediaGet User Profile](#6-get-current-user-profile)
+   - [Get User Profile](#6-get-current-user-profile)
 3. [User Profile Management](#-user-profile-management)
+   - [Search Users](#search-users)
    - [Update Profile](#17-update-user-profile)
    - [Update Profile Media (Bio, Cover Photo, Profile Image)](#171-update-profile-media-bio-cover-photo-profile-image)
    - [Update Personal Information](#172-update-personal-information)
@@ -45,7 +46,12 @@
    - [Create Story](#43-create-story)
    - [Get User Stories](#44-get-user-stories)
    - [Get All Friends Stories](#45-get-all-friends-stories)
-8. [Friend Management](#-friend-management)
+8. [Reels Management](#-reels-management)
+   - [Upload Reel Media](#upload-reel-media)
+   - [Create Reel](#create-reel)
+   - [Get Reels by Content Type](#get-reels-by-content-type)
+   - [Get User Reels](#get-user-reels)
+9. [Friend Management](#-friend-management)
    - [Send Friend Request](#46-send-friend-request)
    - [Accept Friend Request](#47-accept-friend-request)
    - [Reject Friend Request](#48-reject-friend-request)
@@ -55,7 +61,7 @@
    - [Get Friend Suggestions](#54-get-friend-suggestions)
    - [Unfriend User](#52-unfriend-user)
    - [Cancel Sent Request](#53-cancel-sent-friend-request)
-9. [Chat/Messaging](#-chatmessaging)
+10. [Chat/Messaging](#-chatmessaging)
    - [Get All Conversations](#55-get-all-conversations)
    - [Get or Create Conversation](#56-get-or-create-conversation)
    - [Get Messages](#57-get-messages)
@@ -64,7 +70,9 @@
    - [Mark Messages as Read](#60-mark-messages-as-read)
    - [Get Unread Count](#61-get-unread-count)
    - [WebSocket Events](#websocket-events)
-10. [OTP Verification](#-otp-verification)
+11. [OTP Verification](#-otp-verification)
+   - [Send Phone OTP (Twilio)](#send-phone-otp-twilio)
+   - [Verify Phone OTP (Twilio)](#verify-phone-otp-twilio)
    - [Send OTP for Signup (Email)](#6-send-otp-for-signup-email)
    - [Verify OTP for Signup (Email)](#7-verify-otp-for-signup-email)
    - [Send Phone OTP for Signup](#8-send-phone-otp-for-signup)
@@ -72,16 +80,16 @@
    - [Send OTP for Password Reset](#10-send-otp-for-password-reset)
    - [Verify OTP for Password Reset](#11-verify-otp-for-password-reset)
    - [Reset Password](#12-reset-password)
-11. [Google OAuth](#-google-oauth)
+12. [Google OAuth](#-google-oauth)
    - [Web OAuth](#13-google-oauth-web-redirect-flow)
    - [OAuth Callback](#14-google-oauth-callback)
    - [Mobile OAuth](#15-google-oauth-mobile-androidios)
    - [Verify Google Token](#16-verify-google-token-androidiosweb)
    - [Check Email](#18-check-email-exists)
-12. [Authentication Flows](#-authentication-flows)
-13. [Error Handling](#-error-handling)
-14. [Security Features](#-security-features)
-15. [Testing Examples](#-testing-examples)
+13. [Authentication Flows](#-authentication-flows)
+14. [Error Handling](#-error-handling)
+15. [Security Features](#-security-features)
+16. [Testing Examples](#-testing-examples)
 
 ---
 
@@ -184,6 +192,7 @@ if (profile.status === 401) {
 - `accessToken`: Short-lived JWT token (1 hour) - use for API requests
 - `refreshToken`: Never expires - use to refresh access token (only invalidated on explicit logout)
 - `token`: Same as `accessToken` (included for backward compatibility)
+- **Device Limit**: Maximum of 5 devices allowed per user. When logging in on a 6th device, the oldest device is automatically logged out.
 
 **Error Responses:**
 - `400`: Missing fields, invalid gender, password too short, password mismatch, user exists, phone already registered, missing verification tokens
@@ -243,6 +252,7 @@ if (profile.status === 401) {
 - `accessToken`: Short-lived JWT token (1 hour) - use for API requests
 - `refreshToken`: Never expires - use to refresh access token (only invalidated on explicit logout)
 - `token`: Same as `accessToken` (included for backward compatibility)
+- **Device Limit**: Maximum of 5 devices allowed per user. When logging in on a 6th device, the oldest device is automatically logged out.
 
 **Error Responses:**
 - `400`: Missing fields, invalid credentials
@@ -429,6 +439,7 @@ X-Refresh-Token: your_refresh_token_here
 **Note:** 
 - Devices are sorted by most recent login first
 - Each login from a different device/browser creates a new device entry
+- **Maximum of 5 devices allowed** - when logging in on a 6th device, the oldest device is automatically logged out
 - Use the `deviceId` from this response to logout from specific devices via the logout endpoint
 
 ---
@@ -534,6 +545,151 @@ Authorization: Bearer your_access_token_here
 ## 👤 User Profile Management
 
 All user profile management endpoints require authentication. Include the access token in the `Authorization` header.
+
+### Search Users
+
+**Method:** `GET`  
+**URL:** `/api/user/search`  
+**Authentication:** Required
+
+**Description:**  
+Search for other users by their name. The search is case-insensitive and matches across firstName, lastName, and name fields. The authenticated user is automatically excluded from search results. Results are paginated and sorted alphabetically.
+
+**Query Parameters:**
+- `query` (string, required): Name to search for (searches firstName, lastName, and name fields)
+- `page` (number, optional): Page number (default: 1)
+- `limit` (number, optional): Number of users per page (default: 20)
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+```
+
+**Example Request:**
+```bash
+GET /api/user/search?query=John
+GET /api/user/search?query=John&page=1&limit=10
+```
+
+**Example using cURL:**
+```bash
+curl -X GET "https://api.ulearnandearn.com/api/user/search?query=John&page=1&limit=10" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+**Example using JavaScript:**
+```javascript
+const response = await fetch('https://api.ulearnandearn.com/api/user/search?query=John&page=1&limit=10', {
+  method: 'GET',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`
+  }
+});
+
+const result = await response.json();
+```
+
+**Success Response (200) - Users Found:**
+```json
+{
+  "success": true,
+  "message": "Found 2 user/users",
+  "data": {
+    "users": [
+      {
+        "id": "507f1f77bcf86cd799439011",
+        "firstName": "John",
+        "lastName": "Doe",
+        "name": "John Doe",
+        "profileImage": "https://res.cloudinary.com/...",
+        "bio": "Software developer",
+        "currentCity": "San Francisco, CA",
+        "hometown": "New York, NY"
+      },
+      {
+        "id": "507f1f77bcf86cd799439012",
+        "firstName": "Johnny",
+        "lastName": "Smith",
+        "name": "Johnny Smith",
+        "profileImage": "https://res.cloudinary.com/...",
+        "bio": "Photographer",
+        "currentCity": "Los Angeles, CA",
+        "hometown": "Boston, MA"
+      }
+    ],
+    "pagination": {
+      "currentPage": 1,
+      "totalPages": 1,
+      "totalUsers": 2,
+      "hasNextPage": false,
+      "hasPrevPage": false
+    }
+  }
+}
+```
+
+**Success Response (200) - No Users Found:**
+```json
+{
+  "success": true,
+  "message": "No users found",
+  "data": {
+    "users": [],
+    "pagination": {
+      "currentPage": 1,
+      "totalPages": 0,
+      "totalUsers": 0,
+      "hasNextPage": false,
+      "hasPrevPage": false
+    }
+  }
+}
+```
+
+**Error Response (400):**
+```json
+{
+  "success": false,
+  "message": "Search query is required"
+}
+```
+
+**Error Response (401):**
+```json
+{
+  "success": false,
+  "message": "Not authorized to access this route"
+}
+```
+
+**Response Fields:**
+- `users` (array): Array of user objects, each containing:
+  - `id` (string): User's database ID
+  - `firstName` (string): User's first name
+  - `lastName` (string): User's last name
+  - `name` (string): User's full name
+  - `profileImage` (string): URL of user's profile image
+  - `bio` (string): User's biography/description
+  - `currentCity` (string): User's current city
+  - `hometown` (string): User's hometown
+- `pagination` (object): Pagination information:
+  - `currentPage` (number): Current page number
+  - `totalPages` (number): Total number of pages
+  - `totalUsers` (number): Total number of users matching the search
+  - `hasNextPage` (boolean): Whether there is a next page
+  - `hasPrevPage` (boolean): Whether there is a previous page
+
+**Notes:**
+- **Case-Insensitive Search:** The search is case-insensitive and matches partial names
+- **Authentication Required:** This endpoint requires a valid access token
+- **Excludes Current User:** The authenticated user is automatically excluded from search results
+- **Privacy:** Sensitive data (password, refreshToken, email) is excluded from results
+- **Pagination:** Supports pagination with `page` and `limit` query parameters
+- **Search Fields:** Searches across firstName, lastName, and name fields
+- **Sorted Results:** Results are sorted alphabetically by name
+- **Result Limit:** Default limit is 20 users per page
+
+---
 
 ### 17. Update User Profile
 
@@ -1007,7 +1163,7 @@ Upload a cover photo for the authenticated user. The image is automatically opti
 
 **Example using cURL:**
 ```bash
-curl -X POST https://api.sanoraindia.com/api/media/cover-photo \
+curl -X POST https://api.ulearnandearn.com/api/media/cover-photo \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -F "coverPhoto=@/path/to/your/cover.jpg"
 ```
@@ -1017,7 +1173,7 @@ curl -X POST https://api.sanoraindia.com/api/media/cover-photo \
 const formData = new FormData();
 formData.append('coverPhoto', fileInput.files[0]);
 
-const response = await fetch('https://api.sanoraindia.com/api/media/cover-photo', {
+const response = await fetch('https://api.ulearnandearn.com/api/media/cover-photo', {
   method: 'POST',
   headers: {
     'Authorization': `Bearer ${accessToken}`
@@ -1375,7 +1531,7 @@ Upload images or videos to Cloudinary. Supports automatic resource type detectio
 
 **Example using cURL:**
 ```bash
-curl -X POST https://api.sanoraindia.com/api/media/upload \
+curl -X POST https://api.ulearnandearn.com/api/media/upload \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -F "media=@/path/to/your/image.jpg"
 ```
@@ -1385,7 +1541,7 @@ curl -X POST https://api.sanoraindia.com/api/media/upload \
 const formData = new FormData();
 formData.append('media', fileInput.files[0]);
 
-const response = await fetch('https://api.sanoraindia.com/api/media/upload', {
+const response = await fetch('https://api.ulearnandearn.com/api/media/upload', {
   method: 'POST',
   headers: {
     'Authorization': `Bearer ${accessToken}`
@@ -1402,7 +1558,7 @@ const file = document.querySelector('input[type="file"]').files[0];
 const formData = new FormData();
 formData.append('media', file);
 
-fetch('https://api.sanoraindia.com/api/media/upload', {
+fetch('https://api.ulearnandearn.com/api/media/upload', {
   method: 'POST',
   headers: {
     'Authorization': `Bearer ${accessToken}`
@@ -1523,7 +1679,7 @@ Upload a profile image for the authenticated user. The image is automatically op
 
 **Example using cURL:**
 ```bash
-curl -X POST https://api.sanoraindia.com/api/media/profile-image \
+curl -X POST https://api.ulearnandearn.com/api/media/profile-image \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -F "profileImage=@/path/to/your/profile.jpg"
 ```
@@ -1533,7 +1689,7 @@ curl -X POST https://api.sanoraindia.com/api/media/profile-image \
 const formData = new FormData();
 formData.append('profileImage', fileInput.files[0]);
 
-const response = await fetch('https://api.sanoraindia.com/api/media/profile-image', {
+const response = await fetch('https://api.ulearnandearn.com/api/media/profile-image', {
   method: 'POST',
   headers: {
     'Authorization': `Bearer ${accessToken}`
@@ -1739,13 +1895,13 @@ GET /api/media/my-images?page=1&limit=20
 
 **Example using cURL:**
 ```bash
-curl -X GET "https://api.sanoraindia.com/api/media/my-images?page=1&limit=20" \
+curl -X GET "https://api.ulearnandearn.com/api/media/my-images?page=1&limit=20" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 **Example using JavaScript:**
 ```javascript
-const response = await fetch('https://api.sanoraindia.com/api/media/my-images?page=1&limit=20', {
+const response = await fetch('https://api.ulearnandearn.com/api/media/my-images?page=1&limit=20', {
   method: 'GET',
   headers: {
     'Authorization': `Bearer ${accessToken}`
@@ -1866,13 +2022,13 @@ Authorization: Bearer your_access_token_here
 
 **Example using cURL:**
 ```bash
-curl -X DELETE https://api.sanoraindia.com/api/media/media_record_id_123 \
+curl -X DELETE https://api.ulearnandearn.com/api/media/media_record_id_123 \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 **Example using JavaScript:**
 ```javascript
-const response = await fetch('https://api.sanoraindia.com/api/media/media_record_id_123', {
+const response = await fetch('https://api.ulearnandearn.com/api/media/media_record_id_123', {
   method: 'DELETE',
   headers: {
     'Authorization': `Bearer ${accessToken}`
@@ -2310,7 +2466,7 @@ Authorization: Bearer your_access_token_here
 
 **Example using cURL:**
 ```bash
-curl -X POST https://api.sanoraindia.com/api/posts/upload-media \
+curl -X POST https://api.ulearnandearn.com/api/posts/upload-media \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -F "media=@/path/to/your/image.jpg"
 ```
@@ -2320,7 +2476,7 @@ curl -X POST https://api.sanoraindia.com/api/posts/upload-media \
 const formData = new FormData();
 formData.append('media', fileInput.files[0]);
 
-const response = await fetch('https://api.sanoraindia.com/api/posts/upload-media', {
+const response = await fetch('https://api.ulearnandearn.com/api/posts/upload-media', {
   method: 'POST',
   headers: {
     'Authorization': `Bearer ${accessToken}`
@@ -2727,13 +2883,13 @@ Authorization: Bearer your_access_token_here
 
 **Example using cURL:**
 ```bash
-curl -X DELETE https://api.sanoraindia.com/api/posts/post_id_123 \
+curl -X DELETE https://api.ulearnandearn.com/api/posts/post_id_123 \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 **Example using JavaScript:**
 ```javascript
-const response = await fetch('https://api.sanoraindia.com/api/posts/post_id_123', {
+const response = await fetch('https://api.ulearnandearn.com/api/posts/post_id_123', {
   method: 'DELETE',
   headers: {
     'Authorization': `Bearer ${accessToken}`
@@ -2792,7 +2948,7 @@ Authorization: Bearer your_access_token_here
 
 **Example using cURL:**
 ```bash
-curl -X POST https://api.sanoraindia.com/api/stories/upload-media \
+curl -X POST https://api.ulearnandearn.com/api/stories/upload-media \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -F "media=@/path/to/your/image.jpg"
 ```
@@ -2802,7 +2958,7 @@ curl -X POST https://api.sanoraindia.com/api/stories/upload-media \
 const formData = new FormData();
 formData.append('media', fileInput.files[0]);
 
-const response = await fetch('https://api.sanoraindia.com/api/stories/upload-media', {
+const response = await fetch('https://api.ulearnandearn.com/api/stories/upload-media', {
   method: 'POST',
   headers: {
     'Authorization': `Bearer ${accessToken}`
@@ -3105,6 +3261,263 @@ Authorization: Bearer YOUR_ACCESS_TOKEN
 - Stories within each user are sorted by creation date (newest first)
 - Expired stories are automatically filtered out
 - This endpoint requires authentication
+
+---
+
+## 🎞 Reels Management
+
+### Upload Reel Media
+
+**Method:** `POST`  
+**URL:** `/api/reels/upload-media`  
+**Authentication:** Required  
+
+**Description:** Upload a reel video to Cloudinary. Videos only.
+
+**Content-Type:** `multipart/form-data`  
+**Field:** `media` (required, video)
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "message": "Reel media uploaded successfully",
+  "data": {
+    "url": "https://res.cloudinary.com/.../reels/abc123.mp4",
+    "publicId": "user_uploads/user_id/reels/abc123",
+    "type": "video",
+    "format": "mp4",
+    "duration": 12.3,
+    "width": 1080,
+    "height": 1920,
+    "fileSize": 12345678
+  }
+}
+```
+
+**Errors:** 400 (no file or not video), 401 (unauthenticated), 500 (upload failed)
+
+---
+
+### Create Reel
+
+**Method:** `POST`  
+**URL:** `/api/reels/create`  
+**Authentication:** Required  
+
+**Description:** Create a reel. `contentType` is mandatory and defines the logical cluster.
+
+**Request Body:**
+```json
+{
+  "caption": "Quick tip",
+  "media": {
+    "url": "...",
+    "publicId": "...",
+    "type": "video",
+    "thumbnailUrl": "",
+    "format": "mp4",
+    "duration": 12.3
+  },
+  "contentType": "education",
+  "visibility": "public"
+}
+```
+
+**Notes:**
+- `contentType` (required): `education` | `fun`
+- Media must be a video from the upload endpoint
+- Visibility: `public` | `followers` | `private` (default `public`)
+
+**Success (201):** Returns the created reel with user info.  
+**Errors:** 400 (invalid contentType/media), 401 (unauthenticated), 500 (create failed)
+
+---
+
+### Get Reels by Content Type
+
+**Method:** `GET`  
+**URL:** `/api/reels`  
+**Authentication:** Not required  
+
+**Query Params:**
+- `contentType` (required): `education` | `fun`
+- `sort` (optional): `new` (default) | `engagement`
+- `page` (optional): default `1`
+- `limit` (optional): default `10`, max `50`
+
+**Description:** Fetch reels for a logical cluster using `contentType`. Pagination and per-cluster caching (Redis key `reels:{contentType}:sort:{sort}:page:{page}:limit:{limit}`).
+
+**Success (200):**
+```json
+{
+  "success": true,
+  "message": "Reels retrieved successfully",
+  "data": {
+    "reels": [
+      {
+        "id": "reel_id",
+        "userId": "user_id",
+        "user": { "id": "user_id", "firstName": "John", "lastName": "Doe", "email": "user@example.com", "profileImage": "..." },
+        "caption": "Quick tip",
+        "media": { "url": "...", "publicId": "...", "thumbnailUrl": "", "type": "video", "format": "mp4", "duration": 12.3 },
+        "contentType": "education",
+        "visibility": "public",
+        "views": 0,
+        "likeCount": 0,
+        "commentCount": 0,
+        "engagementScore": 0,
+        "createdAt": "2024-01-01T12:00:00.000Z",
+        "updatedAt": "2024-01-01T12:00:00.000Z"
+      }
+    ],
+    "pagination": {
+      "currentPage": 1,
+      "totalPages": 1,
+      "totalReels": 1,
+      "hasNextPage": false,
+      "hasPrevPage": false
+    },
+    "cluster": { "contentType": "education" }
+  }
+}
+```
+
+**Errors:** 400 (missing/invalid contentType), 500 (failed to fetch)
+
+**Performance Notes:** Single Reels system with logical clustering via `contentType`; indexed on `contentType` + `createdAt`/`engagementScore`/`views`; cache invalidated per `contentType` on new reel creation.
+
+---
+
+### Get User Reels
+
+**Method:** `GET`  
+**URL:** `/api/reels/user/:id`  
+**Authentication:** Not required
+
+**Description:**  
+Retrieve all reels by a specific user. Results are sorted by newest first and include pagination support.
+
+**URL Parameters:**
+- `id` (string, required): User ID (the `_id` field from the user document)
+
+**Query Parameters:**
+- `page` (number, optional): Page number (default: 1)
+- `limit` (number, optional): Number of reels per page (default: 10)
+
+**Example Request:**
+```bash
+GET /api/reels/user/user_id_123?page=1&limit=10
+```
+
+**Example using cURL:**
+```bash
+curl -X GET "https://api.ulearnandearn.com/api/reels/user/user_id_123?page=1&limit=10"
+```
+
+**Example using JavaScript:**
+```javascript
+const response = await fetch('https://api.ulearnandearn.com/api/reels/user/user_id_123?page=1&limit=10', {
+  method: 'GET'
+});
+
+const result = await response.json();
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "User reels retrieved successfully",
+  "data": {
+    "user": {
+      "id": "user_id",
+      "name": "John Doe",
+      "email": "user@example.com",
+      "profileImage": "https://..."
+    },
+    "reels": [
+      {
+        "id": "reel_id_1",
+        "userId": "user_id",
+        "user": {
+          "id": "user_id",
+          "firstName": "John",
+          "lastName": "Doe",
+          "name": "John Doe",
+          "email": "user@example.com",
+          "profileImage": "https://..."
+        },
+        "caption": "Quick tip",
+        "media": {
+          "url": "https://res.cloudinary.com/...",
+          "publicId": "user_uploads/user_id/reels/abc123",
+          "thumbnailUrl": "",
+          "type": "video",
+          "format": "mp4",
+          "duration": 12.3,
+          "dimensions": {
+            "width": 1080,
+            "height": 1920
+          },
+          "size": 12345678
+        },
+        "contentType": "education",
+        "visibility": "public",
+        "views": 0,
+        "likes": [],
+        "comments": [],
+        "likeCount": 0,
+        "commentCount": 0,
+        "createdAt": "2024-01-15T10:30:00.000Z",
+        "updatedAt": "2024-01-15T10:30:00.000Z"
+      }
+    ],
+    "pagination": {
+      "currentPage": 1,
+      "totalPages": 2,
+      "totalReels": 15,
+      "hasNextPage": true,
+      "hasPrevPage": false
+    }
+  }
+}
+```
+
+**Response Fields:**
+- `user` (object): User information
+- `reels` (array): Array of reel objects, each containing:
+  - `id` (string): Reel ID
+  - `userId` (string): User ID who created the reel
+  - `user` (object): User information (populated)
+  - `caption` (string): Reel caption
+  - `media` (object): Media object with video details
+  - `contentType` (string): Content type - "education" or "fun"
+  - `visibility` (string): Visibility setting - "public", "followers", or "private"
+  - `views` (number): Number of views
+  - `likes` (array): Array of like objects
+  - `comments` (array): Array of comment objects
+  - `likeCount` (number): Number of likes
+  - `commentCount` (number): Number of comments
+  - `createdAt` (string): Creation timestamp
+  - `updatedAt` (string): Last update timestamp
+- `pagination` (object): Pagination metadata
+  - `currentPage` (number): Current page number
+  - `totalPages` (number): Total number of pages
+  - `totalReels` (number): Total number of reels for the user
+  - `hasNextPage` (boolean): Whether there are more pages
+  - `hasPrevPage` (boolean): Whether there are previous pages
+
+**Error Responses:**
+- `400`: Invalid user ID
+- `404`: User not found
+- `500`: Failed to retrieve user reels
+
+**Note:** 
+- Results are sorted by creation date (newest first)
+- User information, likes, and comments are automatically populated
+- This endpoint is public (no authentication required)
+- Returns all reels for the user regardless of visibility setting
 
 ---
 
@@ -3682,21 +4095,23 @@ Authorization: Bearer <your_access_token>
 
 The chat system provides real-time messaging capabilities using WebSocket (Socket.IO) and REST API endpoints. All chat endpoints require authentication.
 
+**⚠️ Note:** Audio messages are **not supported**. The system only supports text, image, video, and file messages. Attempting to send audio messages will result in a 400 error.
+
 ### ⚠️ Important: Protocol Usage
 
 **REST API Endpoints** (for fetching data):
 - Use `https://` (or `http://` for local development)
-- Example: `https://api.sanoraindia.com/api/chat/conversations`
+- Example: `https://api.ulearnandearn.com/api/chat/conversations`
 
 **WebSocket Connection** (for real-time messaging):
 - Use `wss://` (or `ws://` for local development) - **NO `/api/chat` path**
-- Example: `wss://api.sanoraindia.com` (Socket.IO handles the path automatically)
+- Example: `wss://api.ulearnandearn.com` (Socket.IO handles the path automatically)
 
 **Do NOT use `wss://` for REST API endpoints!** Use `https://` instead.
 
 ### WebSocket Connection
 
-**Base URL:** `ws://localhost:3100` (local) or `wss://api.sanoraindia.com` (production)
+**Base URL:** `ws://localhost:3100` (local) or `wss://api.ulearnandearn.com` (production)
 
 **Connection:**
 ```javascript
@@ -3735,7 +4150,7 @@ GET /api/chat/conversations
 
 **Example using cURL:**
 ```bash
-curl -X GET "https://api.sanoraindia.com/api/chat/conversations" \
+curl -X GET "https://api.ulearnandearn.com/api/chat/conversations" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
@@ -3827,7 +4242,7 @@ GET /api/chat/conversation/507f1f77bcf86cd799439011
 
 **Example using cURL:**
 ```bash
-curl -X GET "https://api.sanoraindia.com/api/chat/conversation/507f1f77bcf86cd799439011" \
+curl -X GET "https://api.ulearnandearn.com/api/chat/conversation/507f1f77bcf86cd799439011" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
@@ -3907,7 +4322,7 @@ GET /api/chat/conversation/507f1f77bcf86cd799439011/messages?page=1&limit=50
 
 **Example using cURL:**
 ```bash
-curl -X GET "https://api.sanoraindia.com/api/chat/conversation/507f1f77bcf86cd799439011/messages?page=1&limit=50" \
+curl -X GET "https://api.ulearnandearn.com/api/chat/conversation/507f1f77bcf86cd799439011/messages?page=1&limit=50" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
@@ -3973,10 +4388,10 @@ curl -X GET "https://api.sanoraindia.com/api/chat/conversation/507f1f77bcf86cd79
   - `text` (string|null): Message text (null if media-only)
   - `media` (array): Array of media objects
     - `url` (string): Media URL
-    - `type` (string): "image" | "video" | "audio" | "file"
+    - `type` (string): "image" | "video" | "file"
     - `filename` (string|null): Original filename
     - `size` (number|null): File size in bytes
-  - `messageType` (string): "text" | "image" | "video" | "audio" | "file"
+  - `messageType` (string): "text" | "image" | "video" | "file"
   - `status` (string): "sent" | "delivered" | "read"
   - `replyTo` (object|null): Message being replied to
 - `pagination` (object): Pagination metadata
@@ -4031,7 +4446,9 @@ Content-Type: application/json
 - `conversationId` (string, required): ID of the conversation
 - `text` (string, optional): Message text (required if no media)
 - `media` (array, optional): Array of media objects (required if no text)
-- `messageType` (string, optional): "text" | "image" | "video" | "audio" | "file" (default: "text" or inferred from media)
+- `messageType` (string, optional): "text" | "image" | "video" | "file" (default: "text" or inferred from media)
+
+**⚠️ Note:** Audio messages are not supported. Attempting to send audio messages will result in a 400 error.
 - `replyTo` (string, optional): ID of message to reply to
 
 **Example Request:**
@@ -4041,7 +4458,7 @@ POST /api/chat/message
 
 **Example using cURL:**
 ```bash
-curl -X POST "https://api.sanoraindia.com/api/chat/message" \
+curl -X POST "https://api.ulearnandearn.com/api/chat/message" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -4077,7 +4494,7 @@ curl -X POST "https://api.sanoraindia.com/api/chat/message" \
 ```
 
 **Error Responses:**
-- `400`: Conversation ID required, message text or media required
+- `400`: Conversation ID required, message text or media required, audio messages are not allowed
 - `401`: Not authenticated
 - `403`: Not authorized to send message
 - `404`: Conversation not found
@@ -4088,6 +4505,7 @@ curl -X POST "https://api.sanoraindia.com/api/chat/message" \
 - Rate limited to 30 messages per minute per user
 - Message is also emitted via WebSocket to all participants
 - At least one of `text` or `media` must be provided
+- **Audio messages are disabled** - attempting to send audio will return a 400 error with message "Audio messages are not allowed"
 
 ---
 
@@ -4126,7 +4544,7 @@ DELETE /api/chat/message/507f1f77bcf86cd799439011
 
 **Example using cURL:**
 ```bash
-curl -X DELETE "https://api.sanoraindia.com/api/chat/message/507f1f77bcf86cd799439011" \
+curl -X DELETE "https://api.ulearnandearn.com/api/chat/message/507f1f77bcf86cd799439011" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"deleteForEveryone": false}'
@@ -4187,7 +4605,7 @@ POST /api/chat/messages/read
 
 **Example using cURL:**
 ```bash
-curl -X POST "https://api.sanoraindia.com/api/chat/messages/read" \
+curl -X POST "https://api.ulearnandearn.com/api/chat/messages/read" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -4242,7 +4660,7 @@ GET /api/chat/unread-count
 
 **Example using cURL:**
 ```bash
-curl -X GET "https://api.sanoraindia.com/api/chat/unread-count" \
+curl -X GET "https://api.ulearnandearn.com/api/chat/unread-count" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
@@ -4302,7 +4720,7 @@ socket.emit('send:message', {
   conversationId: 'conversation_id',
   text: 'Hello!',
   media: [], // Optional
-  messageType: 'text', // 'text' | 'image' | 'video' | 'audio' | 'file'
+  messageType: 'text', // 'text' | 'image' | 'video' | 'file' (audio not supported)
   replyTo: 'message_id' // Optional
 });
 ```
@@ -4401,10 +4819,112 @@ socket.on('error', (data) => {
 - Users can only join conversations they're participants in
 - Messages are automatically saved to database
 - Status updates: `sent` → `delivered` (if recipient online) → `read` (when viewed)
+- **Audio messages are not supported** - attempting to send audio via WebSocket will emit an error event with message "Audio messages are not allowed"
 
 ---
 
 ## 📧 OTP Verification
+
+### Twilio Phone OTP (Direct Endpoints)
+
+These endpoints are available directly at the root level for phone OTP verification using Twilio Verify service. They are separate from the signup OTP flow and can be used for general phone verification purposes.
+
+#### Send Phone OTP (Twilio)
+
+**Method:** `POST`  
+**URL:** `/send-otp`
+
+**Description:**  
+Send an OTP code to a phone number using Twilio Verify service. This endpoint uses Twilio's Verify v2 API to send SMS OTP codes.
+
+**Request Body:**
+```json
+{
+  "phone": "+1234567890"
+}
+```
+
+**Required Fields:**
+- `phone` (string): Phone number in E.164 format (e.g., +1234567890). Must start with + followed by country code and subscriber number (10-15 digits total).
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "sid": "VEXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+  "status": "pending"
+}
+```
+
+**Response Fields:**
+- `sid` (string): Twilio verification SID
+- `status` (string): Verification status (typically "pending")
+
+**Error Responses:**
+- `400`: Phone number is required, invalid phone number format
+- `500`: Twilio is not configured, connection error, authentication failed, service not found, rate limit exceeded
+
+**Note:** 
+- Phone number must be in E.164 format: +[country code][subscriber number]
+- Requires Twilio configuration: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`
+- OTP expires in 10 minutes (Twilio default)
+- Rate limited by Twilio service
+
+**Example using cURL:**
+```bash
+curl -X POST https://api.ulearnandearn.com/send-otp \
+  -H "Content-Type: application/json" \
+  -d '{"phone": "+1234567890"}'
+```
+
+---
+
+#### Verify Phone OTP (Twilio)
+
+**Method:** `POST`  
+**URL:** `/verify-otp`
+
+**Description:**  
+Verify an OTP code sent to a phone number using Twilio Verify service. This endpoint verifies the OTP code against the phone number.
+
+**Request Body:**
+```json
+{
+  "phone": "+1234567890",
+  "code": "123456"
+}
+```
+
+**Required Fields:**
+- `phone` (string): Phone number in E.164 format (e.g., +1234567890). Must match the phone number used in `/send-otp`
+- `code` (string): OTP code (4-8 digits) received via SMS
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Phone verified"
+}
+```
+
+**Error Responses:**
+- `400`: Phone and code required, invalid phone number format, invalid OTP code format, invalid or expired code
+- `500`: Twilio is not configured, connection error, authentication failed, service not found
+
+**Note:** 
+- Phone number must match the one used in `/send-otp`
+- OTP code must be 4-8 digits
+- OTP expires in 10 minutes (Twilio default)
+- Requires Twilio configuration: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`
+
+**Example using cURL:**
+```bash
+curl -X POST https://api.ulearnandearn.com/verify-otp \
+  -H "Content-Type: application/json" \
+  -d '{"phone": "+1234567890", "code": "123456"}'
+```
+
+---
 
 ### 6. Send OTP for Signup (Email)
 
@@ -4730,6 +5250,7 @@ https://your-frontend.com/auth/callback?token=ACCESS_TOKEN&name=User%20Name&emai
 - Automatically creates user account if doesn't exist (signup)
 - Logs in existing user if account exists (login)
 - Returns access token (1 hour) and refresh token (never expires)
+- **Device Limit**: Maximum of 5 devices allowed per user. When logging in on a 6th device, the oldest device is automatically logged out.
 
 **Error Responses:**
 - `400`: idToken is required
@@ -5106,27 +5627,27 @@ All endpoints return errors in this format:
 
 ```bash
 # 1. Send email OTP
-curl -X POST https://api.sanoraindia.com/api/auth/send-otp-signup \
+curl -X POST https://api.ulearnandearn.com/api/auth/send-otp-signup \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com"}'
 
 # 2. Verify email OTP (use code from email)
-curl -X POST https://api.sanoraindia.com/api/auth/verify-otp-signup \
+curl -X POST https://api.ulearnandearn.com/api/auth/verify-otp-signup \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","otp":"123456"}'
 
 # 3. Send phone OTP
-curl -X POST https://api.sanoraindia.com/api/auth/send-phone-otp-signup \
+curl -X POST https://api.ulearnandearn.com/api/auth/send-phone-otp-signup \
   -H "Content-Type: application/json" \
   -d '{"phone":"+1234567890"}'
 
 # 4. Verify phone OTP (use code from SMS)
-curl -X POST https://api.sanoraindia.com/api/auth/verify-phone-otp-signup \
+curl -X POST https://api.ulearnandearn.com/api/auth/verify-phone-otp-signup \
   -H "Content-Type: application/json" \
   -d '{"phone":"+1234567890","otp":"123456"}'
 
 # 5. Complete signup (use tokens from steps 2 and 4)
-curl -X POST https://api.sanoraindia.com/api/auth/signup \
+curl -X POST https://api.ulearnandearn.com/api/auth/signup \
   -H "Content-Type: application/json" \
   -d '{
     "email":"test@example.com",
@@ -5145,12 +5666,12 @@ curl -X POST https://api.sanoraindia.com/api/auth/signup \
 
 ```bash
 # Login with email
-curl -X POST https://api.sanoraindia.com/api/auth/login \
+curl -X POST https://api.ulearnandearn.com/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"MyPassword123"}'
 
 # Login with phone
-curl -X POST https://api.sanoraindia.com/api/auth/login \
+curl -X POST https://api.ulearnandearn.com/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"phoneNumber":"+1234567890","password":"MyPassword123"}'
 ```
@@ -5159,21 +5680,21 @@ curl -X POST https://api.sanoraindia.com/api/auth/login \
 
 ```bash
 # 1. Login to get tokens
-curl -X POST https://api.sanoraindia.com/api/auth/login \
+curl -X POST https://api.ulearnandearn.com/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"MyPassword123"}'
 
 # 2. Use access token to get profile
-curl -X GET https://api.sanoraindia.com/api/auth/profile \
+curl -X GET https://api.ulearnandearn.com/api/auth/profile \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 
 # 3. If token expires (401), refresh it
-curl -X POST https://api.sanoraindia.com/api/auth/refresh-token \
+curl -X POST https://api.ulearnandearn.com/api/auth/refresh-token \
   -H "Content-Type: application/json" \
   -d '{"refreshToken":"YOUR_REFRESH_TOKEN"}'
 
 # 4. Use new access token
-curl -X GET https://api.sanoraindia.com/api/auth/profile \
+curl -X GET https://api.ulearnandearn.com/api/auth/profile \
   -H "Authorization: Bearer NEW_ACCESS_TOKEN"
 ```
 
@@ -5181,7 +5702,7 @@ curl -X GET https://api.sanoraindia.com/api/auth/profile \
 
 ```bash
 # Update basic profile (name, dob, gender)
-curl -X PUT https://api.sanoraindia.com/api/user/profile \
+curl -X PUT https://api.ulearnandearn.com/api/user/profile \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -5192,7 +5713,7 @@ curl -X PUT https://api.sanoraindia.com/api/user/profile \
   }'
 
 # Update profile with new fields (bio, location, relationship status)
-curl -X PUT https://api.sanoraindia.com/api/user/profile \
+curl -X PUT https://api.ulearnandearn.com/api/user/profile \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -5203,7 +5724,7 @@ curl -X PUT https://api.sanoraindia.com/api/user/profile \
   }'
 
 # Update workplace
-curl -X PUT https://api.sanoraindia.com/api/user/profile \
+curl -X PUT https://api.ulearnandearn.com/api/user/profile \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -5219,7 +5740,7 @@ curl -X PUT https://api.sanoraindia.com/api/user/profile \
   }'
 
 # Update education (example: add education entries)
-curl -X PUT https://api.sanoraindia.com/api/user/profile \
+curl -X PUT https://api.ulearnandearn.com/api/user/profile \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -5248,7 +5769,7 @@ curl -X PUT https://api.sanoraindia.com/api/user/profile \
 
 ```bash
 # Update bio and cover photo
-curl -X PUT https://api.sanoraindia.com/api/user/profile/media \
+curl -X PUT https://api.ulearnandearn.com/api/user/profile/media \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -5258,7 +5779,7 @@ curl -X PUT https://api.sanoraindia.com/api/user/profile/media \
   }'
 
 # Update only bio
-curl -X PUT https://api.sanoraindia.com/api/user/profile/media \
+curl -X PUT https://api.ulearnandearn.com/api/user/profile/media \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -5270,7 +5791,7 @@ curl -X PUT https://api.sanoraindia.com/api/user/profile/media \
 
 ```bash
 # Update name, gender, and date of birth
-curl -X PUT https://api.sanoraindia.com/api/user/profile/personal-info \
+curl -X PUT https://api.ulearnandearn.com/api/user/profile/personal-info \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -5281,7 +5802,7 @@ curl -X PUT https://api.sanoraindia.com/api/user/profile/personal-info \
   }'
 
 # Update phone numbers (no OTP required via this endpoint)
-curl -X PUT https://api.sanoraindia.com/api/user/profile/personal-info \
+curl -X PUT https://api.ulearnandearn.com/api/user/profile/personal-info \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -5294,7 +5815,7 @@ curl -X PUT https://api.sanoraindia.com/api/user/profile/personal-info \
 
 ```bash
 # Update location, pronouns, and relationship status
-curl -X PUT https://api.sanoraindia.com/api/user/profile/location-details \
+curl -X PUT https://api.ulearnandearn.com/api/user/profile/location-details \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -5305,7 +5826,7 @@ curl -X PUT https://api.sanoraindia.com/api/user/profile/location-details \
   }'
 
 # Update workplace
-curl -X PUT https://api.sanoraindia.com/api/user/profile/location-details \
+curl -X PUT https://api.ulearnandearn.com/api/user/profile/location-details \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -5321,7 +5842,7 @@ curl -X PUT https://api.sanoraindia.com/api/user/profile/location-details \
   }'
 
 # Update education
-curl -X PUT https://api.sanoraindia.com/api/user/profile/location-details \
+curl -X PUT https://api.ulearnandearn.com/api/user/profile/location-details \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -5342,13 +5863,13 @@ curl -X PUT https://api.sanoraindia.com/api/user/profile/location-details \
 
 ```bash
 # 1. Send OTP for phone update
-curl -X POST https://api.sanoraindia.com/api/user/phone/send-otp \
+curl -X POST https://api.ulearnandearn.com/api/user/phone/send-otp \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"phoneNumber": "+1234567890"}'
 
 # 2. Verify OTP and update phone
-curl -X POST https://api.sanoraindia.com/api/user/phone/verify-otp \
+curl -X POST https://api.ulearnandearn.com/api/user/phone/verify-otp \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -5361,13 +5882,13 @@ curl -X POST https://api.sanoraindia.com/api/user/phone/verify-otp \
 
 ```bash
 # 1. Send OTP for alternate phone
-curl -X POST https://api.sanoraindia.com/api/user/alternate-phone/send-otp \
+curl -X POST https://api.ulearnandearn.com/api/user/alternate-phone/send-otp \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"alternatePhoneNumber": "+1987654321"}'
 
 # 2. Verify OTP and update alternate phone
-curl -X POST https://api.sanoraindia.com/api/user/alternate-phone/verify-otp \
+curl -X POST https://api.ulearnandearn.com/api/user/alternate-phone/verify-otp \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -5376,14 +5897,14 @@ curl -X POST https://api.sanoraindia.com/api/user/alternate-phone/verify-otp \
   }'
 
 # 3. Remove alternate phone (optional)
-curl -X DELETE https://api.sanoraindia.com/api/user/alternate-phone \
+curl -X DELETE https://api.ulearnandearn.com/api/user/alternate-phone \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 ### Refresh Token
 
 ```bash
-curl -X POST https://api.sanoraindia.com/api/auth/refresh-token \
+curl -X POST https://api.ulearnandearn.com/api/auth/refresh-token \
   -H "Content-Type: application/json" \
   -d '{"refreshToken":"YOUR_REFRESH_TOKEN"}'
 ```
@@ -5391,7 +5912,7 @@ curl -X POST https://api.sanoraindia.com/api/auth/refresh-token \
 ### Logout
 
 ```bash
-curl -X POST https://api.sanoraindia.com/api/auth/logout \
+curl -X POST https://api.ulearnandearn.com/api/auth/logout \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
@@ -5399,17 +5920,17 @@ curl -X POST https://api.sanoraindia.com/api/auth/logout \
 
 ```bash
 # 1. Send OTP
-curl -X POST https://api.sanoraindia.com/api/auth/forgot-password/send-otp \
+curl -X POST https://api.ulearnandearn.com/api/auth/forgot-password/send-otp \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com"}'
 
 # 2. Verify OTP
-curl -X POST https://api.sanoraindia.com/api/auth/forgot-password/verify-otp \
+curl -X POST https://api.ulearnandearn.com/api/auth/forgot-password/verify-otp \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","otp":"123456"}'
 
 # 3. Reset password
-curl -X POST https://api.sanoraindia.com/api/auth/forgot-password/reset \
+curl -X POST https://api.ulearnandearn.com/api/auth/forgot-password/reset \
   -H "Content-Type: application/json" \
   -d '{
     "verificationToken":"TOKEN_FROM_STEP_2",
@@ -5421,48 +5942,60 @@ curl -X POST https://api.sanoraindia.com/api/auth/forgot-password/reset \
 ### Google Token Verification
 
 ```bash
-curl -X POST https://api.sanoraindia.com/api/auth/verify-google-token \
+curl -X POST https://api.ulearnandearn.com/api/auth/verify-google-token \
   -H "Content-Type: application/json" \
   -d '{"token":"GOOGLE_ID_TOKEN"}'
+```
+
+### Search Users
+
+```bash
+# Search for users by name
+curl -X GET "https://api.ulearnandearn.com/api/user/search?query=John" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+# Search with pagination
+curl -X GET "https://api.ulearnandearn.com/api/user/search?query=John&page=1&limit=10" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 ### Friend Management
 
 ```bash
 # 1. Send friend request
-curl -X POST https://api.sanoraindia.com/api/friend/send/RECEIVER_USER_ID \
+curl -X POST https://api.ulearnandearn.com/api/friend/send/RECEIVER_USER_ID \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 
 # 2. List received friend requests (requests sent to you)
-curl -X GET https://api.sanoraindia.com/api/friend/requests/received \
+curl -X GET https://api.ulearnandearn.com/api/friend/requests/received \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 
 # 3. Accept friend request
-curl -X POST https://api.sanoraindia.com/api/friend/accept/REQUEST_ID \
+curl -X POST https://api.ulearnandearn.com/api/friend/accept/REQUEST_ID \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 
 # 4. Reject friend request (alternative to accept)
-curl -X POST https://api.sanoraindia.com/api/friend/reject/REQUEST_ID \
+curl -X POST https://api.ulearnandearn.com/api/friend/reject/REQUEST_ID \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 
 # 5. List sent friend requests (requests you sent)
-curl -X GET https://api.sanoraindia.com/api/friend/requests/sent \
+curl -X GET https://api.ulearnandearn.com/api/friend/requests/sent \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 
 # 6. Cancel sent friend request
-curl -X DELETE https://api.sanoraindia.com/api/friend/cancel/REQUEST_ID \
+curl -X DELETE https://api.ulearnandearn.com/api/friend/cancel/REQUEST_ID \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 
 # 7. List all friends
-curl -X GET https://api.sanoraindia.com/api/friend/list \
+curl -X GET https://api.ulearnandearn.com/api/friend/list \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 
 # 8. Get friend suggestions
-curl -X GET "https://api.sanoraindia.com/api/friend/suggestions?limit=20" \
+curl -X GET "https://api.ulearnandearn.com/api/friend/suggestions?limit=20" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 
 # 9. Unfriend a user
-curl -X DELETE https://api.sanoraindia.com/api/friend/unfriend/FRIEND_USER_ID \
+curl -X DELETE https://api.ulearnandearn.com/api/friend/unfriend/FRIEND_USER_ID \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
@@ -5470,19 +6003,19 @@ curl -X DELETE https://api.sanoraindia.com/api/friend/unfriend/FRIEND_USER_ID \
 
 ```bash
 # User A sends friend request to User B
-curl -X POST https://api.sanoraindia.com/api/friend/send/USER_B_ID \
+curl -X POST https://api.ulearnandearn.com/api/friend/send/USER_B_ID \
   -H "Authorization: Bearer USER_A_ACCESS_TOKEN"
 
 # User B checks received requests
-curl -X GET https://api.sanoraindia.com/api/friend/requests/received \
+curl -X GET https://api.ulearnandearn.com/api/friend/requests/received \
   -H "Authorization: Bearer USER_B_ACCESS_TOKEN"
 
 # User B accepts the request
-curl -X POST https://api.sanoraindia.com/api/friend/accept/REQUEST_ID \
+curl -X POST https://api.ulearnandearn.com/api/friend/accept/REQUEST_ID \
   -H "Authorization: Bearer USER_B_ACCESS_TOKEN"
 
 # Both users can now see each other in friends list
-curl -X GET https://api.sanoraindia.com/api/friend/list \
+curl -X GET https://api.ulearnandearn.com/api/friend/list \
   -H "Authorization: Bearer USER_A_ACCESS_TOKEN"
 ```
 
@@ -5494,13 +6027,13 @@ curl -X GET https://api.sanoraindia.com/api/friend/list \
 
 ```bash
 # 1. Login to get access token
-ACCESS_TOKEN=$(curl -X POST https://api.sanoraindia.com/api/auth/login \
+ACCESS_TOKEN=$(curl -X POST https://api.ulearnandearn.com/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"MyPassword123"}' \
   | jq -r '.data.accessToken')
 
 # 2. Upload profile image
-curl -X POST https://api.sanoraindia.com/api/media/profile-image \
+curl -X POST https://api.ulearnandearn.com/api/media/profile-image \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -F "profileImage=@/path/to/profile.jpg"
 ```
@@ -5528,7 +6061,7 @@ curl -X POST https://api.sanoraindia.com/api/media/profile-image \
 
 ```bash
 # Upload an image or video file
-curl -X POST https://api.sanoraindia.com/api/media/upload \
+curl -X POST https://api.ulearnandearn.com/api/media/upload \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -F "media=@/path/to/your/file.jpg"
 ```
@@ -5557,7 +6090,7 @@ curl -X POST https://api.sanoraindia.com/api/media/upload \
 
 ```bash
 # Get list of all uploaded media files
-curl -X GET https://api.sanoraindia.com/api/media/my-media \
+curl -X GET https://api.ulearnandearn.com/api/media/my-media \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 ```
 
@@ -5586,7 +6119,7 @@ curl -X GET https://api.sanoraindia.com/api/media/my-media \
 
 ```bash
 # Delete a specific media file (use ID from GET /api/media/my-media response)
-curl -X DELETE https://api.sanoraindia.com/api/media/MEDIA_ID \
+curl -X DELETE https://api.ulearnandearn.com/api/media/MEDIA_ID \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 ```
 
@@ -5609,13 +6142,13 @@ curl -X DELETE https://api.sanoraindia.com/api/media/MEDIA_ID \
 
 ```bash
 # 1. Upload media for post (optional - can create text-only posts)
-ACCESS_TOKEN=$(curl -X POST https://api.sanoraindia.com/api/auth/login \
+ACCESS_TOKEN=$(curl -X POST https://api.ulearnandearn.com/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"MyPassword123"}' \
   | jq -r '.data.accessToken')
 
 # Upload media
-MEDIA_RESPONSE=$(curl -X POST https://api.sanoraindia.com/api/posts/upload-media \
+MEDIA_RESPONSE=$(curl -X POST https://api.ulearnandearn.com/api/posts/upload-media \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -F "media=@/path/to/image.jpg")
 
@@ -5625,7 +6158,7 @@ PUBLIC_ID=$(echo $MEDIA_RESPONSE | jq -r '.data.publicId')
 MEDIA_TYPE=$(echo $MEDIA_RESPONSE | jq -r '.data.type')
 
 # 2. Create post with media
-curl -X POST https://api.sanoraindia.com/api/posts/create \
+curl -X POST https://api.ulearnandearn.com/api/posts/create \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{
@@ -5638,7 +6171,7 @@ curl -X POST https://api.sanoraindia.com/api/posts/create \
   }"
 
 # Or create text-only post
-curl -X POST https://api.sanoraindia.com/api/posts/create \
+curl -X POST https://api.ulearnandearn.com/api/posts/create \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -5679,14 +6212,14 @@ curl -X POST https://api.sanoraindia.com/api/posts/create \
 
 ```bash
 # Get all posts (feed) with pagination
-curl -X GET "https://api.sanoraindia.com/api/posts/all?page=1&limit=10"
+curl -X GET "https://api.ulearnandearn.com/api/posts/all?page=1&limit=10"
 ```
 
 ### Get User Posts
 
 ```bash
 # Get posts by specific user
-curl -X GET "https://api.sanoraindia.com/api/posts/user/user_id_123?page=1&limit=10"
+curl -X GET "https://api.ulearnandearn.com/api/posts/user/user_id_123?page=1&limit=10"
 ```
 
 **Important Notes:**
@@ -5696,17 +6229,32 @@ curl -X GET "https://api.sanoraindia.com/api/posts/user/user_id_123?page=1&limit
 - Get posts endpoints are public (no authentication required)
 - All posts include pagination support
 
+### Get User Reels
+
+```bash
+# Get reels by specific user
+curl -X GET "https://api.ulearnandearn.com/api/reels/user/user_id_123?page=1&limit=10"
+```
+
+**Important Notes:**
+- Reel creation requires authentication
+- Reels must contain video media
+- Media must be uploaded first using `/api/reels/upload-media`
+- Get user reels endpoint is public (no authentication required)
+- All reels include pagination support
+- Returns all reels for the user regardless of visibility setting
+
 ### Create Story
 
 ```bash
 # 1. Upload media for story
-ACCESS_TOKEN=$(curl -X POST https://api.sanoraindia.com/api/auth/login \
+ACCESS_TOKEN=$(curl -X POST https://api.ulearnandearn.com/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"MyPassword123"}' \
   | jq -r '.data.accessToken')
 
 # Upload story media
-STORY_MEDIA_RESPONSE=$(curl -X POST https://api.sanoraindia.com/api/stories/upload-media \
+STORY_MEDIA_RESPONSE=$(curl -X POST https://api.ulearnandearn.com/api/stories/upload-media \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -F "media=@/path/to/image.jpg")
 
@@ -5717,7 +6265,7 @@ STORY_MEDIA_TYPE=$(echo $STORY_MEDIA_RESPONSE | jq -r '.data.type')
 STORY_FORMAT=$(echo $STORY_MEDIA_RESPONSE | jq -r '.data.format')
 
 # 2. Create story with media
-curl -X POST https://api.sanoraindia.com/api/stories/create \
+curl -X POST https://api.ulearnandearn.com/api/stories/create \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{
@@ -5762,14 +6310,14 @@ curl -X POST https://api.sanoraindia.com/api/stories/create \
 
 ```bash
 # Get stories for a specific user
-curl -X GET "https://api.sanoraindia.com/api/stories/user/user_id_123"
+curl -X GET "https://api.ulearnandearn.com/api/stories/user/user_id_123"
 ```
 
 ### Get All Friends Stories
 
 ```bash
 # Get all stories from friends (grouped by user)
-curl -X GET https://api.sanoraindia.com/api/stories/all \
+curl -X GET https://api.ulearnandearn.com/api/stories/all \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
@@ -5787,6 +6335,44 @@ curl -X GET https://api.sanoraindia.com/api/stories/all \
 
 
 ## 📚 Additional Notes
+
+### Debug Endpoints
+
+#### Get All Registered Routes
+
+**Method:** `GET`  
+**URL:** `/api/debug/routes`
+
+**Description:**  
+Returns a list of all registered API routes. Useful for debugging and discovering available endpoints.
+
+**Example Request:**
+```bash
+GET /api/debug/routes
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Registered routes",
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/api/auth/signup"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/profile"
+    }
+  ],
+  "total": 50
+}
+```
+
+**Note:** This endpoint is available for debugging purposes and may be disabled in production.
+
+---
 
 ### General
 
@@ -6012,4 +6598,4 @@ The following endpoints provide more focused ways to update specific profile inf
 
 ---
 
-**Last Updated:** 2024
+**Last Updated:** January 2025

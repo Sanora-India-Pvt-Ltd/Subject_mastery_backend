@@ -3,14 +3,12 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Message = require('../models/Message');
 const Conversation = require('../models/Conversation');
-const { setUserOnline, setUserOffline, isUserOnline } = require('../config/redis');
-const { initRedis, getRedisSubscriber, getRedisPublisher } = require('../config/redis');
+const { setUserOnline, setUserOffline, isUserOnline, getRedisSubscriber, getRedisPublisher, waitForRedisReady } = require('../config/redisStub');
 
 let io = null;
 
 const initSocketServer = async (httpServer) => {
-    // Initialize Redis first and wait for connections
-    await initRedis();
+    // Wait for Redis connections to be ready (if Redis is configured)
     const redisSubscriber = getRedisSubscriber();
     const redisPublisher = getRedisPublisher();
 
@@ -24,32 +22,8 @@ const initSocketServer = async (httpServer) => {
         transports: ['websocket', 'polling']
     });
 
-    // Use Redis adapter for scaling (if Redis is available)
-    // CRITICAL: Only initialize adapter AFTER Redis connections are established and ready
-    // Socket.IO adapter calls psubscribe() immediately, which requires an open connection
-    // initRedis() now waits for connections to be ready before returning
-    if (redisSubscriber && redisPublisher) {
-        try {
-            // Verify connections are ready (should be ready after await initRedis())
-            const subscriberStatus = redisSubscriber.status;
-            const publisherStatus = redisPublisher.status;
-            
-            if (subscriberStatus === 'ready' && publisherStatus === 'ready') {
-                const { createAdapter } = require('@socket.io/redis-adapter');
-                io.adapter(createAdapter(redisPublisher, redisSubscriber));
-                console.log('✅ Socket.IO Redis adapter initialized');
-            } else {
-                console.warn('⚠️  Redis connections not ready - using in-memory adapter');
-                console.warn(`   Subscriber status: ${subscriberStatus}, Publisher status: ${publisherStatus}`);
-                console.warn('   This may happen if Redis is not available or connection failed');
-            }
-        } catch (error) {
-            console.warn('⚠️  Redis adapter not available, using in-memory adapter');
-            console.warn('   Error:', error.message);
-        }
-    } else {
-        console.log('ℹ️  Redis not configured - using in-memory adapter (single server only)');
-    }
+    // Redis is disabled - using in-memory adapter only
+    console.log('ℹ️  Using in-memory Socket.IO adapter (single server only)');
 
     // Socket authentication middleware
     io.use(async (socket, next) => {
@@ -79,12 +53,12 @@ const initSocketServer = async (httpServer) => {
         }
     });
 
-    // Connection handling
+    // ✅ Socket.io Presence Logic (Correct Pattern)
     io.on('connection', async (socket) => {
         const userId = socket.userId;
         console.log(`✅ User connected: ${userId}`);
 
-        // Set user online
+        // Set user online in Redis
         await setUserOnline(userId);
 
         // Join user's personal room
@@ -146,6 +120,11 @@ const initSocketServer = async (httpServer) => {
 
                 if (!isParticipant) {
                     return socket.emit('error', { message: 'Not authorized to send message' });
+                }
+
+                // Reject audio messages
+                if (messageType === 'audio' || (media && media.some(m => m.type === 'audio'))) {
+                    return socket.emit('error', { message: 'Audio messages are not allowed' });
                 }
 
                 // Create message
@@ -272,6 +251,7 @@ const initSocketServer = async (httpServer) => {
         // Handle disconnect
         socket.on('disconnect', async () => {
             console.log(`❌ User disconnected: ${userId}`);
+            // Remove from online status and set last seen
             await setUserOffline(userId);
             socket.broadcast.emit('user:offline', { userId });
         });

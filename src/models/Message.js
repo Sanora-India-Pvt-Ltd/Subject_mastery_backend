@@ -4,14 +4,14 @@ const messageSchema = new mongoose.Schema({
     conversationId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Conversation',
-        required: true,
-        index: true
+        required: true
+        // Index removed - covered by compound index { conversationId: 1, createdAt: -1 }
     },
     senderId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true,
-        index: true
+        required: true
+        // Index removed - covered by index { senderId: 1 }
     },
     text: {
         type: String,
@@ -24,7 +24,7 @@ const messageSchema = new mongoose.Schema({
         },
         type: {
             type: String,
-            enum: ['image', 'video', 'audio', 'file'],
+            enum: ['image', 'video', 'file'],
             required: true
         },
         filename: {
@@ -38,14 +38,14 @@ const messageSchema = new mongoose.Schema({
     }],
     messageType: {
         type: String,
-        enum: ['text', 'image', 'video', 'audio', 'file'],
+        enum: ['text', 'image', 'video', 'file'],
         default: 'text'
     },
     status: {
         type: String,
         enum: ['sent', 'delivered', 'read'],
-        default: 'sent',
-        index: true
+        default: 'sent'
+        // Index removed - covered by index { status: 1 }
     },
     replyTo: {
         type: mongoose.Schema.Types.ObjectId,

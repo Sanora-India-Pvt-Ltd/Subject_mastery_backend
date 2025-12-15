@@ -2,7 +2,7 @@ const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const User = require('../models/User');
 const { getIO } = require('../socket/socketServer');
-const { isUserOnline, getUserLastSeen } = require('../config/redis');
+const { isUserOnline, getUserLastSeen } = require('../config/redisStub');
 
 // Get all conversations for a user
 const getConversations = async (req, res) => {
@@ -243,6 +243,14 @@ const sendMessage = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: 'Message text or media is required'
+            });
+        }
+
+        // Reject audio messages
+        if (messageType === 'audio' || (media && media.some(m => m.type === 'audio'))) {
+            return res.status(400).json({
+                success: false,
+                message: 'Audio messages are not allowed'
             });
         }
 

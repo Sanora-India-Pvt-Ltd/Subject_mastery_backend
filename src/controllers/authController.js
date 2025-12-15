@@ -5,6 +5,23 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const { generateToken, generateAccessToken, generateRefreshToken } = require('../middleware/auth');
 
+// Maximum number of devices a user can be logged in on simultaneously
+const MAX_DEVICES = 5;
+
+// Helper function to manage device limit - removes oldest device if limit is reached
+const manageDeviceLimit = (user) => {
+    if (!user.refreshTokens) {
+        user.refreshTokens = [];
+    }
+    
+    // If we've reached the limit, remove the oldest device (sorted by createdAt)
+    if (user.refreshTokens.length >= MAX_DEVICES) {
+        // Sort by createdAt (oldest first) and remove the first one
+        user.refreshTokens.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        user.refreshTokens.shift(); // Remove the oldest device
+    }
+};
+
 // User Signup (with OTP verification)
 const signup = async (req, res) => {
     try {
@@ -165,7 +182,10 @@ const signup = async (req, res) => {
             user.refreshTokens = [];
         }
 
-        // Add new refresh token to array (allows multiple devices)
+        // Manage device limit - remove oldest device if limit is reached
+        manageDeviceLimit(user);
+
+        // Add new refresh token to array (allows multiple devices, max 5)
         user.refreshTokens.push({
             token: refreshToken,
             expiryDate: refreshTokenExpiry,
@@ -176,6 +196,7 @@ const signup = async (req, res) => {
         // Note: We no longer clean up tokens automatically
         // Tokens only expire when user explicitly logs out
         // This allows users to stay logged in indefinitely
+        // Maximum of 5 devices are allowed - oldest device is removed when limit is reached
 
         // Keep backward compatibility - set single token fields
         user.refreshToken = refreshToken;
@@ -260,7 +281,10 @@ const login = async (req, res) => {
             user.refreshTokens = [];
         }
 
-        // Add new refresh token to array (allows multiple devices)
+        // Manage device limit - remove oldest device if limit is reached
+        manageDeviceLimit(user);
+
+        // Add new refresh token to array (allows multiple devices, max 5)
         user.refreshTokens.push({
             token: refreshToken,
             expiryDate: refreshTokenExpiry,
@@ -271,6 +295,7 @@ const login = async (req, res) => {
         // Note: We no longer clean up tokens automatically
         // Tokens only expire when user explicitly logs out
         // This allows users to stay logged in indefinitely
+        // Maximum of 5 devices are allowed - oldest device is removed when limit is reached
 
         // Keep backward compatibility - set single token fields
         user.refreshToken = refreshToken;
@@ -1107,6 +1132,7 @@ const updateProfile = async (req, res) => {
                 const processedWork = {
                     company: company._id, // Store company ObjectID reference
                     position: work.position,
+                    description: work.description ? work.description.trim() : '',
                     startDate: new Date(work.startDate),
                     endDate: work.endDate ? new Date(work.endDate) : null,
                     isCurrent: work.isCurrent || false

@@ -89,6 +89,11 @@ const userSchema = new mongoose.Schema({
             type: String,
             required: true
         },
+        description: {
+            type: String,
+            trim: true,
+            default: ''
+        },
         startDate: {
             type: Date,
             required: true
