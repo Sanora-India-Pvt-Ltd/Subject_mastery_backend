@@ -7,13 +7,31 @@ const { transcodeVideo, isVideo, cleanupFile } = require('../services/videoTrans
 const fs = require('fs').promises;
 const { Report, REPORT_REASONS } = require('../models/Report');
 
-// Helper function to limit comments to 15 most recent
+// Helper function to limit comments to 15 most recent and format with user info
 const limitComments = (comments) => {
     if (!comments || !Array.isArray(comments)) return [];
     // Sort by createdAt descending (newest first) and take first 15
     return comments
         .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-        .slice(0, 15);
+        .slice(0, 15)
+        .map(comment => {
+            const commentUserId = comment.userId._id ? comment.userId._id.toString() : comment.userId.toString();
+            const commentUserInfo = comment.userId._id ? {
+                id: comment.userId._id.toString(),
+                firstName: comment.userId.firstName,
+                lastName: comment.userId.lastName,
+                name: comment.userId.name,
+                profileImage: comment.userId.profileImage
+            } : null;
+
+            return {
+                id: comment._id.toString(),
+                userId: commentUserId,
+                user: commentUserInfo,
+                text: comment.text,
+                createdAt: comment.createdAt
+            };
+        });
 };
 
 // Upload video for reels
@@ -629,6 +647,7 @@ const toggleLikeReel = async (req, res) => {
 
         // Populate for response
         await reel.populate('userId', 'firstName lastName name email profileImage');
+        await reel.populate('comments.userId', 'firstName lastName name profileImage');
 
         // Extract userId as string
         const userIdString = reel.userId._id ? reel.userId._id.toString() : reel.userId.toString();
