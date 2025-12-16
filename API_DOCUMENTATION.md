@@ -42,7 +42,8 @@
    - [Get All Posts](#32-get-all-posts)
    - [Get My Posts](#33-get-my-posts)
    - [Get User Posts](#34-get-user-posts)
-   - [Delete Post](#35-delete-post)
+   - [Like/Unlike Post](#35-likeunlike-post)
+   - [Delete Post](#36-delete-post)
 7. [Stories Management](#-stories-management)
    - [Upload Story Media](#42-upload-story-media)
    - [Create Story](#43-create-story)
@@ -53,6 +54,7 @@
    - [Create Reel](#create-reel)
    - [Get Reels by Content Type](#get-reels-by-content-type)
    - [Get User Reels](#get-user-reels)
+   - [Like/Unlike Reel](#likeunlike-reel)
 9. [Friend Management](#-friend-management)
    - [Send Friend Request](#46-send-friend-request)
    - [Accept Friend Request](#47-accept-friend-request)
@@ -3207,6 +3209,110 @@ GET /api/posts/user/user_id_123?page=1&limit=10
 
 ---
 
+### 35. Like/Unlike Post
+
+**Method:** `POST`  
+**URL:** `/api/posts/:id/like`  
+**Authentication:** Required (Bearer Token)
+
+**Description:**  
+Toggle like on a post. If the user hasn't liked the post, it adds a like. If the user has already liked the post, it removes the like (unlike). The like count is automatically updated.
+
+**URL Parameters:**
+- `id` (string, required): Post ID (the `_id` field from the post document)
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+```
+
+**Example using cURL:**
+```bash
+curl -X POST https://api.ulearnandearn.com/api/posts/post_id_123/like \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+**Example using JavaScript:**
+```javascript
+const response = await fetch('https://api.ulearnandearn.com/api/posts/post_id_123/like', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`
+  }
+});
+
+const result = await response.json();
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Post liked successfully",
+  "data": {
+    "post": {
+      "id": "post_id_123",
+      "userId": "user_id",
+      "user": {
+        "id": "user_id",
+        "firstName": "John",
+        "lastName": "Doe",
+        "name": "John Doe",
+        "email": "user@example.com",
+        "profileImage": "https://..."
+      },
+      "caption": "Check out this amazing sunset! 🌅",
+      "media": [
+        {
+          "url": "https://res.cloudinary.com/...",
+          "publicId": "user_uploads/user_id/posts/abc123",
+          "type": "image",
+          "format": "jpg"
+        }
+      ],
+      "likes": [
+        {
+          "userId": {
+            "id": "current_user_id",
+            "firstName": "Jane",
+            "lastName": "Smith",
+            "name": "Jane Smith",
+            "profileImage": "https://..."
+          },
+          "createdAt": "2024-01-15T10:35:00.000Z"
+        }
+      ],
+      "comments": [],
+      "likeCount": 1,
+      "commentCount": 0,
+      "createdAt": "2024-01-15T10:30:00.000Z",
+      "updatedAt": "2024-01-15T10:35:00.000Z"
+    },
+    "action": "liked",
+    "isLiked": true
+  }
+}
+```
+
+**Response Fields:**
+- `post` (object): Updated post object with current like count
+- `action` (string): Action performed - "liked" or "unliked"
+- `isLiked` (boolean): Whether the current user has liked the post after this action
+
+**Error Responses:**
+- `400`: Invalid post ID
+- `401`: Not authenticated
+- `404`: Post not found
+- `500`: Failed to toggle like on post
+
+**Note:** 
+- This is a toggle endpoint - calling it multiple times will alternate between liked and unliked states
+- First call adds a like, second call removes it, third call adds it again, etc.
+- The `likeCount` is automatically calculated from the `likes` array length
+- User information in likes is automatically populated
+
+---
+
 ### 36. Delete Post
 
 **Method:** `DELETE`  
@@ -3861,6 +3967,118 @@ const result = await response.json();
 - User information, likes, and comments are automatically populated
 - This endpoint is public (no authentication required)
 - Returns all reels for the user regardless of visibility setting
+
+---
+
+### Like/Unlike Reel
+
+**Method:** `POST`  
+**URL:** `/api/reels/:id/like`  
+**Authentication:** Required (Bearer Token)
+
+**Description:**  
+Toggle like on a reel. If the user hasn't liked the reel, it adds a like. If the user has already liked the reel, it removes the like (unlike). The like count is automatically updated.
+
+**URL Parameters:**
+- `id` (string, required): Reel ID (the `_id` field from the reel document)
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+```
+
+**Example using cURL:**
+```bash
+curl -X POST https://api.ulearnandearn.com/api/reels/reel_id_123/like \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+**Example using JavaScript:**
+```javascript
+const response = await fetch('https://api.ulearnandearn.com/api/reels/reel_id_123/like', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`
+  }
+});
+
+const result = await response.json();
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Reel liked successfully",
+  "data": {
+    "reel": {
+      "id": "reel_id_123",
+      "userId": "user_id",
+      "user": {
+        "id": "user_id",
+        "firstName": "John",
+        "lastName": "Doe",
+        "name": "John Doe",
+        "email": "user@example.com",
+        "profileImage": "https://..."
+      },
+      "caption": "Quick tip",
+      "media": {
+        "url": "https://res.cloudinary.com/...",
+        "publicId": "user_uploads/user_id/reels/abc123",
+        "thumbnailUrl": "",
+        "type": "video",
+        "format": "mp4",
+        "duration": 12.3,
+        "dimensions": {
+          "width": 1080,
+          "height": 1920
+        },
+        "size": 12345678
+      },
+      "contentType": "education",
+      "visibility": "public",
+      "views": 0,
+      "likes": [
+        {
+          "userId": {
+            "id": "current_user_id",
+            "firstName": "Jane",
+            "lastName": "Smith",
+            "name": "Jane Smith",
+            "profileImage": "https://..."
+          },
+          "createdAt": "2024-01-15T10:35:00.000Z"
+        }
+      ],
+      "comments": [],
+      "likeCount": 1,
+      "commentCount": 0,
+      "createdAt": "2024-01-15T10:30:00.000Z",
+      "updatedAt": "2024-01-15T10:35:00.000Z"
+    },
+    "action": "liked",
+    "isLiked": true
+  }
+}
+```
+
+**Response Fields:**
+- `reel` (object): Updated reel object with current like count
+- `action` (string): Action performed - "liked" or "unliked"
+- `isLiked` (boolean): Whether the current user has liked the reel after this action
+
+**Error Responses:**
+- `400`: Invalid reel ID
+- `401`: Not authenticated
+- `404`: Reel not found
+- `500`: Failed to toggle like on reel
+
+**Note:** 
+- This is a toggle endpoint - calling it multiple times will alternate between liked and unliked states
+- First call adds a like, second call removes it, third call adds it again, etc.
+- The `likeCount` is automatically calculated from the `likes` array length
+- User information in likes is automatically populated
 
 ---
 

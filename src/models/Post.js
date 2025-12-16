@@ -31,17 +31,13 @@ const postSchema = new mongoose.Schema({
             required: false
         }
     }],
-    likes: [{
-        userId: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: 'User',
-            required: true
-        },
-        createdAt: {
-            type: Date,
-            default: Date.now
-        }
-    }],
+    // Likes structure: [happy[], sad[], angry[], hug[], wow[], like[]]
+    // Each sub-array contains only userIds for that reaction type
+    likes: {
+        type: [[mongoose.Schema.Types.ObjectId]],
+        default: [[], [], [], [], [], []], // [happy, sad, angry, hug, wow, like]
+        ref: 'User'
+    },
     comments: [{
         userId: {
             type: mongoose.Schema.Types.ObjectId,
@@ -66,9 +62,10 @@ const postSchema = new mongoose.Schema({
 postSchema.index({ userId: 1, createdAt: -1 }); // For user posts queries
 postSchema.index({ createdAt: -1 }); // For all posts feed queries
 
-// Virtual for like count
+// Virtual for like count (sum of all reactions)
 postSchema.virtual('likeCount').get(function() {
-    return this.likes ? this.likes.length : 0;
+    if (!this.likes || !Array.isArray(this.likes)) return 0;
+    return this.likes.reduce((total, reactionArray) => total + (reactionArray ? reactionArray.length : 0), 0);
 });
 
 // Virtual for comment count

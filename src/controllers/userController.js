@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const twilio = require('twilio');
 const cloudinary = require('../config/cloudinary');
+const { transcodeVideo, isVideo, cleanupFile } = require('../services/videoTranscoder');
 
 // Update user profile (name, dob, gender) - no verification needed
 const updateProfile = async (req, res) => {
@@ -941,6 +942,9 @@ const removeAlternatePhone = async (req, res) => {
 
 // Upload media to Cloudinary - ensures it's only associated with the authenticated user
 const uploadMedia = async (req, res) => {
+    let transcodedPath = null;
+    let originalPath = req.file?.path;
+
     try {
         if (!req.file) {
             return res.status(400).json({
@@ -954,8 +958,27 @@ const uploadMedia = async (req, res) => {
         // User-specific folder path to ensure files are organized per user
         const userFolder = `user_uploads/${user._id}`;
 
+        // Check if uploaded file is a video
+        const isVideoFile = isVideo(req.file.mimetype);
+        let fileToUpload = originalPath;
+
+        // Transcode video if it's a video file
+        if (isVideoFile) {
+            try {
+                console.log('Transcoding video for media upload...');
+                const transcoded = await transcodeVideo(originalPath);
+                transcodedPath = transcoded.outputPath;
+                fileToUpload = transcodedPath;
+                console.log('Video transcoded successfully:', transcodedPath);
+            } catch (transcodeError) {
+                console.error('Video transcoding failed:', transcodeError);
+                // Continue with original file if transcoding fails
+                console.warn('Uploading original video without transcoding');
+            }
+        }
+
         // Upload to Cloudinary in user-specific folder
-        const result = await cloudinary.uploader.upload(req.file.path, {
+        const result = await cloudinary.uploader.upload(fileToUpload, {
             folder: userFolder,
             upload_preset: process.env.UPLOAD_PRESET,
             resource_type: "auto", // auto = images + videos
@@ -973,6 +996,11 @@ const uploadMedia = async (req, res) => {
             originalFilename: req.file.originalname,
             folder: result.folder || userFolder
         });
+
+        // Cleanup transcoded file after successful upload
+        if (transcodedPath) {
+            await cleanupFile(transcodedPath);
+        }
 
         return res.status(200).json({
             success: true,
@@ -995,6 +1023,12 @@ const uploadMedia = async (req, res) => {
 
     } catch (err) {
         console.error('Cloudinary upload error:', err);
+        
+        // Cleanup transcoded file on error
+        if (transcodedPath) {
+            await cleanupFile(transcodedPath);
+        }
+
         return res.status(500).json({
             success: false,
             message: "Cloudinary upload failed",

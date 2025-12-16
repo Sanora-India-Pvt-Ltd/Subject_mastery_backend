@@ -2,6 +2,7 @@ const Story = require('../models/Story');
 const User = require('../models/User');
 const cloudinary = require('../config/cloudinary');
 const mongoose = require('mongoose');
+const { transcodeVideo, isVideo, cleanupFile } = require('../services/videoTranscoder');
 
 // Create a new story
 const createStory = async (req, res) => {
@@ -241,6 +242,9 @@ const getAllFriendsStories = async (req, res) => {
 
 // Upload media for stories (similar to posts)
 const uploadStoryMedia = async (req, res) => {
+    let transcodedPath = null;
+    let originalPath = req.file?.path;
+
     try {
         if (!req.file) {
             return res.status(400).json({
@@ -254,8 +258,27 @@ const uploadStoryMedia = async (req, res) => {
         // User-specific folder path for story media
         const userFolder = `user_uploads/${user._id}/stories`;
 
+        // Check if uploaded file is a video
+        const isVideoFile = isVideo(req.file.mimetype);
+        let fileToUpload = originalPath;
+
+        // Transcode video if it's a video file
+        if (isVideoFile) {
+            try {
+                console.log('Transcoding video for story...');
+                const transcoded = await transcodeVideo(originalPath);
+                transcodedPath = transcoded.outputPath;
+                fileToUpload = transcodedPath;
+                console.log('Video transcoded successfully:', transcodedPath);
+            } catch (transcodeError) {
+                console.error('Video transcoding failed:', transcodeError);
+                // Continue with original file if transcoding fails
+                console.warn('Uploading original video without transcoding');
+            }
+        }
+
         // Upload to Cloudinary
-        const result = await cloudinary.uploader.upload(req.file.path, {
+        const result = await cloudinary.uploader.upload(fileToUpload, {
             folder: userFolder,
             upload_preset: process.env.UPLOAD_PRESET,
             resource_type: 'auto', // auto = images + videos
@@ -264,6 +287,11 @@ const uploadStoryMedia = async (req, res) => {
 
         // Determine media type
         const mediaType = result.resource_type === 'video' ? 'video' : 'image';
+
+        // Cleanup transcoded file after successful upload
+        if (transcodedPath) {
+            await cleanupFile(transcodedPath);
+        }
 
         return res.status(200).json({
             success: true,
@@ -279,6 +307,12 @@ const uploadStoryMedia = async (req, res) => {
 
     } catch (error) {
         console.error('Story media upload error:', error);
+        
+        // Cleanup transcoded file on error
+        if (transcodedPath) {
+            await cleanupFile(transcodedPath);
+        }
+
         return res.status(500).json({
             success: false,
             message: 'Failed to upload story media',
