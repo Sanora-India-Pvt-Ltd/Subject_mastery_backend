@@ -154,7 +154,7 @@ const sendPhoneOTPForSignup = async (req, res) => {
         }
 
         // Check if phone number is already taken
-        const existingUser = await User.findOne({ phoneNumber: normalizedPhone });
+        const existingUser = await User.findOne({ 'profile.phoneNumbers.primary': normalizedPhone });
         if (existingUser) {
             return res.status(400).json({
                 success: false,
@@ -226,7 +226,7 @@ const verifyPhoneOTPForSignup = async (req, res) => {
         }
 
         // Check if phone number is already taken
-        const existingUser = await User.findOne({ phoneNumber: normalizedPhone });
+        const existingUser = await User.findOne({ 'profile.phoneNumbers.primary': normalizedPhone });
         if (existingUser) {
             return res.status(400).json({
                 success: false,

@@ -2,6 +2,19 @@
 
 **Base URL:** `https://api.ulearnandearn.com`
 
+## 📋 Important Note on Profile Structure
+
+The API uses a **nested profile structure** for better organization. User profile data is organized into the following sections:
+
+- **`profile`**: Core user identity (name, email, phone numbers, gender, bio, images)
+- **`location`**: Location information (current city, hometown)
+- **`social`**: Social information (friends, relationship status)
+- **`professional`**: Professional information (workplace, education)
+- **`content`**: Content preferences (general and professional weightage)
+- **`account`**: Account metadata (creation date, verification status, last login)
+
+**Note:** While the API accepts flat field names in request bodies (e.g., `firstName`, `lastName`, `email`), all profile responses return data in the nested structure shown above. This provides better organization and separation of concerns.
+
 ---
 
 ## 📑 Table of Contents
@@ -190,7 +203,8 @@ if (profile.status === 401) {
       "lastName": "Doe",
       "phoneNumber": "+1234567890",
       "gender": "Male",
-      "name": "John Doe"
+      "name": "John Doe",
+      "profileImage": "https://..."
     }
   }
 }
@@ -458,6 +472,8 @@ X-Refresh-Token: your_refresh_token_here
 **URL:** `/api/auth/profile`  
 **Authentication:** Required
 
+**Note:** The user profile response uses a nested structure. Profile information is organized into sections: `profile`, `location`, `social`, `professional`, `content`, and `account`. This structure provides better organization and separation of concerns.
+
 **Headers:**
 ```
 Authorization: Bearer your_access_token_here
@@ -471,21 +487,34 @@ Authorization: Bearer your_access_token_here
   "data": {
     "user": {
       "id": "user_id",
-      "email": "user@example.com",
-      "firstName": "John",
-      "lastName": "Doe",
-      "phoneNumber": "+1234567890",
-      "alternatePhoneNumber": "+1987654321",
-      "gender": "Male",
-      "name": "John Doe",
-      "dob": "1999-01-15T00:00:00.000Z",
-      "profileImage": "https://...",
-      "coverPhoto": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/cover/cover123.jpg",
-      "bio": "Software developer passionate about building great products",
-      "currentCity": "San Francisco, CA",
-      "hometown": "New York, NY",
-      "relationshipStatus": "Single",
-      "workplace": [
+      "profile": {
+        "name": {
+          "first": "John",
+          "last": "Doe",
+          "full": "John Doe"
+        },
+        "email": "user@example.com",
+        "phoneNumbers": {
+          "primary": "+1234567890",
+          "alternate": "+1987654321"
+        },
+        "gender": "Male",
+        "pronouns": "",
+        "dob": "1999-01-15T00:00:00.000Z",
+        "bio": "Software developer passionate about building great products",
+        "profileImage": "https://...",
+        "coverPhoto": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/cover/cover123.jpg"
+      },
+      "location": {
+        "currentCity": "San Francisco, CA",
+        "hometown": "New York, NY"
+      },
+      "social": {
+        "numberOfFriends": 15,
+        "relationshipStatus": "Single"
+      },
+      "professional": {
+        "workplace": [
         {
           "company": "Tech Corp",
           "position": "Senior Software Engineer",
@@ -546,15 +575,19 @@ Authorization: Bearer your_access_token_here
           "cgpa": null,
           "percentage": 88.5
         }
-      ],
-      "isGoogleOAuth": false,
-      "googleId": null,
-      "numberOfFriends": 15,
-      "generalWeightage": 75.5,
-      "professionalWeightage": 82.3,
-      "token": "user_token_string_here",
-      "createdAt": "2024-01-01T12:00:00.000Z",
-      "updatedAt": "2024-01-01T12:00:00.000Z"
+        ]
+      },
+      "content": {
+        "generalWeightage": 75.5,
+        "professionalWeightage": 82.3
+      },
+      "account": {
+        "createdAt": "2024-01-01T12:00:00.000Z",
+        "updatedAt": "2024-01-01T12:00:00.000Z",
+        "isActive": true,
+        "isVerified": false,
+        "lastLogin": "2024-01-15T10:30:00.000Z"
+      }
     }
   }
 }
@@ -562,30 +595,39 @@ Authorization: Bearer your_access_token_here
 
 **Response Fields:**
 - `id` (string): User's database ID
-- `email` (string): User's email address
-- `firstName` (string): User's first name
-- `lastName` (string): User's last name
-- `phoneNumber` (string): User's primary phone number
-- `alternatePhoneNumber` (string): User's alternate phone number
-- `gender` (string): User's gender (Male, Female, Other, Prefer not to say)
-- `name` (string): User's full name
-- `dob` (date): User's date of birth
-- `profileImage` (string): URL of user's profile image
-- `coverPhoto` (string): URL of user's cover photo
-- `bio` (string): User's biography/description
-- `currentCity` (string): User's current city
-- `hometown` (string): User's hometown
-- `relationshipStatus` (string): User's relationship status
-- `workplace` (array): Array of workplace objects
-- `education` (array): Array of education objects
-- `isGoogleOAuth` (boolean): Whether user signed up via Google OAuth
-- `googleId` (string): Google ID if user signed up via Google OAuth
-- `numberOfFriends` (number): Total number of friends the user has
-- `generalWeightage` (number): General weightage value (default: 0)
-- `professionalWeightage` (number): Professional weightage value (default: 0)
-- `token` (string): User's token value (default: null)
-- `createdAt` (date): Account creation timestamp
-- `updatedAt` (date): Last update timestamp
+- `profile` (object): User profile information
+  - `name` (object): User's name
+    - `first` (string): User's first name
+    - `last` (string): User's last name
+    - `full` (string): User's full name
+  - `email` (string): User's email address
+  - `phoneNumbers` (object): User's phone numbers
+    - `primary` (string): User's primary phone number
+    - `alternate` (string): User's alternate phone number (optional)
+  - `gender` (string): User's gender (Male, Female, Other, Prefer not to say)
+  - `pronouns` (string): User's pronouns (optional)
+  - `dob` (date): User's date of birth (optional)
+  - `bio` (string): User's biography/description (optional)
+  - `profileImage` (string): URL of user's profile image (optional)
+  - `coverPhoto` (string): URL of user's cover photo (optional)
+- `location` (object): User's location information
+  - `currentCity` (string): User's current city (optional)
+  - `hometown` (string): User's hometown (optional)
+- `social` (object): User's social information
+  - `numberOfFriends` (number): Total number of friends the user has
+  - `relationshipStatus` (string): User's relationship status (optional)
+- `professional` (object): User's professional information
+  - `workplace` (array): Array of workplace objects
+  - `education` (array): Array of education objects
+- `content` (object): User's content preferences
+  - `generalWeightage` (number): General weightage value (default: 0)
+  - `professionalWeightage` (number): Professional weightage value (default: 0)
+- `account` (object): Account metadata
+  - `createdAt` (date): Account creation timestamp
+  - `updatedAt` (date): Last update timestamp
+  - `isActive` (boolean): Whether the account is active
+  - `isVerified` (boolean): Whether the account is verified
+  - `lastLogin` (date): Last login timestamp (optional)
 
 **Error Responses:**
 - `401`: No token, invalid token, expired token
@@ -604,10 +646,10 @@ All user profile management endpoints require authentication. Include the access
 **Authentication:** Required
 
 **Description:**  
-Search for other users by their name. The search is case-insensitive and matches across firstName, lastName, and name fields. The authenticated user is automatically excluded from search results. Results are paginated and sorted alphabetically.
+Search for other users by their name. The search is case-insensitive and matches across first name, last name, and full name fields. The authenticated user is automatically excluded from search results. Results are paginated and sorted alphabetically.
 
 **Query Parameters:**
-- `query` (string, required): Name to search for (searches firstName, lastName, and name fields)
+- `query` (string, required): Name to search for (searches first name, last name, and full name fields)
 - `page` (number, optional): Page number (default: 1)
 - `limit` (number, optional): Number of users per page (default: 20)
 
@@ -736,7 +778,7 @@ const result = await response.json();
 - **Excludes Current User:** The authenticated user is automatically excluded from search results
 - **Privacy:** Sensitive data (password, refreshToken, email) is excluded from results
 - **Pagination:** Supports pagination with `page` and `limit` query parameters
-- **Search Fields:** Searches across firstName, lastName, and name fields
+- **Search Fields:** Searches across first name, last name, and full name fields
 - **Sorted Results:** Results are sorted alphabetically by name
 - **Result Limit:** Default limit is 20 users per page
 
@@ -860,21 +902,32 @@ Authorization: Bearer your_access_token_here
   "data": {
     "user": {
       "id": "user_id",
-      "email": "user@example.com",
-      "firstName": "John",
-      "lastName": "Doe",
-      "name": "John Doe",
-      "dob": "1999-01-15T00:00:00.000Z",
-      "phoneNumber": "+1234567890",
-      "alternatePhoneNumber": "+1987654321",
-      "gender": "Male",
-      "profileImage": "https://...",
-      "coverPhoto": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/cover/cover123.jpg",
-      "bio": "Software developer passionate about building great products",
-      "currentCity": "San Francisco, CA",
-      "hometown": "New York, NY",
-      "relationshipStatus": "Single",
-      "workplace": [
+      "profile": {
+        "name": {
+          "first": "John",
+          "last": "Doe",
+          "full": "John Doe"
+        },
+        "email": "user@example.com",
+        "phoneNumbers": {
+          "primary": "+1234567890",
+          "alternate": "+1987654321"
+        },
+        "gender": "Male",
+        "dob": "1999-01-15T00:00:00.000Z",
+        "bio": "Software developer passionate about building great products",
+        "profileImage": "https://...",
+        "coverPhoto": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/cover/cover123.jpg"
+      },
+      "location": {
+        "currentCity": "San Francisco, CA",
+        "hometown": "New York, NY"
+      },
+      "social": {
+        "relationshipStatus": "Single"
+      },
+      "professional": {
+        "workplace": [
         {
           "company": {
             "id": "507f1f77bcf86cd799439011",
@@ -943,9 +996,12 @@ Authorization: Bearer your_access_token_here
           "cgpa": null,
           "percentage": 88.5
         }
-      ],
-      "createdAt": "2024-01-01T12:00:00.000Z",
-      "updatedAt": "2024-01-01T12:30:00.000Z"
+        ]
+      },
+      "account": {
+        "createdAt": "2024-01-01T12:00:00.000Z",
+        "updatedAt": "2024-01-01T12:30:00.000Z"
+      }
     }
   }
 }
@@ -999,13 +1055,17 @@ Content-Type: application/json
   "success": true,
   "message": "Profile media updated successfully",
   "data": {
-    "user": {
-      "id": "user_id",
-      "bio": "Software developer passionate about building great products",
-      "coverPhoto": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/cover/cover123.jpg",
-      "profileImage": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/profile/profile123.jpg",
-      "updatedAt": "2024-01-01T12:35:00.000Z"
-    }
+      "user": {
+        "id": "user_id",
+        "profile": {
+          "bio": "Software developer passionate about building great products",
+          "coverPhoto": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/cover/cover123.jpg",
+          "profileImage": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/profile/profile123.jpg"
+        },
+        "account": {
+          "updatedAt": "2024-01-01T12:35:00.000Z"
+        }
+      }
   }
 }
 ```
@@ -1066,17 +1126,25 @@ Content-Type: application/json
   "success": true,
   "message": "Personal information updated successfully",
   "data": {
-    "user": {
-      "id": "user_id",
-      "firstName": "John",
-      "lastName": "Doe",
-      "name": "John Doe",
-      "gender": "Male",
-      "dob": "1999-01-15T00:00:00.000Z",
-      "phoneNumber": "+1234567890",
-      "alternatePhoneNumber": "+1987654321",
-      "updatedAt": "2024-01-01T12:40:00.000Z"
-    }
+      "user": {
+        "id": "user_id",
+        "profile": {
+          "name": {
+            "first": "John",
+            "last": "Doe",
+            "full": "John Doe"
+          },
+          "gender": "Male",
+          "dob": "1999-01-15T00:00:00.000Z",
+          "phoneNumbers": {
+            "primary": "+1234567890",
+            "alternate": "+1987654321"
+          }
+        },
+        "account": {
+          "updatedAt": "2024-01-01T12:40:00.000Z"
+        }
+      }
   }
 }
 ```
@@ -1578,17 +1646,25 @@ Authorization: Bearer your_access_token_here
   "data": {
     "user": {
       "id": "user_id",
-      "email": "user@example.com",
-      "firstName": "John",
-      "lastName": "Doe",
-      "name": "John Doe",
-      "dob": "1999-01-15T00:00:00.000Z",
-      "phoneNumber": "+1234567890",
-      "alternatePhoneNumber": "+1987654321",
-      "gender": "Male",
-      "profileImage": "https://...",
-      "createdAt": "2024-01-01T12:00:00.000Z",
-      "updatedAt": "2024-01-01T12:35:00.000Z"
+      "profile": {
+        "name": {
+          "first": "John",
+          "last": "Doe",
+          "full": "John Doe"
+        },
+        "email": "user@example.com",
+        "phoneNumbers": {
+          "primary": "+1234567890",
+          "alternate": "+1987654321"
+        },
+        "gender": "Male",
+        "dob": "1999-01-15T00:00:00.000Z",
+        "profileImage": "https://..."
+      },
+      "account": {
+        "createdAt": "2024-01-01T12:00:00.000Z",
+        "updatedAt": "2024-01-01T12:35:00.000Z"
+      }
     }
   }
 }
@@ -1682,17 +1758,25 @@ Authorization: Bearer your_access_token_here
   "data": {
     "user": {
       "id": "user_id",
-      "email": "user@example.com",
-      "firstName": "John",
-      "lastName": "Doe",
-      "name": "John Doe",
-      "dob": "1999-01-15T00:00:00.000Z",
-      "phoneNumber": "+1234567890",
-      "alternatePhoneNumber": "+1987654321",
-      "gender": "Male",
-      "profileImage": "https://...",
-      "createdAt": "2024-01-01T12:00:00.000Z",
-      "updatedAt": "2024-01-01T12:40:00.000Z"
+      "profile": {
+        "name": {
+          "first": "John",
+          "last": "Doe",
+          "full": "John Doe"
+        },
+        "email": "user@example.com",
+        "phoneNumbers": {
+          "primary": "+1234567890",
+          "alternate": "+1987654321"
+        },
+        "gender": "Male",
+        "dob": "1999-01-15T00:00:00.000Z",
+        "profileImage": "https://..."
+      },
+      "account": {
+        "createdAt": "2024-01-01T12:00:00.000Z",
+        "updatedAt": "2024-01-01T12:40:00.000Z"
+      }
     }
   }
 }
@@ -4307,7 +4391,7 @@ Authorization: Bearer <your_access_token>
 **Authentication:** Required (Bearer Token)
 
 **Description:**  
-Get a list of all your confirmed friends with their profile information.
+Get a list of all your confirmed friends. Returns only the friend's ID, name, and profile image.
 
 **Example Request:**
 ```bash
@@ -4324,25 +4408,13 @@ Authorization: Bearer <your_access_token>
     "friends": [
       {
         "_id": "friend_id_1",
-        "firstName": "Jane",
-        "lastName": "Smith",
         "name": "Jane Smith",
-        "email": "jane@example.com",
-        "profileImage": "https://...",
-        "bio": "Software developer",
-        "currentCity": "New York",
-        "hometown": "Boston"
+        "profileImage": "https://..."
       },
       {
         "_id": "friend_id_2",
-        "firstName": "Bob",
-        "lastName": "Johnson",
         "name": "Bob Johnson",
-        "email": "bob@example.com",
-        "profileImage": "https://...",
-        "bio": "",
-        "currentCity": "Los Angeles",
-        "hometown": ""
+        "profileImage": "https://..."
       }
     ],
     "count": 2
@@ -4356,7 +4428,8 @@ Authorization: Bearer <your_access_token>
 
 **Note:** 
 - Returns all confirmed friends (users who have accepted your friend request)
-- Friend details are automatically populated
+- Only returns minimal friend information: `_id`, `name`, and `profileImage`
+- Blocked users are automatically filtered out from the friends list
 
 ---
 

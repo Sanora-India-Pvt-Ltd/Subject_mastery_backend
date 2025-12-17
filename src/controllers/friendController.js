@@ -103,8 +103,8 @@ const sendFriendRequest = async (req, res) => {
         });
 
         // Populate sender and receiver details
-        await friendRequest.populate('sender', 'firstName lastName name profileImage email');
-        await friendRequest.populate('receiver', 'firstName lastName name profileImage email');
+        await friendRequest.populate('sender', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email');
+        await friendRequest.populate('receiver', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email');
 
         res.status(201).json({
             success: true,
@@ -204,8 +204,8 @@ const acceptFriendRequest = async (req, res) => {
         await friendRequest.save();
 
         // Populate sender and receiver details
-        await friendRequest.populate('sender', 'firstName lastName name profileImage email');
-        await friendRequest.populate('receiver', 'firstName lastName name profileImage email');
+        await friendRequest.populate('sender', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email');
+        await friendRequest.populate('receiver', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email');
 
         res.json({
             success: true,
@@ -271,8 +271,8 @@ const rejectFriendRequest = async (req, res) => {
         // await FriendRequest.findByIdAndDelete(requestId);
 
         // Populate sender and receiver details
-        await friendRequest.populate('sender', 'firstName lastName name profileImage email');
-        await friendRequest.populate('receiver', 'firstName lastName name profileImage email');
+        await friendRequest.populate('sender', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email');
+        await friendRequest.populate('receiver', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email');
 
         res.json({
             success: true,
@@ -296,7 +296,7 @@ const listFriends = async (req, res) => {
 
         // Get user with populated friends
         const user = await User.findById(userId)
-            .populate('friends', 'firstName lastName name profileImage email bio currentCity hometown')
+            .populate('friends', 'profile.name.full profile.profileImage')
             .select('friends blockedUsers');
         
         // Filter out blocked users from friends list
@@ -312,12 +312,19 @@ const listFriends = async (req, res) => {
             });
         }
 
+        // Map friends to only include name, profileImage, and _id
+        const friendsList = filteredFriends.map(friend => ({
+            _id: friend._id,
+            name: friend.name,
+            profileImage: friend.profileImage
+        }));
+
         res.json({
             success: true,
             message: 'Friends retrieved successfully',
             data: {
-                friends: filteredFriends,
-                count: filteredFriends.length
+                friends: friendsList,
+                count: friendsList.length
             }
         });
     } catch (error) {
@@ -344,7 +351,7 @@ const listReceivedRequests = async (req, res) => {
             status: 'pending',
             sender: { $nin: blockedUserIds } // Exclude requests from blocked users
         })
-        .populate('sender', 'firstName lastName name profileImage email bio currentCity hometown')
+        .populate('sender', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email profile.bio location.currentCity location.hometown')
         .sort({ createdAt: -1 });
 
         res.json({
@@ -379,7 +386,7 @@ const listSentRequests = async (req, res) => {
             status: 'pending',
             receiver: { $nin: blockedUserIds } // Exclude requests to blocked users
         })
-        .populate('receiver', 'firstName lastName name profileImage email bio currentCity hometown')
+        .populate('receiver', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email profile.bio location.currentCity location.hometown')
         .sort({ createdAt: -1 });
 
         res.json({

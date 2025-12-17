@@ -248,17 +248,17 @@ const createReel = async (req, res) => {
         });
 
         // Populate user info for response
-        await reel.populate('userId', 'firstName lastName name email profileImage');
+        await reel.populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage');
 
         // Extract userId as string (handle both populated and non-populated cases)
         const userIdString = reel.userId._id ? reel.userId._id.toString() : reel.userId.toString();
         const userInfo = reel.userId._id ? {
             id: reel.userId._id.toString(),
-            firstName: reel.userId.firstName,
-            lastName: reel.userId.lastName,
-            name: reel.userId.name,
-            email: reel.userId.email,
-            profileImage: reel.userId.profileImage
+            firstName: reel.userId.profile?.name?.first,
+            lastName: reel.userId.profile?.name?.last,
+            name: reel.userId.profile?.name?.full,
+            email: reel.userId.profile?.email,
+            profileImage: reel.userId.profile?.profileImage
         } : null;
 
         return res.status(201).json({
@@ -350,8 +350,8 @@ const getReels = async (req, res) => {
 
         // Get reels sorted by newest first
         const reels = await Reel.find(query)
-            .populate('userId', 'firstName lastName name email profileImage')
-            .populate('comments.userId', 'firstName lastName name profileImage')
+            .populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage')
+            .populate('comments.userId', 'profile.name.first profile.name.last profile.name.full profile.profileImage')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit);
@@ -367,11 +367,11 @@ const getReels = async (req, res) => {
                     const userIdString = reel.userId._id ? reel.userId._id.toString() : reel.userId.toString();
                     const userInfo = reel.userId._id ? {
                         id: reel.userId._id.toString(),
-                        firstName: reel.userId.firstName,
-                        lastName: reel.userId.lastName,
-                        name: reel.userId.name,
-                        email: reel.userId.email,
-                        profileImage: reel.userId.profileImage
+                        firstName: reel.userId.profile?.name?.first,
+                        lastName: reel.userId.profile?.name?.last,
+                        name: reel.userId.profile?.name?.full,
+                        email: reel.userId.profile?.email,
+                        profileImage: reel.userId.profile?.profileImage
                     } : null;
 
                     return {
@@ -478,8 +478,8 @@ const getUserReels = async (req, res) => {
 
         // Get reels for this user
         const reels = await Reel.find(query)
-            .populate('userId', 'firstName lastName name email profileImage')
-            .populate('comments.userId', 'firstName lastName name profileImage')
+            .populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage')
+            .populate('comments.userId', 'profile.name.first profile.name.last profile.name.full profile.profileImage')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit);
@@ -493,19 +493,19 @@ const getUserReels = async (req, res) => {
             data: {
                 user: {
                     id: user._id.toString(),
-                    name: user.name,
-                    email: user.email,
-                    profileImage: user.profileImage
+                    name: user.profile?.name?.full,
+                    email: user.profile?.email,
+                    profileImage: user.profile?.profileImage
                 },
                 reels: reels.map(reel => {
                     const userIdString = reel.userId._id ? reel.userId._id.toString() : reel.userId.toString();
                     const userInfo = reel.userId._id ? {
                         id: reel.userId._id.toString(),
-                        firstName: reel.userId.firstName,
-                        lastName: reel.userId.lastName,
-                        name: reel.userId.name,
-                        email: reel.userId.email,
-                        profileImage: reel.userId.profileImage
+                        firstName: reel.userId.profile?.name?.first,
+                        lastName: reel.userId.profile?.name?.last,
+                        name: reel.userId.profile?.name?.full,
+                        email: reel.userId.profile?.email,
+                        profileImage: reel.userId.profile?.profileImage
                     } : null;
 
                     return {
@@ -646,18 +646,18 @@ const toggleLikeReel = async (req, res) => {
         await reel.save();
 
         // Populate for response
-        await reel.populate('userId', 'firstName lastName name email profileImage');
-        await reel.populate('comments.userId', 'firstName lastName name profileImage');
+        await reel.populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage');
+        await reel.populate('comments.userId', 'profile.name.first profile.name.last profile.name.full profile.profileImage');
 
         // Extract userId as string
         const userIdString = reel.userId._id ? reel.userId._id.toString() : reel.userId.toString();
         const userInfo = reel.userId._id ? {
             id: reel.userId._id.toString(),
-            firstName: reel.userId.firstName,
-            lastName: reel.userId.lastName,
-            name: reel.userId.name,
-            email: reel.userId.email,
-            profileImage: reel.userId.profileImage
+            firstName: reel.userId.profile?.name?.first,
+            lastName: reel.userId.profile?.name?.last,
+            name: reel.userId.profile?.name?.full,
+            email: reel.userId.profile?.email,
+            profileImage: reel.userId.profile?.profileImage
         } : null;
 
         return res.status(200).json({
@@ -747,18 +747,18 @@ const addComment = async (req, res) => {
         await reel.save();
 
         // Populate for response
-        await reel.populate('userId', 'firstName lastName name email profileImage');
-        await reel.populate('comments.userId', 'firstName lastName name profileImage');
+        await reel.populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage');
+        await reel.populate('comments.userId', 'profile.name.first profile.name.last profile.name.full profile.profileImage');
 
         // Extract userId as string
         const userIdString = reel.userId._id ? reel.userId._id.toString() : reel.userId.toString();
         const userInfo = reel.userId._id ? {
             id: reel.userId._id.toString(),
-            firstName: reel.userId.firstName,
-            lastName: reel.userId.lastName,
-            name: reel.userId.name,
-            email: reel.userId.email,
-            profileImage: reel.userId.profileImage
+            firstName: reel.userId.profile?.name?.first,
+            lastName: reel.userId.profile?.name?.last,
+            name: reel.userId.profile?.name?.full,
+            email: reel.userId.profile?.email,
+            profileImage: reel.userId.profile?.profileImage
         } : null;
 
         // Get the newly added comment (last one in array)
@@ -875,18 +875,18 @@ const deleteComment = async (req, res) => {
         await reel.save();
 
         // Populate for response
-        await reel.populate('userId', 'firstName lastName name email profileImage');
-        await reel.populate('comments.userId', 'firstName lastName name profileImage');
+        await reel.populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage');
+        await reel.populate('comments.userId', 'profile.name.first profile.name.last profile.name.full profile.profileImage');
 
         // Extract userId as string
         const userIdString = reel.userId._id ? reel.userId._id.toString() : reel.userId.toString();
         const userInfo = reel.userId._id ? {
             id: reel.userId._id.toString(),
-            firstName: reel.userId.firstName,
-            lastName: reel.userId.lastName,
-            name: reel.userId.name,
-            email: reel.userId.email,
-            profileImage: reel.userId.profileImage
+            firstName: reel.userId.profile?.name?.first,
+            lastName: reel.userId.profile?.name?.last,
+            name: reel.userId.profile?.name?.full,
+            email: reel.userId.profile?.email,
+            profileImage: reel.userId.profile?.profileImage
         } : null;
 
         return res.status(200).json({

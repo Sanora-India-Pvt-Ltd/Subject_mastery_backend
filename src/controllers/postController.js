@@ -85,7 +85,7 @@ const createPost = async (req, res) => {
         });
 
         // Populate user info for response
-        await post.populate('userId', 'firstName lastName name email profileImage');
+        await post.populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage');
 
         // Extract userId as string (handle both populated and non-populated cases)
         const userIdString = post.userId._id ? post.userId._id.toString() : post.userId.toString();
@@ -176,8 +176,8 @@ const getAllPosts = async (req, res) => {
 
         // Get posts sorted by newest first
         const posts = await Post.find(query)
-            .populate('userId', 'firstName lastName name email profileImage')
-            .populate('comments.userId', 'firstName lastName name profileImage')
+            .populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage')
+            .populate('comments.userId', 'profile.name.first profile.name.last profile.name.full profile.profileImage')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit);
@@ -193,11 +193,11 @@ const getAllPosts = async (req, res) => {
                     const userIdString = post.userId._id ? post.userId._id.toString() : post.userId.toString();
                     const userInfo = post.userId._id ? {
                         id: post.userId._id.toString(),
-                        firstName: post.userId.firstName,
-                        lastName: post.userId.lastName,
-                        name: post.userId.name,
-                        email: post.userId.email,
-                        profileImage: post.userId.profileImage
+                        firstName: post.userId.profile?.name?.first,
+                        lastName: post.userId.profile?.name?.last,
+                        name: post.userId.profile?.name?.full,
+                        email: post.userId.profile?.email,
+                        profileImage: post.userId.profile?.profileImage
                     } : null;
 
                     return {
@@ -244,8 +244,8 @@ const getMyPosts = async (req, res) => {
 
         // Get posts for the authenticated user
         const posts = await Post.find({ userId: user._id })
-            .populate('userId', 'firstName lastName name email profileImage')
-            .populate('comments.userId', 'firstName lastName name profileImage')
+            .populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage')
+            .populate('comments.userId', 'profile.name.first profile.name.last profile.name.full profile.profileImage')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit);
@@ -259,19 +259,19 @@ const getMyPosts = async (req, res) => {
             data: {
                 user: {
                     id: user._id.toString(),
-                    name: user.name,
-                    email: user.email,
-                    profileImage: user.profileImage
+                    name: user.profile?.name?.full,
+                    email: user.profile?.email,
+                    profileImage: user.profile?.profileImage
                 },
                 posts: posts.map(post => {
                     const userIdString = post.userId._id ? post.userId._id.toString() : post.userId.toString();
                     const userInfo = post.userId._id ? {
                         id: post.userId._id.toString(),
-                        firstName: post.userId.firstName,
-                        lastName: post.userId.lastName,
-                        name: post.userId.name,
-                        email: post.userId.email,
-                        profileImage: post.userId.profileImage
+                        firstName: post.userId.profile?.name?.first,
+                        lastName: post.userId.profile?.name?.last,
+                        name: post.userId.profile?.name?.full,
+                        email: post.userId.profile?.email,
+                        profileImage: post.userId.profile?.profileImage
                     } : null;
 
                     return {
@@ -375,8 +375,8 @@ const getUserPosts = async (req, res) => {
 
         // Get posts for this user
         const posts = await Post.find(query)
-            .populate('userId', 'firstName lastName name email profileImage')
-            .populate('comments.userId', 'firstName lastName name profileImage')
+            .populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage')
+            .populate('comments.userId', 'profile.name.first profile.name.last profile.name.full profile.profileImage')
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit);
@@ -390,19 +390,19 @@ const getUserPosts = async (req, res) => {
             data: {
                 user: {
                     id: user._id.toString(),
-                    name: user.name,
-                    email: user.email,
-                    profileImage: user.profileImage
+                    name: user.profile?.name?.full,
+                    email: user.profile?.email,
+                    profileImage: user.profile?.profileImage
                 },
                 posts: posts.map(post => {
                     const userIdString = post.userId._id ? post.userId._id.toString() : post.userId.toString();
                     const userInfo = post.userId._id ? {
                         id: post.userId._id.toString(),
-                        firstName: post.userId.firstName,
-                        lastName: post.userId.lastName,
-                        name: post.userId.name,
-                        email: post.userId.email,
-                        profileImage: post.userId.profileImage
+                        firstName: post.userId.profile?.name?.first,
+                        lastName: post.userId.profile?.name?.last,
+                        name: post.userId.profile?.name?.full,
+                        email: post.userId.profile?.email,
+                        profileImage: post.userId.profile?.profileImage
                     } : null;
 
                     return {
@@ -634,8 +634,8 @@ const toggleLikePost = async (req, res) => {
         await post.save();
 
         // Populate for response
-        await post.populate('userId', 'firstName lastName name email profileImage');
-        await post.populate('comments.userId', 'firstName lastName name profileImage');
+        await post.populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage');
+        await post.populate('comments.userId', 'profile.name.first profile.name.last profile.name.full profile.profileImage');
 
         // Extract userId as string
         const userIdString = post.userId._id ? post.userId._id.toString() : post.userId.toString();
@@ -794,8 +794,8 @@ const addComment = async (req, res) => {
         await post.save();
 
         // Populate for response
-        await post.populate('userId', 'firstName lastName name email profileImage');
-        await post.populate('comments.userId', 'firstName lastName name profileImage');
+        await post.populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage');
+        await post.populate('comments.userId', 'profile.name.first profile.name.last profile.name.full profile.profileImage');
 
         // Extract userId as string
         const userIdString = post.userId._id ? post.userId._id.toString() : post.userId.toString();
@@ -919,8 +919,8 @@ const deleteComment = async (req, res) => {
         await post.save();
 
         // Populate for response
-        await post.populate('userId', 'firstName lastName name email profileImage');
-        await post.populate('comments.userId', 'firstName lastName name profileImage');
+        await post.populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage');
+        await post.populate('comments.userId', 'profile.name.first profile.name.last profile.name.full profile.profileImage');
 
         // Extract userId as string
         const userIdString = post.userId._id ? post.userId._id.toString() : post.userId.toString();

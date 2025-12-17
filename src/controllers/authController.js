@@ -10,15 +10,17 @@ const MAX_DEVICES = 5;
 
 // Helper function to manage device limit - removes oldest device if limit is reached
 const manageDeviceLimit = (user) => {
-    if (!user.refreshTokens) {
-        user.refreshTokens = [];
+    if (!user.auth?.tokens?.refreshTokens) {
+        if (!user.auth) user.auth = {};
+        if (!user.auth.tokens) user.auth.tokens = {};
+        user.auth.tokens.refreshTokens = [];
     }
     
     // If we've reached the limit, remove the oldest device (sorted by createdAt)
-    if (user.refreshTokens.length >= MAX_DEVICES) {
+    if (user.auth.tokens.refreshTokens.length >= MAX_DEVICES) {
         // Sort by createdAt (oldest first) and remove the first one
-        user.refreshTokens.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-        user.refreshTokens.shift(); // Remove the oldest device
+        user.auth.tokens.refreshTokens.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        user.auth.tokens.refreshTokens.shift(); // Remove the oldest device
     }
 };
 
@@ -61,7 +63,7 @@ const signup = async (req, res) => {
         }
 
         // Check if user already exists
-        const existingUser = await User.findOne({ email });
+        const existingUser = await User.findOne({ 'profile.email': email.toLowerCase() });
         if (existingUser) {
             return res.status(400).json({
                 success: false,
@@ -76,7 +78,7 @@ const signup = async (req, res) => {
         }
 
         // Check if phone number is already taken
-        const existingPhoneUser = await User.findOne({ phoneNumber: normalizedPhone });
+        const existingPhoneUser = await User.findOne({ 'profile.phoneNumbers.primary': normalizedPhone });
         if (existingPhoneUser) {
             return res.status(400).json({
                 success: false,
@@ -160,47 +162,67 @@ const signup = async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
 
         // Create user (use normalized phone number)
+        const fullName = name || `${firstName} ${lastName}`.trim();
         const user = await User.create({
-            email: email.toLowerCase(),
-            password: hashedPassword,
-            firstName,
-            lastName,
-            phoneNumber: normalizedPhone,
-            gender,
-            name: name || `${firstName} ${lastName}`.trim()
+            profile: {
+                name: {
+                    first: firstName,
+                    last: lastName,
+                    full: fullName
+                },
+                email: email.toLowerCase(),
+                phoneNumbers: {
+                    primary: normalizedPhone
+                },
+                gender
+            },
+            auth: {
+                password: hashedPassword,
+                tokens: {
+                    refreshTokens: []
+                }
+            },
+            account: {
+                isActive: true,
+                isVerified: false,
+                lastLogin: new Date()
+            },
+            social: {
+                friends: [],
+                blockedUsers: []
+            },
+            location: {},
+            professional: {
+                education: [],
+                workplace: []
+            },
+            content: {
+                generalWeightage: 0,
+                professionalWeightage: 0
+            }
         });
 
         // Generate access token and refresh token
-        const accessToken = generateAccessToken({ id: user._id, email: user.email });
+        const accessToken = generateAccessToken({ id: user._id, email: user.profile.email });
         const { token: refreshToken, expiryDate: refreshTokenExpiry } = generateRefreshToken();
 
         // Get device info from request (optional)
         const deviceInfo = req.headers['user-agent'] || req.body.deviceInfo || 'Unknown Device';
 
-        // Initialize refreshTokens array if it doesn't exist
-        if (!user.refreshTokens) {
-            user.refreshTokens = [];
-        }
-
         // Manage device limit - remove oldest device if limit is reached
         manageDeviceLimit(user);
 
         // Add new refresh token to array (allows multiple devices, max 5)
-        user.refreshTokens.push({
+        user.auth.tokens.refreshTokens.push({
             token: refreshToken,
-            expiryDate: refreshTokenExpiry,
-            deviceInfo: deviceInfo.substring(0, 200), // Limit length
+            expiresAt: refreshTokenExpiry,
+            device: deviceInfo.substring(0, 200), // Limit length
             createdAt: new Date()
         });
 
-        // Note: We no longer clean up tokens automatically
-        // Tokens only expire when user explicitly logs out
-        // This allows users to stay logged in indefinitely
-        // Maximum of 5 devices are allowed - oldest device is removed when limit is reached
-
         // Keep backward compatibility - set single token fields
-        user.refreshToken = refreshToken;
-        user.refreshTokenExpiry = refreshTokenExpiry;
+        user.auth.refreshToken = refreshToken;
+        user.auth.refreshTokenExpiry = refreshTokenExpiry;
 
         await user.save();
 
@@ -213,12 +235,12 @@ const signup = async (req, res) => {
                 token: accessToken, // For backward compatibility
                 user: {
                     id: user._id,
-                    email: user.email,
-                    firstName: user.firstName,
-                    lastName: user.lastName,
-                    phoneNumber: user.phoneNumber,
-                    gender: user.gender,
-                    name: user.name
+                    email: user.profile.email,
+                    firstName: user.profile.name.first,
+                    lastName: user.profile.name.last,
+                    phoneNumber: user.profile.phoneNumbers.primary,
+                    gender: user.profile.gender,
+                    name: user.profile.name.full
                 }
             }
         });
@@ -248,9 +270,9 @@ const login = async (req, res) => {
         // Find user by email or phone number
         let user;
         if (email) {
-            user = await User.findOne({ email: email.toLowerCase() });
+            user = await User.findOne({ 'profile.email': email.toLowerCase() });
         } else if (phoneNumber) {
-            user = await User.findOne({ phoneNumber });
+            user = await User.findOne({ 'profile.phoneNumbers.primary': phoneNumber });
         }
 
         if (!user) {
@@ -261,7 +283,7 @@ const login = async (req, res) => {
         }
 
         // Check password
-        const isPasswordValid = await bcrypt.compare(password, user.password);
+        const isPasswordValid = await bcrypt.compare(password, user.auth.password);
         if (!isPasswordValid) {
             return res.status(400).json({
                 success: false,
@@ -269,37 +291,31 @@ const login = async (req, res) => {
             });
         }
 
+        // Update last login
+        if (!user.account) user.account = {};
+        user.account.lastLogin = new Date();
+
         // Generate access token and refresh token
-        const accessToken = generateAccessToken({ id: user._id, email: user.email });
+        const accessToken = generateAccessToken({ id: user._id, email: user.profile.email });
         const { token: refreshToken, expiryDate: refreshTokenExpiry } = generateRefreshToken();
 
         // Get device info from request (optional)
         const deviceInfo = req.headers['user-agent'] || req.body.deviceInfo || 'Unknown Device';
 
-        // Initialize refreshTokens array if it doesn't exist
-        if (!user.refreshTokens) {
-            user.refreshTokens = [];
-        }
-
         // Manage device limit - remove oldest device if limit is reached
         manageDeviceLimit(user);
 
         // Add new refresh token to array (allows multiple devices, max 5)
-        user.refreshTokens.push({
+        user.auth.tokens.refreshTokens.push({
             token: refreshToken,
-            expiryDate: refreshTokenExpiry,
-            deviceInfo: deviceInfo.substring(0, 200), // Limit length
+            expiresAt: refreshTokenExpiry,
+            device: deviceInfo.substring(0, 200), // Limit length
             createdAt: new Date()
         });
 
-        // Note: We no longer clean up tokens automatically
-        // Tokens only expire when user explicitly logs out
-        // This allows users to stay logged in indefinitely
-        // Maximum of 5 devices are allowed - oldest device is removed when limit is reached
-
         // Keep backward compatibility - set single token fields
-        user.refreshToken = refreshToken;
-        user.refreshTokenExpiry = refreshTokenExpiry;
+        user.auth.refreshToken = refreshToken;
+        user.auth.refreshTokenExpiry = refreshTokenExpiry;
 
         await user.save();
 
@@ -312,13 +328,13 @@ const login = async (req, res) => {
                 token: accessToken, // For backward compatibility
                 user: {
                     id: user._id,
-                    email: user.email,
-                    firstName: user.firstName,
-                    lastName: user.lastName,
-                    phoneNumber: user.phoneNumber,
-                    gender: user.gender,
-                    name: user.name,
-                    profileImage: user.profileImage
+                    email: user.profile.email,
+                    firstName: user.profile.name.first,
+                    lastName: user.profile.name.last,
+                    phoneNumber: user.profile.phoneNumbers.primary,
+                    gender: user.profile.gender,
+                    name: user.profile.name.full,
+                    profileImage: user.profile.profileImage
                 }
             }
         });
@@ -350,7 +366,7 @@ const sendOTPForPasswordReset = async (req, res) => {
         if (email) {
             // Normalize email to lowercase
             const normalizedEmail = email.toLowerCase().trim();
-            user = await User.findOne({ email: normalizedEmail });
+            user = await User.findOne({ 'profile.email': normalizedEmail });
             
             if (!user) {
                 return res.status(404).json({
@@ -375,7 +391,7 @@ const sendOTPForPasswordReset = async (req, res) => {
             
             // Try each variation
             for (const phoneVar of phoneVariations) {
-                user = await User.findOne({ phoneNumber: phoneVar });
+                user = await User.findOne({ 'profile.phoneNumbers.primary': phoneVar });
                 if (user) {
                     console.log(`✅ Found user with phone variation: ${phoneVar}`);
                     break;
@@ -389,12 +405,12 @@ const sendOTPForPasswordReset = async (req, res) => {
                 if (phoneDigits.length >= 10) {
                     const last10Digits = phoneDigits.slice(-10);
                     const users = await User.find({
-                        phoneNumber: { $regex: last10Digits }
+                        'profile.phoneNumbers.primary': { $regex: last10Digits }
                     }).limit(5);
                     
                     if (users.length > 0) {
                         console.log(`🔍 Found ${users.length} user(s) with similar phone numbers:`);
-                        users.forEach(u => console.log(`   - ${u.phoneNumber} (${u.email})`));
+                        users.forEach(u => console.log(`   - ${u.profile?.phoneNumbers?.primary} (${u.profile?.email})`));
                     }
                 }
             }
@@ -513,7 +529,7 @@ const verifyOTPForPasswordReset = async (req, res) => {
 
         // If email provided, verify using email OTP service
         if (email) {
-            user = await User.findOne({ email: email.toLowerCase() });
+            user = await User.findOne({ 'profile.email': email.toLowerCase() });
             
             if (!user) {
                 return res.status(404).json({
@@ -544,7 +560,7 @@ const verifyOTPForPasswordReset = async (req, res) => {
             
             // Try each variation
             for (const phoneVar of phoneVariations) {
-                user = await User.findOne({ phoneNumber: phoneVar });
+                user = await User.findOne({ 'profile.phoneNumbers.primary': phoneVar });
                 if (user) {
                     break;
                 }
@@ -599,8 +615,8 @@ const verifyOTPForPasswordReset = async (req, res) => {
         const verificationToken = jwt.sign(
             {
                 userId: user._id,
-                email: user.email,
-                phoneNumber: user.phoneNumber,
+                email: user.profile.email,
+                phoneNumber: user.profile.phoneNumbers.primary,
                 purpose: 'password_reset'
             },
             process.env.JWT_SECRET,
@@ -612,7 +628,7 @@ const verifyOTPForPasswordReset = async (req, res) => {
             message: 'OTP verified successfully. You can now reset your password.',
             data: {
                 verificationToken,
-                email: user.email
+                email: user.profile.email
             }
         });
 
@@ -688,7 +704,8 @@ const resetPassword = async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
 
         // Update password
-        user.password = hashedPassword;
+        if (!user.auth) user.auth = {};
+        user.auth.password = hashedPassword;
         await user.save();
 
         res.status(200).json({
@@ -720,11 +737,11 @@ const getProfile = async (req, res) => {
         }
 
         // Populate company and institution data
-        await user.populate('workplace.company', 'name isCustom');
-        await user.populate('education.institution', 'name type city country logo verified isCustom');
+        await user.populate('professional.workplace.company', 'name isCustom');
+        await user.populate('professional.education.institution', 'name type city country logo verified isCustom');
 
         // Format workplace to include company name
-        const formattedWorkplace = user.workplace.map(work => ({
+        const formattedWorkplace = (user.professional?.workplace || []).map(work => ({
             company: work.company ? {
                 id: work.company._id,
                 name: work.company.name,
@@ -737,7 +754,7 @@ const getProfile = async (req, res) => {
         }));
 
         // Format education to include institution details
-        const formattedEducation = (user.education || []).map(edu => ({
+        const formattedEducation = (user.professional?.education || []).map(edu => ({
             institution: edu.institution ? {
                 id: edu.institution._id,
                 name: edu.institution.name,
@@ -755,38 +772,62 @@ const getProfile = async (req, res) => {
         }));
 
         // Get number of friends
-        const numberOfFriends = user.friends ? user.friends.length : 0;
+        const numberOfFriends = user.social?.friends ? user.social.friends.length : 0;
 
+        // IMPORTANT: Do NOT expose auth data in profile API
         res.status(200).json({
             success: true,
             message: 'User profile retrieved successfully',
             data: {
                 user: {
                     id: user._id,
-                    email: user.email,
-                    firstName: user.firstName,
-                    lastName: user.lastName,
-                    phoneNumber: user.phoneNumber,
-                    alternatePhoneNumber: user.alternatePhoneNumber,
-                    gender: user.gender,
-                    name: user.name,
-                    dob: user.dob,
-                    profileImage: user.profileImage,
-                    coverPhoto: user.coverPhoto,
-                    bio: user.bio,
-                    currentCity: user.currentCity,
-                    hometown: user.hometown,
-                    relationshipStatus: user.relationshipStatus,
-                    workplace: formattedWorkplace,
-                    education: formattedEducation,
-                    isGoogleOAuth: user.isGoogleOAuth,
-                    googleId: user.googleId,
-                    numberOfFriends: numberOfFriends,
-                    generalWeightage: user.generalWeightage || 0,
-                    professionalWeightage: user.professionalWeightage || 0,
-                    token: user.token || null,
-                    createdAt: user.createdAt,
-                    updatedAt: user.updatedAt
+                    // Profile section
+                    profile: {
+                        name: {
+                            first: user.profile?.name?.first,
+                            last: user.profile?.name?.last,
+                            full: user.profile?.name?.full
+                        },
+                        email: user.profile?.email,
+                        phoneNumbers: {
+                            primary: user.profile?.phoneNumbers?.primary,
+                            alternate: user.profile?.phoneNumbers?.alternate
+                        },
+                        gender: user.profile?.gender,
+                        pronouns: user.profile?.pronouns,
+                        dob: user.profile?.dob,
+                        bio: user.profile?.bio,
+                        profileImage: user.profile?.profileImage,
+                        coverPhoto: user.profile?.coverPhoto
+                    },
+                    // Location section
+                    location: {
+                        currentCity: user.location?.currentCity,
+                        hometown: user.location?.hometown
+                    },
+                    // Social section
+                    social: {
+                        numberOfFriends: numberOfFriends,
+                        relationshipStatus: user.social?.relationshipStatus
+                    },
+                    // Professional section
+                    professional: {
+                        workplace: formattedWorkplace,
+                        education: formattedEducation
+                    },
+                    // Content section
+                    content: {
+                        generalWeightage: user.content?.generalWeightage || 0,
+                        professionalWeightage: user.content?.professionalWeightage || 0
+                    },
+                    // Account metadata (no sensitive data)
+                    account: {
+                        createdAt: user.createdAt,
+                        updatedAt: user.updatedAt,
+                        isActive: user.account?.isActive,
+                        isVerified: user.account?.isVerified,
+                        lastLogin: user.account?.lastLogin
+                    }
                 }
             }
         });
@@ -813,11 +854,11 @@ const refreshToken = async (req, res) => {
         }
 
         // Find user by refresh token (check both old single token and new array)
-        let user = await User.findOne({ refreshToken });
+        let user = await User.findOne({ 'auth.refreshToken': refreshToken });
         
         // If not found in single token field, check refreshTokens array
         if (!user) {
-            user = await User.findOne({ 'refreshTokens.token': refreshToken });
+            user = await User.findOne({ 'auth.tokens.refreshTokens.token': refreshToken });
         }
 
         if (!user) {
@@ -829,12 +870,12 @@ const refreshToken = async (req, res) => {
 
         // Check if token exists in refreshTokens array
         let tokenRecord = null;
-        if (user.refreshTokens && Array.isArray(user.refreshTokens)) {
-            tokenRecord = user.refreshTokens.find(rt => rt.token === refreshToken);
+        if (user.auth?.tokens?.refreshTokens && Array.isArray(user.auth.tokens.refreshTokens)) {
+            tokenRecord = user.auth.tokens.refreshTokens.find(rt => rt.token === refreshToken);
         }
 
         // Fallback to single token field for backward compatibility
-        if (!tokenRecord && user.refreshToken === refreshToken) {
+        if (!tokenRecord && user.auth?.refreshToken === refreshToken) {
             // Token found in single field - check if it's still valid
             // Note: We no longer check expiry date - tokens only expire on explicit logout
             // The expiryDate check is removed to allow indefinite login
@@ -849,7 +890,7 @@ const refreshToken = async (req, res) => {
         }
 
         // Generate new access token
-        const accessToken = generateAccessToken({ id: user._id, email: user.email });
+        const accessToken = generateAccessToken({ id: user._id, email: user.profile.email });
 
         res.status(200).json({
             success: true,
@@ -877,46 +918,51 @@ const logout = async (req, res) => {
         let loggedOutDevice = null;
         let remainingDevices = 0;
 
+        // Ensure auth structure exists
+        if (!user.auth) user.auth = {};
+        if (!user.auth.tokens) user.auth.tokens = {};
+        if (!user.auth.tokens.refreshTokens) user.auth.tokens.refreshTokens = [];
+
         if (refreshToken || deviceId) {
             // Remove specific refresh token from array
-            if (user.refreshTokens && Array.isArray(user.refreshTokens)) {
-                const beforeCount = user.refreshTokens.length;
+            if (user.auth.tokens.refreshTokens && Array.isArray(user.auth.tokens.refreshTokens)) {
+                const beforeCount = user.auth.tokens.refreshTokens.length;
                 
                 // Find device info before removing
                 if (refreshToken) {
-                    const deviceToLogout = user.refreshTokens.find(rt => rt.token === refreshToken);
+                    const deviceToLogout = user.auth.tokens.refreshTokens.find(rt => rt.token === refreshToken);
                     if (deviceToLogout) {
-                        loggedOutDevice = parseDeviceInfo(deviceToLogout.deviceInfo);
+                        loggedOutDevice = parseDeviceInfo(deviceToLogout.device);
                     }
                 } else if (deviceId) {
                     // deviceId is 1-based index from getDevices response
                     const deviceIndex = parseInt(deviceId) - 1;
-                    if (deviceIndex >= 0 && deviceIndex < user.refreshTokens.length) {
+                    if (deviceIndex >= 0 && deviceIndex < user.auth.tokens.refreshTokens.length) {
                         // Sort tokens by createdAt to match getDevices order
-                        const sortedTokens = [...user.refreshTokens].sort((a, b) => 
+                        const sortedTokens = [...user.auth.tokens.refreshTokens].sort((a, b) => 
                             new Date(b.createdAt) - new Date(a.createdAt)
                         );
                         const deviceToLogout = sortedTokens[deviceIndex];
                         if (deviceToLogout) {
-                            loggedOutDevice = parseDeviceInfo(deviceToLogout.deviceInfo);
+                            loggedOutDevice = parseDeviceInfo(deviceToLogout.device);
                             // Remove the actual token from array
-                            user.refreshTokens = user.refreshTokens.filter(
+                            user.auth.tokens.refreshTokens = user.auth.tokens.refreshTokens.filter(
                                 rt => rt.token !== deviceToLogout.token
                             );
                         }
                     }
                 } else {
                     // Remove by refreshToken
-                    user.refreshTokens = user.refreshTokens.filter(
+                    user.auth.tokens.refreshTokens = user.auth.tokens.refreshTokens.filter(
                         rt => rt.token !== refreshToken
                     );
                 }
                 
-                remainingDevices = user.refreshTokens.length;
+                remainingDevices = user.auth.tokens.refreshTokens.length;
             }
             
             // Also clear single token if it matches
-            if (user.refreshToken === refreshToken) {
+            if (user.auth.refreshToken === refreshToken) {
                 if (!loggedOutDevice) {
                     loggedOutDevice = {
                         deviceName: 'Legacy Device',
@@ -925,15 +971,15 @@ const logout = async (req, res) => {
                         os: 'Unknown'
                     };
                 }
-                user.refreshToken = null;
-                user.refreshTokenExpiry = null;
+                user.auth.refreshToken = null;
+                user.auth.refreshTokenExpiry = null;
             }
         } else {
             // If no specific token provided, clear all tokens (logout from all devices)
-            const totalDevices = (user.refreshTokens?.length || 0) + (user.refreshToken ? 1 : 0);
-            user.refreshToken = null;
-            user.refreshTokenExpiry = null;
-            user.refreshTokens = [];
+            const totalDevices = (user.auth.tokens.refreshTokens?.length || 0) + (user.auth.refreshToken ? 1 : 0);
+            user.auth.refreshToken = null;
+            user.auth.refreshTokenExpiry = null;
+            user.auth.tokens.refreshTokens = [];
             remainingDevices = 0;
         }
 
@@ -970,11 +1016,23 @@ const updateProfile = async (req, res) => {
         const user = req.user; // From protect middleware
         const { firstName, lastName, phoneNumber, gender, dob, alternatePhoneNumber, profileImage, age, bio, currentCity, hometown, relationshipStatus, workplace, education } = req.body;
 
-        // List of allowed fields to update
+        // List of allowed fields to update (using nested structure)
         const allowedUpdates = {};
         
-        if (firstName !== undefined) allowedUpdates.firstName = firstName;
-        if (lastName !== undefined) allowedUpdates.lastName = lastName;
+        // Ensure nested structures exist
+        if (!user.profile) user.profile = {};
+        if (!user.profile.name) user.profile.name = {};
+        if (!user.profile.phoneNumbers) user.profile.phoneNumbers = {};
+        if (!user.location) user.location = {};
+        if (!user.social) user.social = {};
+        if (!user.professional) user.professional = {};
+        
+        if (firstName !== undefined) {
+            allowedUpdates['profile.name.first'] = firstName;
+        }
+        if (lastName !== undefined) {
+            allowedUpdates['profile.name.last'] = lastName;
+        }
         if (phoneNumber !== undefined) {
             // Normalize phone number
             let normalizedPhone = phoneNumber.replace(/[\s\-\(\)]/g, '');
@@ -984,7 +1042,7 @@ const updateProfile = async (req, res) => {
             
             // Check if phone number is already taken by another user
             const existingPhoneUser = await User.findOne({ 
-                phoneNumber: normalizedPhone,
+                'profile.phoneNumbers.primary': normalizedPhone,
                 _id: { $ne: user._id } // Exclude current user
             });
             
@@ -995,7 +1053,7 @@ const updateProfile = async (req, res) => {
                 });
             }
             
-            allowedUpdates.phoneNumber = normalizedPhone;
+            allowedUpdates['profile.phoneNumbers.primary'] = normalizedPhone;
         }
         if (gender !== undefined) {
             // Validate gender
@@ -1006,10 +1064,10 @@ const updateProfile = async (req, res) => {
                     message: 'Gender must be one of: Male, Female, Other, Prefer not to say'
                 });
             }
-            allowedUpdates.gender = gender;
+            allowedUpdates['profile.gender'] = gender;
         }
         if (dob !== undefined) {
-            allowedUpdates.dob = dob;
+            allowedUpdates['profile.dob'] = dob;
         }
         if (alternatePhoneNumber !== undefined) {
             // Normalize alternate phone number
@@ -1017,10 +1075,10 @@ const updateProfile = async (req, res) => {
             if (!normalizedAltPhone.startsWith('+')) {
                 normalizedAltPhone = '+' + normalizedAltPhone;
             }
-            allowedUpdates.alternatePhoneNumber = normalizedAltPhone;
+            allowedUpdates['profile.phoneNumbers.alternate'] = normalizedAltPhone;
         }
         if (profileImage !== undefined) {
-            allowedUpdates.profileImage = profileImage;
+            allowedUpdates['profile.profileImage'] = profileImage;
         }
         
         // Handle age field - convert to dob if provided
@@ -1034,29 +1092,29 @@ const updateProfile = async (req, res) => {
             // Calculate date of birth from age
             const today = new Date();
             const birthYear = today.getFullYear() - age;
-            allowedUpdates.dob = new Date(birthYear, today.getMonth(), today.getDate());
+            allowedUpdates['profile.dob'] = new Date(birthYear, today.getMonth(), today.getDate());
         }
 
         // Handle bio
         if (bio !== undefined) {
-            allowedUpdates.bio = bio.trim();
+            allowedUpdates['profile.bio'] = bio.trim();
         }
 
         // Handle currentCity
         if (currentCity !== undefined) {
-            allowedUpdates.currentCity = currentCity.trim();
+            allowedUpdates['location.currentCity'] = currentCity.trim();
         }
 
         // Handle hometown
         if (hometown !== undefined) {
-            allowedUpdates.hometown = hometown.trim();
+            allowedUpdates['location.hometown'] = hometown.trim();
         }
 
         // Handle relationshipStatus (optional field)
         if (relationshipStatus !== undefined) {
             if (relationshipStatus === null || relationshipStatus === '') {
                 // Allow explicitly setting to null/empty to clear the field
-                allowedUpdates.relationshipStatus = null;
+                allowedUpdates['social.relationshipStatus'] = null;
             } else {
                 const validStatuses = ['Single', 'In a relationship', 'Engaged', 'Married', 'In a civil partnership', 'In a domestic partnership', 'In an open relationship', "It's complicated", 'Separated', 'Divorced', 'Widowed'];
                 if (!validStatuses.includes(relationshipStatus)) {
@@ -1065,7 +1123,7 @@ const updateProfile = async (req, res) => {
                         message: `Relationship status must be one of: ${validStatuses.join(', ')}`
                     });
                 }
-                allowedUpdates.relationshipStatus = relationshipStatus;
+                allowedUpdates['social.relationshipStatus'] = relationshipStatus;
             }
         }
 
@@ -1167,7 +1225,7 @@ const updateProfile = async (req, res) => {
                 };
                 processedWorkplace.push(processedWork);
             }
-            allowedUpdates.workplace = processedWorkplace;
+            allowedUpdates['professional.workplace'] = processedWorkplace;
         }
 
         // Handle education (array of education entries)
@@ -1327,14 +1385,14 @@ const updateProfile = async (req, res) => {
                 };
                 processedEducation.push(processedEdu);
             }
-            allowedUpdates.education = processedEducation;
+            allowedUpdates['professional.education'] = processedEducation;
         }
 
-        // Update name field if firstName or lastName changed
-        if (allowedUpdates.firstName || allowedUpdates.lastName) {
-            const updatedFirstName = allowedUpdates.firstName || user.firstName;
-            const updatedLastName = allowedUpdates.lastName || user.lastName;
-            allowedUpdates.name = `${updatedFirstName} ${updatedLastName}`.trim();
+        // Update name.full field if firstName or lastName changed
+        if (firstName !== undefined || lastName !== undefined) {
+            const updatedFirstName = firstName !== undefined ? firstName : (user.profile?.name?.first || '');
+            const updatedLastName = lastName !== undefined ? lastName : (user.profile?.name?.last || '');
+            allowedUpdates['profile.name.full'] = `${updatedFirstName} ${updatedLastName}`.trim();
         }
 
         // Check if there are any updates
@@ -1345,16 +1403,16 @@ const updateProfile = async (req, res) => {
             });
         }
 
-        // Update user
-        Object.assign(user, allowedUpdates);
-        await user.save();
-
-        // Populate company and institution data for response
-        await user.populate('workplace.company', 'name isCustom');
-        await user.populate('education.institution', 'name type city country logo verified isCustom');
+        // Update user using MongoDB $set for nested paths
+        await User.findByIdAndUpdate(user._id, { $set: allowedUpdates }, { new: true, runValidators: true });
+        
+        // Reload user to get updated data
+        const updatedUser = await User.findById(user._id);
+        await updatedUser.populate('professional.workplace.company', 'name isCustom');
+        await updatedUser.populate('professional.education.institution', 'name type city country logo verified isCustom');
 
         // Format workplace to include company name
-        const formattedWorkplace = user.workplace.map(work => ({
+        const formattedWorkplace = (updatedUser.professional?.workplace || []).map(work => ({
             company: work.company ? {
                 id: work.company._id,
                 name: work.company.name,
@@ -1367,7 +1425,7 @@ const updateProfile = async (req, res) => {
         }));
 
         // Format education to include institution details
-        const formattedEducation = (user.education || []).map(edu => ({
+        const formattedEducation = (updatedUser.professional?.education || []).map(edu => ({
             institution: edu.institution ? {
                 id: edu.institution._id,
                 name: edu.institution.name,
@@ -1390,31 +1448,51 @@ const updateProfile = async (req, res) => {
             percentage: edu.percentage
         }));
 
+        // IMPORTANT: Do NOT expose auth data in profile API
         res.status(200).json({
             success: true,
             message: 'Profile updated successfully',
             data: {
                 user: {
-                    id: user._id,
-                    email: user.email,
-                    firstName: user.firstName,
-                    lastName: user.lastName,
-                    phoneNumber: user.phoneNumber,
-                    alternatePhoneNumber: user.alternatePhoneNumber,
-                    gender: user.gender,
-                    name: user.name,
-                    dob: user.dob,
-                    profileImage: user.profileImage,
-                    bio: user.bio,
-                    currentCity: user.currentCity,
-                    hometown: user.hometown,
-                    relationshipStatus: user.relationshipStatus,
-                    workplace: formattedWorkplace,
-                    education: formattedEducation,
-                    isGoogleOAuth: user.isGoogleOAuth,
-                    googleId: user.googleId,
-                    createdAt: user.createdAt,
-                    updatedAt: user.updatedAt
+                    id: updatedUser._id,
+                    // Profile section
+                    profile: {
+                        name: {
+                            first: updatedUser.profile?.name?.first,
+                            last: updatedUser.profile?.name?.last,
+                            full: updatedUser.profile?.name?.full
+                        },
+                        email: updatedUser.profile?.email,
+                        phoneNumbers: {
+                            primary: updatedUser.profile?.phoneNumbers?.primary,
+                            alternate: updatedUser.profile?.phoneNumbers?.alternate
+                        },
+                        gender: updatedUser.profile?.gender,
+                        pronouns: updatedUser.profile?.pronouns,
+                        dob: updatedUser.profile?.dob,
+                        bio: updatedUser.profile?.bio,
+                        profileImage: updatedUser.profile?.profileImage,
+                        coverPhoto: updatedUser.profile?.coverPhoto
+                    },
+                    // Location section
+                    location: {
+                        currentCity: updatedUser.location?.currentCity,
+                        hometown: updatedUser.location?.hometown
+                    },
+                    // Social section
+                    social: {
+                        relationshipStatus: updatedUser.social?.relationshipStatus
+                    },
+                    // Professional section
+                    professional: {
+                        workplace: formattedWorkplace,
+                        education: formattedEducation
+                    },
+                    // Account metadata (no sensitive data)
+                    account: {
+                        createdAt: updatedUser.createdAt,
+                        updatedAt: updatedUser.updatedAt
+                    }
                 }
             }
         });
@@ -1510,9 +1588,9 @@ const getDevices = async (req, res) => {
         const devices = [];
         
         // Check refreshTokens array
-        if (user.refreshTokens && Array.isArray(user.refreshTokens)) {
-            user.refreshTokens.forEach((tokenRecord) => {
-                const parsedInfo = parseDeviceInfo(tokenRecord.deviceInfo);
+        if (user.auth?.tokens?.refreshTokens && Array.isArray(user.auth.tokens.refreshTokens)) {
+            user.auth.tokens.refreshTokens.forEach((tokenRecord) => {
+                const parsedInfo = parseDeviceInfo(tokenRecord.device);
                 devices.push({
                     deviceInfo: parsedInfo,
                     loggedInAt: tokenRecord.createdAt || new Date(),
@@ -1524,8 +1602,8 @@ const getDevices = async (req, res) => {
         }
         
         // Also check single refreshToken field for backward compatibility
-        if (user.refreshToken) {
-            const tokenPreview = user.refreshToken.substring(0, 16);
+        if (user.auth?.refreshToken) {
+            const tokenPreview = user.auth.refreshToken.substring(0, 16);
             const alreadyIncluded = devices.some(d => d.tokenId === tokenPreview);
             
             if (!alreadyIncluded) {
@@ -1537,8 +1615,8 @@ const getDevices = async (req, res) => {
                         os: 'Unknown',
                         raw: 'Legacy Device'
                     },
-                    loggedInAt: user.refreshTokenExpiry || new Date(),
-                    isCurrentDevice: currentRefreshToken ? user.refreshToken === currentRefreshToken : false,
+                    loggedInAt: user.auth.refreshTokenExpiry || new Date(),
+                    isCurrentDevice: currentRefreshToken ? user.auth.refreshToken === currentRefreshToken : false,
                     tokenId: tokenPreview
                 });
             }

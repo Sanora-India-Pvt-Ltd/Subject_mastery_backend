@@ -24,8 +24,8 @@ const manageDeviceLimit = (user) => {
 const generateToken = (user) => {
     return generateAccessToken({
         id: user._id,
-        email: user.email,
-        name: user.name,
+        email: user.profile?.email,
+        name: user.profile?.name?.full,
         isGoogleOAuth: user.googleId ? true : false
     });
 };
@@ -105,32 +105,61 @@ const googleLoginMobile = async (req, res) => {
         const picture = payload.picture;
 
         // Find or create user
-        let user = await User.findOne({ email });
+        let user = await User.findOne({ 'profile.email': email });
 
         if (!user) {
+            const nameParts = name.split(" ");
             user = await User.create({
-                email,
-                name,
-                firstName: name.split(" ")[0],
-                lastName: name.split(" ").slice(1).join(" "),
-                gender: 'Other', // Default gender since Google doesn't provide this
-                googleId,
-                profileImage: picture,
-                isGoogleOAuth: true,
-                password: "oauth-user"
+                profile: {
+                    email,
+                    name: {
+                        first: nameParts[0] || 'User',
+                        last: nameParts.slice(1).join(" ") || 'User',
+                        full: name
+                    },
+                    gender: 'Other', // Default gender since Google doesn't provide this
+                    profileImage: picture
+                },
+                auth: {
+                    password: "oauth-user",
+                    isGoogleOAuth: true,
+                    googleId: googleId,
+                    tokens: {
+                        refreshTokens: []
+                    }
+                },
+                account: {
+                    isActive: true,
+                    isVerified: false
+                },
+                social: {
+                    friends: [],
+                    blockedUsers: []
+                },
+                location: {},
+                professional: {
+                    education: [],
+                    workplace: []
+                },
+                content: {
+                    generalWeightage: 0,
+                    professionalWeightage: 0
+                }
             });
         } else {
-            if (!user.googleId) user.googleId = googleId;
-            if (!user.profileImage) user.profileImage = picture;
-            user.isGoogleOAuth = true;
+            if (!user.auth) user.auth = {};
+            if (!user.auth.googleId) user.auth.googleId = googleId;
+            if (!user.profile) user.profile = {};
+            if (!user.profile.profileImage) user.profile.profileImage = picture;
+            user.auth.isGoogleOAuth = true;
             await user.save();
         }
 
         // Tokens
         const accessToken = generateAccessToken({
             id: user._id,
-            email: user.email,
-            name: user.name
+            email: user.profile?.email,
+            name: user.profile?.name?.full
         });
 
         const { token: refreshToken, expiryDate } = generateRefreshToken();
@@ -248,9 +277,9 @@ const googleCallback = (req, res, next) => {
             // Generate access token and refresh token
             const accessToken = generateAccessToken({
                 id: user._id,
-                email: user.email,
-                name: user.name,
-                isGoogleOAuth: user.googleId ? true : false
+                email: user.profile?.email,
+                name: user.profile?.name?.full,
+                isGoogleOAuth: user.auth?.googleId ? true : false
             });
             const { token: refreshToken, expiryDate: refreshTokenExpiry } = generateRefreshToken();
             
@@ -290,7 +319,7 @@ const googleCallback = (req, res, next) => {
             // Determine if this is a new user
             const isNewUser = !user.createdAt || (Date.now() - new Date(user.createdAt).getTime()) < 5000;
             
-            console.log(`✅ Google OAuth successful for ${user.email}`);
+            console.log(`✅ Google OAuth successful for ${user.profile?.email}`);
             console.log(`📱 Platform: ${isMobile ? (platform || 'mobile') : 'web'}`);
             
             // Check if JSON response is requested (for API clients)
@@ -312,13 +341,13 @@ const googleCallback = (req, res, next) => {
                             isNewUser,
                             user: {
                                 id: user._id,
-                                email: user.email,
-                                firstName: user.firstName,
-                                lastName: user.lastName,
-                                phoneNumber: user.phoneNumber,
-                                gender: user.gender,
-                                name: user.name,
-                                profileImage: user.profileImage
+                                email: user.profile?.email,
+                                firstName: user.profile?.name?.first,
+                                lastName: user.profile?.name?.last,
+                                phoneNumber: user.profile?.phoneNumbers?.primary,
+                                gender: user.profile?.gender,
+                                name: user.profile?.name?.full,
+                                profileImage: user.profile?.profileImage
                             }
                         }
                     });
@@ -337,7 +366,7 @@ const googleCallback = (req, res, next) => {
                 }
                 
                 // Create deep link URL (include all tokens for consistency)
-                const deepLinkUrl = `${deepLinkScheme}://auth/callback?token=${token}&accessToken=${accessToken}&refreshToken=${refreshToken}&email=${encodeURIComponent(user.email)}&name=${encodeURIComponent(user.name || '')}&isNewUser=${isNewUser}`;
+                const deepLinkUrl = `${deepLinkScheme}://auth/callback?token=${token}&accessToken=${accessToken}&refreshToken=${refreshToken}&email=${encodeURIComponent(user.profile?.email || '')}&name=${encodeURIComponent(user.profile?.name?.full || '')}&isNewUser=${isNewUser}`;
                 
                 // Return HTML page that automatically opens deep link
                 const html = `<!DOCTYPE html>
@@ -471,8 +500,8 @@ const googleCallback = (req, res, next) => {
             redirectUrl.searchParams.append('token', token);
             redirectUrl.searchParams.append('accessToken', accessToken);
             redirectUrl.searchParams.append('refreshToken', refreshToken);
-            redirectUrl.searchParams.append('name', encodeURIComponent(user.name || ''));
-            redirectUrl.searchParams.append('email', user.email);
+            redirectUrl.searchParams.append('name', encodeURIComponent(user.profile?.name?.full || ''));
+            redirectUrl.searchParams.append('email', user.profile?.email || '');
             redirectUrl.searchParams.append('isNewUser', isNewUser);
             
             res.redirect(redirectUrl.toString());
@@ -498,7 +527,7 @@ const googleCallback = (req, res, next) => {
                         profileImage: user.profileImage
                     }
                 },
-                redirectUrl: `${frontendUrl}/auth/callback?token=${token}&email=${encodeURIComponent(user.email)}`,
+                redirectUrl: `${frontendUrl}/auth/callback?token=${token}&email=${encodeURIComponent(user.profile?.email || '')}`,
                 note: 'Please set FRONTEND_URL environment variable to enable automatic redirect'
             });
         }
@@ -530,14 +559,14 @@ const checkEmailExists = async (req, res) => {
     try {
         const { email } = req.body;
         
-        const user = await User.findOne({ email });
+        const user = await User.findOne({ 'profile.email': email });
         
         res.json({
             success: true,
             exists: !!user,
             data: {
                 email,
-                hasGoogleAccount: !!user?.googleId
+                hasGoogleAccount: !!user?.auth?.googleId
             }
         });
     } catch (error) {

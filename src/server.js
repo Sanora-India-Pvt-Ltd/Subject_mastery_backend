@@ -159,7 +159,7 @@ if (client && validClientIds.length > 0) {
             
             // Find or create user in database (normalize email)
             const normalizedEmail = email.toLowerCase().trim();
-            let user = await User.findOne({ email: normalizedEmail });
+            let user = await User.findOne({ 'profile.email': normalizedEmail });
             let isNewUser = false;
             
             if (!user) {
@@ -171,49 +171,85 @@ if (client && validClientIds.length > 0) {
                 
                 // New user signup - no OTP needed (Google already verified email)
                 user = await User.create({
-                    email: normalizedEmail,
-                    firstName,
-                    lastName,
-                    phoneNumber: '', // Google doesn't provide phone number, user can update later
-                    gender: 'Other', // Default gender since Google doesn't provide this
-                    name: displayName,
-                    googleId,
-                    profileImage: picture || '',
-                    password: 'google-oauth',
-                    isGoogleOAuth: true
+                    profile: {
+                        name: {
+                            first: firstName,
+                            last: lastName,
+                            full: displayName
+                        },
+                        email: normalizedEmail,
+                        phoneNumbers: {
+                            primary: '' // Google doesn't provide phone number, user can update later
+                        },
+                        gender: 'Other', // Default gender since Google doesn't provide this
+                        profileImage: picture || ''
+                    },
+                    auth: {
+                        password: 'google-oauth',
+                        isGoogleOAuth: true,
+                        googleId,
+                        tokens: {
+                            refreshTokens: []
+                        }
+                    },
+                    account: {
+                        isActive: true,
+                        isVerified: true, // Google verified
+                        lastLogin: new Date()
+                    },
+                    social: {
+                        friends: [],
+                        blockedUsers: []
+                    },
+                    location: {},
+                    professional: {
+                        education: [],
+                        workplace: []
+                    },
+                    content: {
+                        generalWeightage: 0,
+                        professionalWeightage: 0
+                    }
                 });
                 isNewUser = true;
                 console.log(`✅ Created new Google OAuth user: ${normalizedEmail}`);
             } else {
                 // User exists - link Google account if not already linked
-                if (!user.googleId) {
+                if (!user.auth?.googleId) {
                     // Link Google account to existing user (from regular signup)
                     // Update name fields if not already set
-                    if (!user.firstName || !user.lastName) {
+                    if (!user.profile?.name?.first || !user.profile?.name?.last) {
                         const displayName = name || email.split('@')[0] || 'User';
                         const nameParts = displayName.trim().split(/\s+/);
-                        user.firstName = user.firstName || nameParts[0] || 'User';
-                        user.lastName = user.lastName || nameParts.slice(1).join(' ') || 'User';
+                        if (!user.profile) user.profile = {};
+                        if (!user.profile.name) user.profile.name = {};
+                        user.profile.name.first = user.profile.name.first || nameParts[0] || 'User';
+                        user.profile.name.last = user.profile.name.last || nameParts.slice(1).join(' ') || 'User';
+                        user.profile.name.full = displayName;
                     }
                     // Update profile image if not set
-                    if (!user.profileImage && picture) {
-                        user.profileImage = picture;
+                    if (!user.profile?.profileImage && picture) {
+                        if (!user.profile) user.profile = {};
+                        user.profile.profileImage = picture;
                     }
-                    // Update name if not set
-                    if (!user.name && name) {
-                        user.name = name;
-                    }
-                    user.googleId = googleId;
-                    user.isGoogleOAuth = true;
+                    // Link Google account
+                    if (!user.auth) user.auth = {};
+                    user.auth.googleId = googleId;
+                    user.auth.isGoogleOAuth = true;
                     await user.save();
                     console.log(`✅ Linked Google account to existing user: ${normalizedEmail}`);
                 } else {
                     // User already has Google account linked - just allow login
                     // Update profile image if provided and different
-                    if (picture && user.profileImage !== picture) {
-                        user.profileImage = picture;
+                    if (picture && user.profile?.profileImage !== picture) {
+                        if (!user.profile) user.profile = {};
+                        user.profile.profileImage = picture;
                         await user.save();
                     }
+                    // Update last login
+                    if (!user.account) user.account = {};
+                    user.account.lastLogin = new Date();
+                    await user.save();
                     console.log(`✅ Google OAuth login for existing user: ${normalizedEmail}`);
                 }
             }
@@ -223,15 +259,38 @@ if (client && validClientIds.length > 0) {
             const { generateAccessToken, generateRefreshToken } = require('./middleware/auth');
             const accessToken = generateAccessToken({
                 id: user._id,
-                email: user.email,
-                name: user.name,
+                email: user.profile.email,
+                name: user.profile.name.full,
                 isGoogleOAuth: true
             });
             const { token: refreshToken, expiryDate: refreshTokenExpiry } = generateRefreshToken();
             
-            // Save refresh token and expiry to database
-            user.refreshToken = refreshToken;
-            user.refreshTokenExpiry = refreshTokenExpiry;
+            // Get device info
+            const deviceInfo = req.headers['user-agent'] || 'Unknown Device';
+            
+            // Initialize auth structure if needed
+            if (!user.auth) user.auth = {};
+            if (!user.auth.tokens) user.auth.tokens = {};
+            if (!user.auth.tokens.refreshTokens) user.auth.tokens.refreshTokens = [];
+            
+            // Manage device limit
+            const MAX_DEVICES = 5;
+            if (user.auth.tokens.refreshTokens.length >= MAX_DEVICES) {
+                user.auth.tokens.refreshTokens.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+                user.auth.tokens.refreshTokens.shift();
+            }
+            
+            // Add new refresh token
+            user.auth.tokens.refreshTokens.push({
+                token: refreshToken,
+                expiresAt: refreshTokenExpiry,
+                device: deviceInfo.substring(0, 200),
+                createdAt: new Date()
+            });
+            
+            // Keep backward compatibility
+            user.auth.refreshToken = refreshToken;
+            user.auth.refreshTokenExpiry = refreshTokenExpiry;
             await user.save();
             
             res.json({
@@ -244,13 +303,13 @@ if (client && validClientIds.length > 0) {
                     isNewUser: isNewUser,
                     user: {
                         id: user._id,
-                        email: user.email,
-                        firstName: user.firstName,
-                        lastName: user.lastName,
-                        phoneNumber: user.phoneNumber,
-                        gender: user.gender,
-                        name: user.name,
-                        profileImage: user.profileImage
+                        email: user.profile.email,
+                        firstName: user.profile.name.first,
+                        lastName: user.profile.name.last,
+                        phoneNumber: user.profile.phoneNumbers.primary,
+                        gender: user.profile.gender,
+                        name: user.profile.name.full,
+                        profileImage: user.profile.profileImage
                     }
                 }
             });

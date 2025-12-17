@@ -24,7 +24,7 @@ const updateProfile = async (req, res) => {
                     message: 'First name cannot be empty'
                 });
             }
-            updateData.firstName = firstName.trim();
+            updateData['profile.name.first'] = firstName.trim();
         }
 
         if (lastName !== undefined) {
@@ -34,16 +34,16 @@ const updateProfile = async (req, res) => {
                     message: 'Last name cannot be empty'
                 });
             }
-            updateData.lastName = lastName.trim();
+            updateData['profile.name.last'] = lastName.trim();
         }
 
         if (name !== undefined) {
-            updateData.name = name.trim() || '';
+            updateData['profile.name.full'] = name.trim() || '';
         } else if (firstName !== undefined || lastName !== undefined) {
             // Auto-update name if firstName or lastName changed
-            const finalFirstName = updateData.firstName || user.firstName;
-            const finalLastName = updateData.lastName || user.lastName;
-            updateData.name = `${finalFirstName} ${finalLastName}`.trim();
+            const finalFirstName = updateData['profile.name.first'] || user.profile?.name?.first;
+            const finalLastName = updateData['profile.name.last'] || user.profile?.name?.last;
+            updateData['profile.name.full'] = `${finalFirstName} ${finalLastName}`.trim();
         }
 
         if (dob !== undefined) {
@@ -70,7 +70,7 @@ const updateProfile = async (req, res) => {
                     message: 'Date of birth is too far in the past (maximum 150 years)'
                 });
             }
-            updateData.dob = dobDate;
+            updateData['profile.dob'] = dobDate;
         }
 
         if (gender !== undefined) {
@@ -81,34 +81,34 @@ const updateProfile = async (req, res) => {
                     message: 'Gender must be one of: Male, Female, Other, Prefer not to say'
                 });
             }
-            updateData.gender = gender;
+            updateData['profile.gender'] = gender;
         }
 
         // Handle bio
         if (bio !== undefined) {
-            updateData.bio = bio.trim();
+            updateData['profile.bio'] = bio.trim();
         }
 
         // Handle currentCity
         if (currentCity !== undefined) {
-            updateData.currentCity = currentCity.trim();
+            updateData['location.currentCity'] = currentCity.trim();
         }
 
         // Handle hometown
         if (hometown !== undefined) {
-            updateData.hometown = hometown.trim();
+            updateData['location.hometown'] = hometown.trim();
         }
 
         // Handle coverPhoto (optional field - accepts URL string)
         if (coverPhoto !== undefined) {
             if (coverPhoto === null || coverPhoto === '') {
                 // Allow explicitly setting to null/empty to clear the field
-                updateData.coverPhoto = '';
+                updateData['profile.coverPhoto'] = '';
             } else {
                 // Validate that it's a valid URL format
                 try {
                     new URL(coverPhoto);
-                    updateData.coverPhoto = coverPhoto.trim();
+                    updateData['profile.coverPhoto'] = coverPhoto.trim();
                 } catch (urlError) {
                     return res.status(400).json({
                         success: false,
@@ -457,19 +457,19 @@ const updateProfile = async (req, res) => {
             data: {
                 user: {
                     id: updatedUser._id,
-                    email: updatedUser.email,
-                    firstName: updatedUser.firstName,
-                    lastName: updatedUser.lastName,
-                    name: updatedUser.name,
-                    dob: updatedUser.dob,
-                    phoneNumber: updatedUser.phoneNumber,
-                    alternatePhoneNumber: updatedUser.alternatePhoneNumber,
-                    gender: updatedUser.gender,
-                    profileImage: updatedUser.profileImage,
-                    coverPhoto: updatedUser.coverPhoto,
-                    bio: updatedUser.bio,
-                    currentCity: updatedUser.currentCity,
-                    hometown: updatedUser.hometown,
+                    email: updatedUser.profile?.email,
+                    firstName: updatedUser.profile?.name?.first,
+                    lastName: updatedUser.profile?.name?.last,
+                    name: updatedUser.profile?.name?.full,
+                    dob: updatedUser.profile?.dob,
+                    phoneNumber: updatedUser.profile?.phoneNumbers?.primary,
+                    alternatePhoneNumber: updatedUser.profile?.phoneNumbers?.alternate,
+                    gender: updatedUser.profile?.gender,
+                    profileImage: updatedUser.profile?.profileImage,
+                    coverPhoto: updatedUser.profile?.coverPhoto,
+                    bio: updatedUser.profile?.bio,
+                    currentCity: updatedUser.location?.currentCity,
+                    hometown: updatedUser.location?.hometown,
                     relationshipStatus: updatedUser.relationshipStatus,
                     workplace: formattedWorkplace,
                     education: formattedEducation,
@@ -510,7 +510,7 @@ const sendOTPForPhoneUpdate = async (req, res) => {
 
         // Check if phone number is already taken by another user
         const existingUser = await User.findOne({ 
-            phoneNumber: normalizedPhone,
+            'profile.phoneNumbers.primary': normalizedPhone,
             _id: { $ne: user._id } // Exclude current user
         });
         
@@ -522,7 +522,7 @@ const sendOTPForPhoneUpdate = async (req, res) => {
         }
 
         // Check if it's the same as current phone number
-        if (user.phoneNumber === normalizedPhone) {
+        if (user.profile?.phoneNumbers?.primary === normalizedPhone) {
             return res.status(400).json({
                 success: false,
                 message: 'This is already your current phone number'
@@ -631,7 +631,7 @@ const verifyOTPAndUpdatePhone = async (req, res) => {
         // Update phone number
         const updatedUser = await User.findByIdAndUpdate(
             user._id,
-            { phoneNumber: normalizedPhone },
+            { 'profile.phoneNumbers.primary': normalizedPhone },
             { new: true, runValidators: true }
         ).select('-password -refreshToken');
 
@@ -641,15 +641,15 @@ const verifyOTPAndUpdatePhone = async (req, res) => {
             data: {
                 user: {
                     id: updatedUser._id,
-                    email: updatedUser.email,
-                    firstName: updatedUser.firstName,
-                    lastName: updatedUser.lastName,
-                    name: updatedUser.name,
-                    dob: updatedUser.dob,
-                    phoneNumber: updatedUser.phoneNumber,
-                    alternatePhoneNumber: updatedUser.alternatePhoneNumber,
-                    gender: updatedUser.gender,
-                    profileImage: updatedUser.profileImage,
+                    email: updatedUser.profile?.email,
+                    firstName: updatedUser.profile?.name?.first,
+                    lastName: updatedUser.profile?.name?.last,
+                    name: updatedUser.profile?.name?.full,
+                    dob: updatedUser.profile?.dob,
+                    phoneNumber: updatedUser.profile?.phoneNumbers?.primary,
+                    alternatePhoneNumber: updatedUser.profile?.phoneNumbers?.alternate,
+                    gender: updatedUser.profile?.gender,
+                    profileImage: updatedUser.profile?.profileImage,
                     createdAt: updatedUser.createdAt,
                     updatedAt: updatedUser.updatedAt
                 }
@@ -694,8 +694,8 @@ const sendOTPForAlternatePhone = async (req, res) => {
         // Check if alternate phone number is already taken by another user
         const existingUser = await User.findOne({ 
             $or: [
-                { phoneNumber: normalizedPhone, _id: { $ne: user._id } },
-                { alternatePhoneNumber: normalizedPhone, _id: { $ne: user._id } }
+                { 'profile.phoneNumbers.primary': normalizedPhone, _id: { $ne: user._id } },
+                { 'profile.phoneNumbers.alternate': normalizedPhone, _id: { $ne: user._id } }
             ]
         });
         
@@ -707,7 +707,7 @@ const sendOTPForAlternatePhone = async (req, res) => {
         }
 
         // Check if it's the same as current phone number
-        if (user.phoneNumber === normalizedPhone) {
+        if (user.profile?.phoneNumbers?.primary === normalizedPhone) {
             return res.status(400).json({
                 success: false,
                 message: 'Alternate phone number cannot be the same as your primary phone number'
@@ -787,8 +787,8 @@ const verifyOTPAndUpdateAlternatePhone = async (req, res) => {
         // Check if alternate phone number is already taken by another user
         const existingUser = await User.findOne({ 
             $or: [
-                { phoneNumber: normalizedPhone, _id: { $ne: user._id } },
-                { alternatePhoneNumber: normalizedPhone, _id: { $ne: user._id } }
+                { 'profile.phoneNumbers.primary': normalizedPhone, _id: { $ne: user._id } },
+                { 'profile.phoneNumbers.alternate': normalizedPhone, _id: { $ne: user._id } }
             ]
         });
         
@@ -800,7 +800,7 @@ const verifyOTPAndUpdateAlternatePhone = async (req, res) => {
         }
 
         // Check if it's the same as current phone number
-        if (user.phoneNumber === normalizedPhone) {
+        if (user.profile?.phoneNumbers?.primary === normalizedPhone) {
             return res.status(400).json({
                 success: false,
                 message: 'Alternate phone number cannot be the same as your primary phone number'
@@ -915,15 +915,15 @@ const removeAlternatePhone = async (req, res) => {
             data: {
                 user: {
                     id: updatedUser._id,
-                    email: updatedUser.email,
-                    firstName: updatedUser.firstName,
-                    lastName: updatedUser.lastName,
-                    name: updatedUser.name,
-                    dob: updatedUser.dob,
-                    phoneNumber: updatedUser.phoneNumber,
-                    alternatePhoneNumber: updatedUser.alternatePhoneNumber,
-                    gender: updatedUser.gender,
-                    profileImage: updatedUser.profileImage,
+                    email: updatedUser.profile?.email,
+                    firstName: updatedUser.profile?.name?.first,
+                    lastName: updatedUser.profile?.name?.last,
+                    name: updatedUser.profile?.name?.full,
+                    dob: updatedUser.profile?.dob,
+                    phoneNumber: updatedUser.profile?.phoneNumbers?.primary,
+                    alternatePhoneNumber: updatedUser.profile?.phoneNumbers?.alternate,
+                    gender: updatedUser.profile?.gender,
+                    profileImage: updatedUser.profile?.profileImage,
                     createdAt: updatedUser.createdAt,
                     updatedAt: updatedUser.updatedAt
                 }
@@ -1014,8 +1014,8 @@ const uploadMedia = async (req, res) => {
                 fileSize: result.bytes || req.file.size,
                 uploadedBy: {
                     userId: user._id,
-                    email: user.email,
-                    name: user.name
+                    email: user.profile?.email,
+                    name: user.profile?.name?.full
                 },
                 uploadedAt: mediaRecord.createdAt
             }
@@ -1062,17 +1062,17 @@ const uploadProfileImage = async (req, res) => {
         const userFolder = `user_uploads/${user._id}/profile`;
 
         // Delete old profile image from Cloudinary if it exists
-        if (user.profileImage) {
+        if (user.profile?.profileImage) {
             try {
                 // Extract public_id from the old profile image URL
-                const oldPublicId = user.profileImage.split('/').slice(-2).join('/').split('.')[0];
+                const oldPublicId = user.profile.profileImage.split('/').slice(-2).join('/').split('.')[0];
                 // Try to delete the old image
                 await cloudinary.uploader.destroy(oldPublicId, { invalidate: true });
                 
                 // Also delete from Media collection
                 await Media.findOneAndDelete({ 
                     userId: user._id, 
-                    url: user.profileImage 
+                    url: user.profile.profileImage 
                 });
             } catch (deleteError) {
                 // Log but don't fail if old image deletion fails
@@ -1094,7 +1094,7 @@ const uploadProfileImage = async (req, res) => {
         // Update user's profileImage field
         const updatedUser = await User.findByIdAndUpdate(
             user._id,
-            { profileImage: result.secure_url },
+            { 'profile.profileImage': result.secure_url },
             { new: true, runValidators: true }
         ).select('-password -refreshToken');
 
@@ -1388,9 +1388,9 @@ const getUserImagesPublic = async (req, res) => {
             data: {
                 user: {
                     id: user._id.toString(),
-                    name: user.name,
-                    email: user.email,
-                    profileImage: user.profileImage
+                    name: user.profile?.name?.full,
+                    email: user.profile?.email,
+                    profileImage: user.profile?.profileImage
                 },
                 count: images.length,
                 totalImages: totalImages,
@@ -1620,7 +1620,7 @@ const updatePersonalInfo = async (req, res) => {
                     message: 'First name cannot be empty'
                 });
             }
-            updateData.firstName = firstName.trim();
+            updateData['profile.name.first'] = firstName.trim();
         }
 
         if (lastName !== undefined) {
@@ -1630,14 +1630,14 @@ const updatePersonalInfo = async (req, res) => {
                     message: 'Last name cannot be empty'
                 });
             }
-            updateData.lastName = lastName.trim();
+            updateData['profile.name.last'] = lastName.trim();
         }
 
         // Auto-update name if firstName or lastName changed
         if (firstName !== undefined || lastName !== undefined) {
-            const finalFirstName = updateData.firstName || user.firstName;
-            const finalLastName = updateData.lastName || user.lastName;
-            updateData.name = `${finalFirstName} ${finalLastName}`.trim();
+            const finalFirstName = updateData['profile.name.first'] || user.profile?.name?.first;
+            const finalLastName = updateData['profile.name.last'] || user.profile?.name?.last;
+            updateData['profile.name.full'] = `${finalFirstName} ${finalLastName}`.trim();
         }
 
         if (gender !== undefined) {
@@ -1648,7 +1648,7 @@ const updatePersonalInfo = async (req, res) => {
                     message: 'Gender must be one of: Male, Female, Other, Prefer not to say'
                 });
             }
-            updateData.gender = gender;
+            updateData['profile.gender'] = gender;
         }
 
         if (dob !== undefined) {
@@ -1675,7 +1675,7 @@ const updatePersonalInfo = async (req, res) => {
                     message: 'Date of birth is too far in the past (maximum 150 years)'
                 });
             }
-            updateData.dob = dobDate;
+            updateData['profile.dob'] = dobDate;
         }
 
         // Build unset object for fields that need to be cleared
@@ -1685,7 +1685,7 @@ const updatePersonalInfo = async (req, res) => {
         if (phoneNumber !== undefined) {
             if (phoneNumber === null || phoneNumber === '') {
                 // Allow clearing phone number - use $unset to properly remove it
-                unsetData.phoneNumber = '';
+                unsetData['profile.phoneNumbers.primary'] = '';
             } else {
                 // Normalize phone number
                 let normalizedPhone = phoneNumber.replace(/[\s\-\(\)]/g, '');
@@ -1695,7 +1695,7 @@ const updatePersonalInfo = async (req, res) => {
                 
                 // Check if phone number is already taken by another user
                 const existingUser = await User.findOne({ 
-                    phoneNumber: normalizedPhone,
+                    'profile.phoneNumbers.primary': normalizedPhone,
                     _id: { $ne: user._id }
                 });
                 
@@ -1706,7 +1706,7 @@ const updatePersonalInfo = async (req, res) => {
                     });
                 }
                 
-                updateData.phoneNumber = normalizedPhone;
+                updateData['profile.phoneNumbers.primary'] = normalizedPhone;
             }
         }
 
@@ -1714,7 +1714,7 @@ const updatePersonalInfo = async (req, res) => {
         if (alternatePhoneNumber !== undefined) {
             if (alternatePhoneNumber === null || alternatePhoneNumber === '') {
                 // Allow clearing alternate phone number - use $unset to properly remove it
-                unsetData.alternatePhoneNumber = '';
+                unsetData['profile.phoneNumbers.alternate'] = '';
             } else {
                 // Normalize phone number
                 let normalizedPhone = alternatePhoneNumber.replace(/[\s\-\(\)]/g, '');
@@ -1723,7 +1723,7 @@ const updatePersonalInfo = async (req, res) => {
                 }
                 
                 // Check if it's the same as primary phone number
-                const finalPhoneNumber = updateData.phoneNumber || user.phoneNumber;
+                const finalPhoneNumber = updateData['profile.phoneNumbers.primary'] || user.profile?.phoneNumbers?.primary;
                 if (finalPhoneNumber === normalizedPhone) {
                     return res.status(400).json({
                         success: false,
@@ -1734,8 +1734,8 @@ const updatePersonalInfo = async (req, res) => {
                 // Check if phone number is already taken by another user
                 const existingUser = await User.findOne({ 
                     $or: [
-                        { phoneNumber: normalizedPhone, _id: { $ne: user._id } },
-                        { alternatePhoneNumber: normalizedPhone, _id: { $ne: user._id } }
+                        { 'profile.phoneNumbers.primary': normalizedPhone, _id: { $ne: user._id } },
+                        { 'profile.phoneNumbers.alternate': normalizedPhone, _id: { $ne: user._id } }
                     ]
                 });
                 
@@ -1746,7 +1746,7 @@ const updatePersonalInfo = async (req, res) => {
                     });
                 }
                 
-                updateData.alternatePhoneNumber = normalizedPhone;
+                updateData['profile.phoneNumbers.alternate'] = normalizedPhone;
             }
         }
 
@@ -2214,9 +2214,9 @@ const searchUsers = async (req, res) => {
             _id: { $ne: user._id, $nin: blockedUserIds }, // Exclude current user and blocked users
             blockedUsers: { $ne: user._id }, // Exclude users who have blocked the current user
             $or: [
-                { firstName: { $regex: searchTerm, $options: 'i' } },
-                { lastName: { $regex: searchTerm, $options: 'i' } },
-                { name: { $regex: searchTerm, $options: 'i' } }
+                { 'profile.name.first': { $regex: searchTerm, $options: 'i' } },
+                { 'profile.name.last': { $regex: searchTerm, $options: 'i' } },
+                { 'profile.name.full': { $regex: searchTerm, $options: 'i' } }
             ]
         };
 
@@ -2226,7 +2226,7 @@ const searchUsers = async (req, res) => {
         // Search for users that match the query
         const users = await User.find(searchQuery)
             .select('-password -refreshToken -refreshTokens -email') // Exclude sensitive data
-            .sort({ name: 1 }) // Sort alphabetically
+            .sort({ 'profile.name.full': 1 }) // Sort alphabetically
             .skip(skip)
             .limit(limit);
 
@@ -2255,13 +2255,13 @@ const searchUsers = async (req, res) => {
             data: {
                 users: users.map(user => ({
                     id: user._id,
-                    firstName: user.firstName,
-                    lastName: user.lastName,
-                    name: user.name,
-                    profileImage: user.profileImage,
-                    bio: user.bio,
-                    currentCity: user.currentCity,
-                    hometown: user.hometown
+                    firstName: user.profile?.name?.first,
+                    lastName: user.profile?.name?.last,
+                    name: user.profile?.name?.full,
+                    profileImage: user.profile?.profileImage,
+                    bio: user.profile?.bio,
+                    currentCity: user.location?.currentCity,
+                    hometown: user.location?.hometown
                 })),
                 pagination: {
                     currentPage: page,
@@ -2564,7 +2564,7 @@ const blockUser = async (req, res) => {
 
         // Get updated user with blocked user details
         const updatedUser = await User.findById(userId)
-            .populate('blockedUsers', 'firstName lastName name profileImage email')
+            .populate('blockedUsers', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email')
             .select('blockedUsers');
 
         res.status(200).json({
@@ -2639,7 +2639,7 @@ const unblockUser = async (req, res) => {
 
         // Get updated user
         const updatedUser = await User.findById(userId)
-            .populate('blockedUsers', 'firstName lastName name profileImage email')
+            .populate('blockedUsers', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email')
             .select('blockedUsers');
 
         res.status(200).json({
@@ -2674,7 +2674,7 @@ const listBlockedUsers = async (req, res) => {
 
         // Get user with populated blocked users
         const user = await User.findById(userId)
-            .populate('blockedUsers', 'firstName lastName name profileImage email bio currentCity hometown')
+            .populate('blockedUsers', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email profile.bio location.currentCity location.hometown')
             .select('blockedUsers');
 
         if (!user) {

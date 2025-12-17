@@ -43,7 +43,8 @@ const protect = async (req, res, next) => {
 
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-            const user = await User.findById(decoded.id).select('-password');
+            // Exclude auth section for security - never expose auth data in req.user
+            const user = await User.findById(decoded.id).select('-auth');
             
             if (!user) {
                 return res.status(404).json({
@@ -78,11 +79,11 @@ const verifyRefreshToken = async (req, res, next) => {
         }
 
         // Find user by refresh token (check both old single token and new array)
-        let user = await User.findOne({ refreshToken });
+        let user = await User.findOne({ 'auth.refreshToken': refreshToken });
         
         // If not found in single token field, check refreshTokens array
         if (!user) {
-            user = await User.findOne({ 'refreshTokens.token': refreshToken });
+            user = await User.findOne({ 'auth.tokens.refreshTokens.token': refreshToken });
         }
 
         if (!user) {
@@ -94,12 +95,12 @@ const verifyRefreshToken = async (req, res, next) => {
 
         // Check if token exists in refreshTokens array
         let tokenRecord = null;
-        if (user.refreshTokens && Array.isArray(user.refreshTokens)) {
-            tokenRecord = user.refreshTokens.find(rt => rt.token === refreshToken);
+        if (user.auth?.tokens?.refreshTokens && Array.isArray(user.auth.tokens.refreshTokens)) {
+            tokenRecord = user.auth.tokens.refreshTokens.find(rt => rt.token === refreshToken);
         }
 
         // Fallback to single token field for backward compatibility
-        if (!tokenRecord && user.refreshToken === refreshToken) {
+        if (!tokenRecord && user.auth?.refreshToken === refreshToken) {
             // Token found in single field - it's valid (no expiry check)
             // Tokens only expire when user explicitly logs out
         } else if (tokenRecord) {

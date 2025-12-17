@@ -36,9 +36,9 @@ const getConversations = async (req, res) => {
                 ]
             }
         })
-        .populate('participants', 'firstName lastName name profileImage')
+        .populate('participants', 'profile.name.first profile.name.last profile.name.full profile.profileImage')
         .populate('lastMessage')
-        .populate('createdBy', 'firstName lastName name profileImage')
+        .populate('createdBy', 'profile.name.first profile.name.last profile.name.full profile.profileImage')
         .sort({ lastMessageAt: -1, updatedAt: -1 })
         .lean();
 
@@ -134,7 +134,7 @@ const getOrCreateConversation = async (req, res) => {
         // Populate last message if exists
         if (conversation.lastMessage) {
             await conversation.populate('lastMessage');
-            await conversation.lastMessage.populate('senderId', 'firstName lastName name profileImage');
+            await conversation.lastMessage.populate('senderId', 'profile.name.first profile.name.last profile.name.full profile.profileImage');
         }
 
         // Add online status
@@ -204,7 +204,7 @@ const getMessages = async (req, res) => {
                 { deletedFor: { $exists: false } }
             ]
         })
-        .populate('senderId', 'firstName lastName name profileImage')
+        .populate('senderId', 'profile.name.first profile.name.last profile.name.full profile.profileImage')
         .populate('replyTo')
         .sort({ createdAt: -1 })
         .limit(parseInt(limit))

@@ -94,11 +94,11 @@ const createBugReport = async (req, res) => {
         // Populate user info for response
         const userInfo = {
             id: user._id.toString(),
-            firstName: user.firstName,
-            lastName: user.lastName,
-            name: user.name,
-            email: user.email,
-            profileImage: user.profileImage
+            firstName: user.profile?.name?.first,
+            lastName: user.profile?.name?.last,
+            name: user.profile?.name?.full,
+            email: user.profile?.email,
+            profileImage: user.profile?.profileImage
         };
 
         return res.status(201).json({
@@ -170,11 +170,11 @@ const getMyBugReports = async (req, res) => {
         // Get user info
         const userInfo = {
             id: user._id.toString(),
-            firstName: user.firstName,
-            lastName: user.lastName,
-            name: user.name,
-            email: user.email,
-            profileImage: user.profileImage
+            firstName: user.profile?.name?.first,
+            lastName: user.profile?.name?.last,
+            name: user.profile?.name?.full,
+            email: user.profile?.email,
+            profileImage: user.profile?.profileImage
         };
 
         return res.status(200).json({
@@ -258,11 +258,11 @@ const getBugReportById = async (req, res) => {
         // Get user info
         const userInfo = {
             id: user._id.toString(),
-            firstName: user.firstName,
-            lastName: user.lastName,
-            name: user.name,
-            email: user.email,
-            profileImage: user.profileImage
+            firstName: user.profile?.name?.first,
+            lastName: user.profile?.name?.last,
+            name: user.profile?.name?.full,
+            email: user.profile?.email,
+            profileImage: user.profile?.profileImage
         };
 
         return res.status(200).json({

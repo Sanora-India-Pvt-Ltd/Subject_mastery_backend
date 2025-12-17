@@ -43,7 +43,7 @@ const createStory = async (req, res) => {
         });
 
         // Populate user info for response
-        await story.populate('userId', 'firstName lastName name email profileImage');
+        await story.populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage');
 
         // Extract userId as string (handle both populated and non-populated cases)
         const userIdString = story.userId._id ? story.userId._id.toString() : story.userId.toString();
@@ -143,19 +143,19 @@ const getUserStories = async (req, res) => {
             data: {
                 user: {
                     id: user._id.toString(),
-                    name: user.name,
-                    email: user.email,
-                    profileImage: user.profileImage
+                    name: user.profile?.name?.full,
+                    email: user.profile?.email,
+                    profileImage: user.profile?.profileImage
                 },
                 stories: stories.map(story => {
                     const userIdString = story.userId._id ? story.userId._id.toString() : story.userId.toString();
                     const userInfo = story.userId._id ? {
                         id: story.userId._id.toString(),
-                        firstName: story.userId.firstName,
-                        lastName: story.userId.lastName,
-                        name: story.userId.name,
-                        email: story.userId.email,
-                        profileImage: story.userId.profileImage
+                        firstName: story.userId.profile?.name?.first,
+                        lastName: story.userId.profile?.name?.last,
+                        name: story.userId.profile?.name?.full,
+                        email: story.userId.profile?.email,
+                        profileImage: story.userId.profile?.profileImage
                     } : null;
 
                     return {
@@ -212,7 +212,7 @@ const getAllFriendsStories = async (req, res) => {
             userId: { $in: allUserIds },
             expiresAt: { $gt: now }
         })
-            .populate('userId', 'firstName lastName name email profileImage')
+            .populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage')
             .sort({ createdAt: -1 }); // Most recent first
 
         // Also filter out stories from users who have blocked the current user
