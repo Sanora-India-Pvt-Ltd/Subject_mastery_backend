@@ -329,7 +329,7 @@ const listFriends = async (req, res) => {
         // Get user with populated friends
         // Include both nested profile structure and old flat fields for backward compatibility
         const user = await User.findById(userId)
-            .populate('friends', 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage')
+            .populate('friends', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.bio firstName lastName name profileImage bio')
             .select('friends');
         
         // Filter out blocked users from friends list (get from both locations)
@@ -346,7 +346,7 @@ const listFriends = async (req, res) => {
             });
         }
 
-        // Map friends to only include name, profileImage, and _id
+        // Map friends to include name, profileImage, bio, and _id
         // Handle both nested profile structure and old flat structure for backward compatibility
         const friendsList = filteredFriends.map(friend => {
             const friendObj = friend.toObject ? friend.toObject() : friend;
@@ -361,11 +361,14 @@ const listFriends = async (req, res) => {
                                 : ''));
             // Extract profileImage from profile structure (new) or flat field (old) with fallback
             const profileImage = friendObj.profile?.profileImage || friendObj.profileImage || '';
+            // Extract bio from profile structure (new) or flat field (old) with fallback
+            const bio = friendObj.profile?.bio || friendObj.bio || '';
             
             return {
                 _id: friend._id,
                 name: name,
-                profileImage: profileImage
+                profileImage: profileImage,
+                bio: bio
             };
         });
 

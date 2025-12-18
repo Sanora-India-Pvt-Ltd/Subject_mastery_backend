@@ -34,8 +34,9 @@ The Friend API provides endpoints for managing friendships, friend requests, and
 - **Friend Requests**: Send, accept, reject, and cancel friend requests
 - **Friend Management**: List friends, unfriend users
 - **Friend Suggestions**: Get personalized friend suggestions based on mutual friends
-- **Blocking Support**: Automatically excludes blocked users from all operations
+- **Blocking Support**: Automatically excludes blocked users from all operations (checks both `blockedUsers` and `social.blockedUsers`)
 - **Bidirectional Friendship**: When a friend request is accepted, both users are added to each other's friend list
+- **Backward Compatibility**: Supports both nested profile structure (`profile.name`, `profile.bio`, etc.) and legacy flat fields (`name`, `bio`, etc.)
 
 ### Friend Request Status:
 - `pending`: Request has been sent but not yet accepted/rejected
@@ -133,8 +134,9 @@ curl -X POST https://api.ulearnandearn.com/api/friend/send/507f1f77bcf86cd799439
 - Cannot send request to yourself
 - Cannot send request if already friends
 - Cannot send request if a pending request already exists (in either direction)
-- Cannot send request to blocked users
-- Cannot send request if you are blocked by the receiver
+- Cannot send request if an accepted request already exists (in either direction)
+- Cannot send request to blocked users (checks both `blockedUsers` and `social.blockedUsers`)
+- Cannot send request if you are blocked by the receiver (checks both locations)
 
 ---
 
@@ -211,6 +213,7 @@ curl -X POST https://api.ulearnandearn.com/api/friend/accept/507f1f77bcf86cd7994
 - Only the receiver of a friend request can accept it
 - After acceptance, both users are added to each other's `friends` array
 - The request status is updated to `accepted` for historical tracking
+- Checks blocking status in both `blockedUsers` and `social.blockedUsers` before accepting
 
 ---
 
@@ -362,12 +365,14 @@ curl -X GET https://api.ulearnandearn.com/api/friend/list \
       {
         "_id": "507f1f77bcf86cd799439011",
         "name": "Jane Smith",
-        "profileImage": "https://example.com/profile2.jpg"
+        "profileImage": "https://example.com/profile2.jpg",
+        "bio": "Software developer passionate about coding"
       },
       {
         "_id": "507f1f77bcf86cd799439013",
         "name": "Bob Johnson",
-        "profileImage": "https://example.com/profile3.jpg"
+        "profileImage": "https://example.com/profile3.jpg",
+        "bio": "Designer and creative thinker"
       }
     ],
     "count": 2
@@ -383,10 +388,11 @@ curl -X GET https://api.ulearnandearn.com/api/friend/list \
 | 500 | Failed to retrieve friends | Internal server error |
 
 **Notes:**
-- Blocked users are automatically filtered out from the friends list
-- The response includes only essential friend information (ID, name, profile image)
-- The response format uses simplified fields (`name`, `profileImage`) extracted from the nested profile structure
-- The actual database stores user data in a nested structure: `profile.name.first`, `profile.name.last`, `profile.name.full`, `profile.profileImage`, etc.
+- Blocked users are automatically filtered out from the friends list (checks both `blockedUsers` and `social.blockedUsers`)
+- The response includes essential friend information (ID, name, profile image, bio)
+- The response format uses simplified fields (`name`, `profileImage`, `bio`) extracted from the nested profile structure or legacy flat fields for backward compatibility
+- The actual database stores user data in a nested structure: `profile.name.first`, `profile.name.last`, `profile.name.full`, `profile.profileImage`, `profile.bio`, etc.
+- Name extraction priority: `profile.name.full` → `profile.name.first + profile.name.last` → `profile.name.first` → `profile.name.last` → `name` → `firstName + lastName`
 
 ---
 
@@ -454,8 +460,9 @@ curl -X GET https://api.ulearnandearn.com/api/friend/requests/received \
 **Notes:**
 - Only returns requests with `pending` status
 - Requests are sorted by creation date (newest first)
-- Requests from blocked users are automatically excluded
-- Includes detailed sender information for easy decision-making
+- Requests from blocked users are automatically excluded (checks both `blockedUsers` and `social.blockedUsers`)
+- Includes detailed sender information (name, profileImage, email, bio, location) for easy decision-making
+- Sender data is populated from nested profile structure
 
 ---
 
@@ -523,8 +530,9 @@ curl -X GET https://api.ulearnandearn.com/api/friend/requests/sent \
 **Notes:**
 - Only returns requests with `pending` status
 - Requests are sorted by creation date (newest first)
-- Requests to blocked users are automatically excluded
-- Includes detailed receiver information
+- Requests to blocked users are automatically excluded (checks both `blockedUsers` and `social.blockedUsers`)
+- Includes detailed receiver information (name, profileImage, email, bio, location)
+- Receiver data is populated from nested profile structure
 
 ---
 
@@ -592,6 +600,8 @@ curl -X GET "https://api.ulearnandearn.com/api/friend/suggestions?limit=20" \
 ```
 
 **Success Response (200 OK):**
+
+When user has friends (mutual friends based):
 ```json
 {
   "success": true,
@@ -601,56 +611,26 @@ curl -X GET "https://api.ulearnandearn.com/api/friend/suggestions?limit=20" \
       {
         "user": {
           "_id": "507f1f77bcf86cd799439014",
-          "profile": {
-            "name": {
-              "first": "Alice",
-              "last": "Williams",
-              "full": "Alice Williams"
-            },
-            "profileImage": "https://res.cloudinary.com/dxb1fppe3/image/upload/v1765539668/user_uploads/example.jpg",
-            "email": "alice@example.com",
-            "bio": "Photographer",
-            "gender": "Female"
-          },
-          "location": {
-            "currentCity": "Seattle",
-            "hometown": "Portland"
-          }
+          "name": "Alice Williams",
+          "profileImage": "https://res.cloudinary.com/dxb1fppe3/image/upload/v1765539668/user_uploads/example.jpg",
+          "bio": "Photographer"
         },
         "mutualFriendsCount": 5,
         "mutualFriends": [
           {
             "_id": "507f1f77bcf86cd799439011",
-            "profile": {
-              "name": {
-                "first": "Jane",
-                "last": "Smith",
-                "full": "Jane Smith"
-              },
-              "profileImage": "https://res.cloudinary.com/dxb1fppe3/image/upload/v1765539668/user_uploads/example2.jpg"
-            }
+            "name": "Jane Smith",
+            "profileImage": "https://res.cloudinary.com/dxb1fppe3/image/upload/v1765539668/user_uploads/example2.jpg"
           },
           {
             "_id": "507f1f77bcf86cd799439013",
-            "profile": {
-              "name": {
-                "first": "Bob",
-                "last": "Johnson",
-                "full": "Bob Johnson"
-              },
-              "profileImage": "https://res.cloudinary.com/dxb1fppe3/image/upload/v1765539668/user_uploads/example3.jpg"
-            }
+            "name": "Bob Johnson",
+            "profileImage": "https://res.cloudinary.com/dxb1fppe3/image/upload/v1765539668/user_uploads/example3.jpg"
           },
           {
             "_id": "507f1f77bcf86cd799439015",
-            "profile": {
-              "name": {
-                "first": "Charlie",
-                "last": "Brown",
-                "full": "Charlie Brown"
-              },
-              "profileImage": "https://res.cloudinary.com/dxb1fppe3/image/upload/v1765539668/user_uploads/example4.jpg"
-            }
+            "name": "Charlie Brown",
+            "profileImage": "https://res.cloudinary.com/dxb1fppe3/image/upload/v1765539668/user_uploads/example4.jpg"
           }
         ]
       }
@@ -659,6 +639,31 @@ curl -X GET "https://api.ulearnandearn.com/api/friend/suggestions?limit=20" \
   }
 }
 ```
+
+When user has no friends (random users):
+```json
+{
+  "success": true,
+  "message": "Friend suggestions retrieved successfully",
+  "data": {
+    "suggestions": [
+      {
+        "user": {
+          "_id": "507f1f77bcf86cd799439014",
+          "name": "Alice Williams",
+          "profileImage": "https://res.cloudinary.com/dxb1fppe3/image/upload/v1765539668/user_uploads/example.jpg",
+          "bio": "Photographer"
+        },
+        "mutualFriends": 0,
+        "mutualFriendsList": []
+      }
+    ],
+    "count": 1
+  }
+}
+```
+
+**Note:** When user has no friends, the response uses `mutualFriends` (number) and `mutualFriendsList` (array). When user has friends, it uses `mutualFriendsCount` (number) and `mutualFriends` (array).
 
 **Error Responses:**
 
@@ -673,11 +678,12 @@ curl -X GET "https://api.ulearnandearn.com/api/friend/suggestions?limit=20" \
 - Automatically excludes:
   - Current user
   - Existing friends
-  - Blocked users (both directions)
+  - Blocked users (checks both `blockedUsers` and `social.blockedUsers` in both directions)
   - Users with pending friend requests
-- If user has no friends, returns random users instead
+- If user has no friends, returns random users instead (with `mutualFriends: 0` and `mutualFriendsList: []`)
 - Shows up to 3 mutual friends per suggestion
-- User data is returned in the nested profile structure: `profile.name.first`, `profile.name.last`, `profile.name.full`, `profile.profileImage`, `profile.email`, `profile.bio`, `profile.gender`, etc.
+- User data is returned in simplified format: `_id`, `name`, `profileImage`, `bio` (extracted from nested profile structure or legacy flat fields for backward compatibility)
+- Mutual friends are returned in simplified format: `_id`, `name`, `profileImage`
 
 **Algorithm:**
 1. Get all friends of the current user
@@ -720,50 +726,50 @@ curl -X GET "https://api.ulearnandearn.com/api/friend/suggestions?limit=20" \
 {
   _id: ObjectId,                    // Friend's user ID
   name: String,                     // Friend's full name
-  profileImage: String              // Friend's profile image URL
+  profileImage: String,             // Friend's profile image URL
+  bio: String                       // Friend's bio/description
 }
 ```
 
 ### Friend Suggestion Item
 
+**When user has friends (mutual friends based):**
 ```javascript
 {
   user: {
-    _id: ObjectId,
-    profile: {
-      name: {
-        first: String,
-        last: String,
-        full: String
-      },
-      profileImage: String,
-      email: String,
-      bio: String,
-      gender: String,
-      pronouns: String,
-      coverPhoto: String
-    },
-    location: {
-      currentCity: String,
-      hometown: String
-    }
+    _id: ObjectId,                    // Suggested user's ID
+    name: String,                     // Full name (extracted from profile or legacy fields)
+    profileImage: String,             // Profile image URL
+    bio: String                       // User bio
   },
   mutualFriendsCount: Number,        // Number of mutual friends
   mutualFriends: [                  // Array of mutual friend objects (max 3)
     {
-      _id: ObjectId,
-      profile: {
-        name: {
-          first: String,
-          last: String,
-          full: String
-        },
-        profileImage: String
-      }
+      _id: ObjectId,                 // Mutual friend's ID
+      name: String,                   // Full name
+      profileImage: String            // Profile image URL
     }
   ]
 }
 ```
+
+**When user has no friends (random users):**
+```javascript
+{
+  user: {
+    _id: ObjectId,                    // Suggested user's ID
+    name: String,                     // Full name
+    profileImage: String,             // Profile image URL
+    bio: String                       // User bio
+  },
+  mutualFriends: 0,                   // Always 0 for random suggestions (number)
+  mutualFriendsList: []              // Always empty for random suggestions (array)
+}
+```
+
+**Important:** The field names differ based on whether the user has friends:
+- **No friends**: Uses `mutualFriends` (number) and `mutualFriendsList` (array)
+- **Has friends**: Uses `mutualFriendsCount` (number) and `mutualFriends` (array)
 
 ### User Profile Structure (Actual Database Format)
 
@@ -1042,6 +1048,8 @@ def unfriend_user(friend_id):
 - User IDs are MongoDB ObjectIds (24-character hexadecimal strings)
 - Friend requests are bidirectional - when accepted, both users are added to each other's friend list
 - Blocked users cannot interact with each other through the friend system
+- Blocking is checked in both `blockedUsers` (root level) and `social.blockedUsers` (nested) for comprehensive blocking support
+- The system supports backward compatibility with legacy flat field structure while primarily using nested profile structure
 - **Database Structure**: User data is stored in a nested structure:
   ```javascript
   {
@@ -1080,6 +1088,13 @@ For issues or questions regarding the Friend API, please refer to:
 
 ---
 
-**Last Updated:** January 2024  
+**Last Updated:** January 2025  
 **API Version:** 1.0
+
+### Recent Updates:
+- ✅ Added `bio` field to friends list response
+- ✅ Enhanced blocking support to check both `blockedUsers` and `social.blockedUsers`
+- ✅ Improved friend suggestions response format (simplified structure)
+- ✅ Added support for users with no friends (returns random suggestions)
+- ✅ Enhanced backward compatibility documentation
 
