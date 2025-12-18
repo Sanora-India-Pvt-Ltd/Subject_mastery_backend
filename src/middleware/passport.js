@@ -43,8 +43,11 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
             const email = emails[0].value.toLowerCase().trim();
             const photo = photos[0]?.value;
             
-            // Check if user exists by email (normalized)
-            let user = await User.findOne({ email });
+            // Check if user exists by email (normalized) - support both old and new structure
+            let user = await User.findOne({ 'profile.email': email });
+            if (!user) {
+                user = await User.findOne({ email });
+            }
             
             if (!user) {
                 // Extract firstName and lastName from displayName
@@ -52,45 +55,106 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
                 const firstName = nameParts[0] || 'User';
                 const lastName = nameParts.slice(1).join(' ') || 'User';
                 
-                // Create new user with Google OAuth
+                // Create new user with Google OAuth using new nested structure
                 // Note: phoneNumber is optional for Google OAuth users
                 user = await User.create({
-                    email,
-                    firstName,
-                    lastName,
-                    // phoneNumber is omitted for Google OAuth users (optional)
-                    gender: 'Other', // Default gender since Google doesn't provide this
-                    name: displayName,
-                    googleId: id,
-                    profileImage: photo,
-                    password: 'oauth-user', // Dummy password for OAuth users
-                    isGoogleOAuth: true
+                    profile: {
+                        name: {
+                            first: firstName,
+                            last: lastName,
+                            full: displayName || `${firstName} ${lastName}`.trim()
+                        },
+                        email: email,
+                        gender: 'Other', // Default gender since Google doesn't provide this
+                        profileImage: photo || ''
+                    },
+                    auth: {
+                        password: 'oauth-user', // Dummy password for OAuth users
+                        isGoogleOAuth: true,
+                        googleId: id,
+                        tokens: {
+                            refreshTokens: []
+                        }
+                    },
+                    account: {
+                        isActive: true,
+                        isVerified: true, // Google OAuth users are verified
+                        lastLogin: new Date()
+                    },
+                    social: {
+                        friends: [],
+                        blockedUsers: []
+                    },
+                    location: {},
+                    professional: {
+                        education: [],
+                        workplace: []
+                    },
+                    content: {
+                        generalWeightage: 0,
+                        professionalWeightage: 0
+                    }
                 });
                 console.log(`✅ Created new Google OAuth user: ${email}`);
             } else {
                 // User exists - link Google account if not already linked
-                if (!user.googleId) {
+                // Support both old and new structure
+                const userGoogleId = user.auth?.googleId || user.googleId;
+                const userIsGoogleOAuth = user.auth?.isGoogleOAuth || user.isGoogleOAuth;
+                
+                if (!userGoogleId) {
                     // Link Google account to existing user (from regular signup)
-                    // Update name if not already set
-                    if (!user.firstName || !user.lastName) {
+                    // Ensure auth structure exists
+                    if (!user.auth) user.auth = {};
+                    if (!user.auth.tokens) user.auth.tokens = {};
+                    if (!user.auth.tokens.refreshTokens) user.auth.tokens.refreshTokens = [];
+                    
+                    // Update name if not already set - support both structures
+                    if (user.profile) {
+                        // New structure
+                        if (!user.profile.name?.first || !user.profile.name?.last) {
+                            const nameParts = displayName ? displayName.trim().split(/\s+/) : ['User'];
+                            if (!user.profile.name) user.profile.name = {};
+                            user.profile.name.first = user.profile.name.first || nameParts[0] || 'User';
+                            user.profile.name.last = user.profile.name.last || nameParts.slice(1).join(' ') || 'User';
+                            user.profile.name.full = displayName || `${user.profile.name.first} ${user.profile.name.last}`.trim();
+                        }
+                        // Update profile image if not set
+                        if (!user.profile.profileImage && photo) {
+                            user.profile.profileImage = photo;
+                        }
+                    } else {
+                        // Old structure - migrate to new structure
                         const nameParts = displayName ? displayName.trim().split(/\s+/) : ['User'];
-                        user.firstName = user.firstName || nameParts[0] || 'User';
-                        user.lastName = user.lastName || nameParts.slice(1).join(' ') || 'User';
+                        user.profile = {
+                            name: {
+                                first: user.firstName || nameParts[0] || 'User',
+                                last: user.lastName || nameParts.slice(1).join(' ') || 'User',
+                                full: user.name || displayName || `${user.firstName || nameParts[0]} ${user.lastName || nameParts.slice(1).join(' ')}`.trim()
+                            },
+                            email: user.email,
+                            gender: user.gender || 'Other',
+                            profileImage: user.profileImage || photo || ''
+                        };
                     }
-                    // Update profile image if not set
-                    if (!user.profileImage && photo) {
-                        user.profileImage = photo;
-                    }
-                    user.googleId = id;
-                    user.isGoogleOAuth = true;
+                    
+                    user.auth.googleId = id;
+                    user.auth.isGoogleOAuth = true;
                     await user.save();
                     console.log(`✅ Linked Google account to existing user: ${email}`);
                 } else {
                     // User already has Google account linked - just allow login
-                    // Update profile image if provided and different
-                    if (photo && user.profileImage !== photo) {
-                        user.profileImage = photo;
-                        await user.save();
+                    // Update profile image if provided and different - support both structures
+                    if (photo) {
+                        if (user.profile) {
+                            if (user.profile.profileImage !== photo) {
+                                user.profile.profileImage = photo;
+                                await user.save();
+                            }
+                        } else if (user.profileImage !== photo) {
+                            user.profileImage = photo;
+                            await user.save();
+                        }
                     }
                     console.log(`✅ Google OAuth login for existing user: ${email}`);
                 }

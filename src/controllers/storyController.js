@@ -49,11 +49,11 @@ const createStory = async (req, res) => {
         const userIdString = story.userId._id ? story.userId._id.toString() : story.userId.toString();
         const userInfo = story.userId._id ? {
             id: story.userId._id.toString(),
-            firstName: story.userId.firstName,
-            lastName: story.userId.lastName,
-            name: story.userId.name,
-            email: story.userId.email,
-            profileImage: story.userId.profileImage
+            firstName: story.userId.profile?.name?.first,
+            lastName: story.userId.profile?.name?.last,
+            name: story.userId.profile?.name?.full,
+            email: story.userId.profile?.email,
+            profileImage: story.userId.profile?.profileImage
         } : null;
 
         return res.status(201).json({
@@ -234,11 +234,11 @@ const getAllFriendsStories = async (req, res) => {
             if (!storiesByUser[userIdString]) {
                 const userInfo = story.userId._id ? {
                     id: story.userId._id.toString(),
-                    firstName: story.userId.firstName,
-                    lastName: story.userId.lastName,
-                    name: story.userId.name,
-                    email: story.userId.email,
-                    profileImage: story.userId.profileImage
+                    firstName: story.userId.profile?.name?.first,
+                    lastName: story.userId.profile?.name?.last,
+                    name: story.userId.profile?.name?.full,
+                    email: story.userId.profile?.email,
+                    profileImage: story.userId.profile?.profileImage
                 } : null;
 
                 storiesByUser[userIdString] = {

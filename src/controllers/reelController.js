@@ -18,10 +18,10 @@ const limitComments = (comments) => {
             const commentUserId = comment.userId._id ? comment.userId._id.toString() : comment.userId.toString();
             const commentUserInfo = comment.userId._id ? {
                 id: comment.userId._id.toString(),
-                firstName: comment.userId.firstName,
-                lastName: comment.userId.lastName,
-                name: comment.userId.name,
-                profileImage: comment.userId.profileImage
+                firstName: comment.userId.profile?.name?.first,
+                lastName: comment.userId.profile?.name?.last,
+                name: comment.userId.profile?.name?.full,
+                profileImage: comment.userId.profile?.profileImage
             } : null;
 
             return {
@@ -765,10 +765,10 @@ const addComment = async (req, res) => {
         const newComment = reel.comments[reel.comments.length - 1];
         const commentUserInfo = newComment.userId._id ? {
             id: newComment.userId._id.toString(),
-            firstName: newComment.userId.firstName,
-            lastName: newComment.userId.lastName,
-            name: newComment.userId.name,
-            profileImage: newComment.userId.profileImage
+            firstName: newComment.userId.profile?.name?.first,
+            lastName: newComment.userId.profile?.name?.last,
+            name: newComment.userId.profile?.name?.full,
+            profileImage: newComment.userId.profile?.profileImage
         } : null;
 
         return res.status(201).json({

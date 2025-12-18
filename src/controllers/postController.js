@@ -17,10 +17,10 @@ const limitComments = (comments) => {
             const commentUserId = comment.userId._id ? comment.userId._id.toString() : comment.userId.toString();
             const commentUserInfo = comment.userId._id ? {
                 id: comment.userId._id.toString(),
-                firstName: comment.userId.firstName,
-                lastName: comment.userId.lastName,
-                name: comment.userId.name,
-                profileImage: comment.userId.profileImage
+                firstName: comment.userId.profile?.name?.first,
+                lastName: comment.userId.profile?.name?.last,
+                name: comment.userId.profile?.name?.full,
+                profileImage: comment.userId.profile?.profileImage
             } : null;
 
             return {
@@ -33,15 +33,21 @@ const limitComments = (comments) => {
         });
 };
 
-// Create a new post
+// Create a new post (with optional file uploads)
 const createPost = async (req, res) => {
+    const uploadedFiles = [];
+    const transcodedPaths = [];
+
     try {
         const user = req.user; // From protect middleware
-        const { caption, mediaUrls } = req.body;
-
+        const { caption } = req.body;
+        
+        // Get files from request (can be single file or array of files)
+        const files = req.files || (req.file ? [req.file] : []);
+        
         // Validate that at least caption or media is provided
         const hasCaption = caption && caption.trim().length > 0;
-        const hasMedia = mediaUrls && Array.isArray(mediaUrls) && mediaUrls.length > 0;
+        const hasMedia = files && files.length > 0;
 
         if (!hasCaption && !hasMedia) {
             return res.status(400).json({
@@ -50,30 +56,97 @@ const createPost = async (req, res) => {
             });
         }
 
-        // Validate media URLs structure if provided
+        // User-specific folder path for post media
+        const userFolder = `user_uploads/${user._id}/posts`;
+
+        // Process uploaded files (if any)
         const media = [];
+        
         if (hasMedia) {
-            for (const mediaItem of mediaUrls) {
-                if (!mediaItem.url || !mediaItem.publicId || !mediaItem.type) {
-                    return res.status(400).json({
-                        success: false,
-                        message: 'Each media item must have url, publicId, and type (image/video)'
-                    });
-                }
+            for (const file of files) {
+                let transcodedPath = null;
+                let originalPath = file.path;
+                let fileToUpload = originalPath;
 
-                if (!['image', 'video'].includes(mediaItem.type)) {
-                    return res.status(400).json({
-                        success: false,
-                        message: 'Media type must be either "image" or "video"'
-                    });
-                }
+                try {
+                    // Check if uploaded file is a video
+                    const isVideoFile = isVideo(file.mimetype);
 
-                media.push({
-                    url: mediaItem.url,
-                    publicId: mediaItem.publicId,
-                    type: mediaItem.type,
-                    format: mediaItem.format || null
-                });
+                    // Transcode video if it's a video file
+                    if (isVideoFile) {
+                        try {
+                            console.log('Transcoding video for post...');
+                            const transcoded = await transcodeVideo(originalPath);
+                            transcodedPath = transcoded.outputPath;
+                            fileToUpload = transcodedPath;
+                            transcodedPaths.push(transcodedPath);
+                            console.log('Video transcoded successfully:', transcodedPath);
+                        } catch (transcodeError) {
+                            console.error('Video transcoding failed:', transcodeError);
+                            // Continue with original file if transcoding fails
+                            console.warn('Uploading original video without transcoding');
+                        }
+                    }
+
+                    // Upload to Cloudinary
+                    const result = await cloudinary.uploader.upload(fileToUpload, {
+                        folder: userFolder,
+                        upload_preset: process.env.UPLOAD_PRESET,
+                        resource_type: 'auto', // auto = images + videos
+                        quality: '100'
+                    });
+
+                    // Determine media type
+                    const mediaType = result.resource_type === 'video' ? 'video' : 'image';
+
+                    // Save upload record to database
+                    const mediaRecord = await Media.create({
+                        userId: user._id,
+                        url: result.secure_url,
+                        public_id: result.public_id,
+                        format: result.format,
+                        resource_type: result.resource_type,
+                        fileSize: result.bytes || file.size,
+                        originalFilename: file.originalname,
+                        folder: result.folder || userFolder
+                    });
+
+                    uploadedFiles.push({
+                        url: result.secure_url,
+                        publicId: result.public_id,
+                        type: mediaType,
+                        format: result.format
+                    });
+
+                    media.push({
+                        url: result.secure_url,
+                        publicId: result.public_id,
+                        type: mediaType,
+                        format: result.format || null
+                    });
+
+                    // Cleanup transcoded file after successful upload
+                    if (transcodedPath) {
+                        await cleanupFile(transcodedPath);
+                        const index = transcodedPaths.indexOf(transcodedPath);
+                        if (index > -1) {
+                            transcodedPaths.splice(index, 1);
+                        }
+                    }
+
+                } catch (fileError) {
+                    console.error('Error processing file:', fileError);
+                    // Cleanup transcoded file on error
+                    if (transcodedPath) {
+                        await cleanupFile(transcodedPath);
+                        const index = transcodedPaths.indexOf(transcodedPath);
+                        if (index > -1) {
+                            transcodedPaths.splice(index, 1);
+                        }
+                    }
+                    // Continue with other files, but log the error
+                    console.warn(`Failed to process file ${file.originalname}, continuing with other files...`);
+                }
             }
         }
 
@@ -91,11 +164,11 @@ const createPost = async (req, res) => {
         const userIdString = post.userId._id ? post.userId._id.toString() : post.userId.toString();
         const userInfo = post.userId._id ? {
             id: post.userId._id.toString(),
-            firstName: post.userId.firstName,
-            lastName: post.userId.lastName,
-            name: post.userId.name,
-            email: post.userId.email,
-            profileImage: post.userId.profileImage
+            firstName: post.userId.profile?.name?.first,
+            lastName: post.userId.profile?.name?.last,
+            name: post.userId.profile?.name?.full,
+            email: post.userId.profile?.email,
+            profileImage: post.userId.profile?.profileImage
         } : null;
 
         return res.status(201).json({
@@ -120,6 +193,19 @@ const createPost = async (req, res) => {
 
     } catch (error) {
         console.error('Create post error:', error);
+        
+        // Cleanup any remaining transcoded files on error
+        for (const transcodedPath of transcodedPaths) {
+            await cleanupFile(transcodedPath);
+        }
+
+        // If post creation failed but files were uploaded, try to clean up Cloudinary
+        if (uploadedFiles.length > 0) {
+            console.warn('Post creation failed, but files were uploaded. Consider cleanup.');
+            // Note: We don't delete from Cloudinary here as the post might be created later
+            // This is a trade-off - you may want to implement cleanup logic if needed
+        }
+
         return res.status(500).json({
             success: false,
             message: 'Failed to create post',
@@ -641,11 +727,11 @@ const toggleLikePost = async (req, res) => {
         const userIdString = post.userId._id ? post.userId._id.toString() : post.userId.toString();
         const userInfo = post.userId._id ? {
             id: post.userId._id.toString(),
-            firstName: post.userId.firstName,
-            lastName: post.userId.lastName,
-            name: post.userId.name,
-            email: post.userId.email,
-            profileImage: post.userId.profileImage
+            firstName: post.userId.profile?.name?.first,
+            lastName: post.userId.profile?.name?.last,
+            name: post.userId.profile?.name?.full,
+            email: post.userId.profile?.email,
+            profileImage: post.userId.profile?.profileImage
         } : null;
 
         return res.status(200).json({
@@ -801,21 +887,21 @@ const addComment = async (req, res) => {
         const userIdString = post.userId._id ? post.userId._id.toString() : post.userId.toString();
         const userInfo = post.userId._id ? {
             id: post.userId._id.toString(),
-            firstName: post.userId.firstName,
-            lastName: post.userId.lastName,
-            name: post.userId.name,
-            email: post.userId.email,
-            profileImage: post.userId.profileImage
+            firstName: post.userId.profile?.name?.first,
+            lastName: post.userId.profile?.name?.last,
+            name: post.userId.profile?.name?.full,
+            email: post.userId.profile?.email,
+            profileImage: post.userId.profile?.profileImage
         } : null;
 
         // Get the newly added comment (last one in array)
         const newComment = post.comments[post.comments.length - 1];
         const commentUserInfo = newComment.userId._id ? {
             id: newComment.userId._id.toString(),
-            firstName: newComment.userId.firstName,
-            lastName: newComment.userId.lastName,
-            name: newComment.userId.name,
-            profileImage: newComment.userId.profileImage
+            firstName: newComment.userId.profile?.name?.first,
+            lastName: newComment.userId.profile?.name?.last,
+            name: newComment.userId.profile?.name?.full,
+            profileImage: newComment.userId.profile?.profileImage
         } : null;
 
         return res.status(201).json({
@@ -926,11 +1012,11 @@ const deleteComment = async (req, res) => {
         const userIdString = post.userId._id ? post.userId._id.toString() : post.userId.toString();
         const userInfo = post.userId._id ? {
             id: post.userId._id.toString(),
-            firstName: post.userId.firstName,
-            lastName: post.userId.lastName,
-            name: post.userId.name,
-            email: post.userId.email,
-            profileImage: post.userId.profileImage
+            firstName: post.userId.profile?.name?.first,
+            lastName: post.userId.profile?.name?.last,
+            name: post.userId.profile?.name?.full,
+            email: post.userId.profile?.email,
+            profileImage: post.userId.profile?.profileImage
         } : null;
 
         return res.status(200).json({
@@ -1079,7 +1165,6 @@ module.exports = {
     getAllPosts,
     getMyPosts,
     getUserPosts,
-    uploadPostMedia,
     toggleLikePost,
     deletePost,
     addComment,

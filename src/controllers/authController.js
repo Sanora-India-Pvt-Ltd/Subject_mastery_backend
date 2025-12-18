@@ -10,17 +10,37 @@ const MAX_DEVICES = 5;
 
 // Helper function to manage device limit - removes oldest device if limit is reached
 const manageDeviceLimit = (user) => {
-    if (!user.auth?.tokens?.refreshTokens) {
+    // Support both old and new structure
+    let refreshTokensArray = null;
+    
+    if (user.auth?.tokens?.refreshTokens && Array.isArray(user.auth.tokens.refreshTokens)) {
+        // New nested structure
+        refreshTokensArray = user.auth.tokens.refreshTokens;
+    } else if (Array.isArray(user.refreshTokens)) {
+        // Old flat structure - migrate to new structure
+        if (!user.auth) user.auth = {};
+        if (!user.auth.tokens) user.auth.tokens = {};
+        // Migrate old refreshTokens to new structure
+        user.auth.tokens.refreshTokens = user.refreshTokens.map(rt => ({
+            token: rt.token || rt,
+            expiresAt: rt.expiresAt || rt.expiryDate || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // Default 1 year if missing
+            device: rt.device || rt.deviceInfo || 'Unknown Device',
+            createdAt: rt.createdAt || new Date()
+        }));
+        refreshTokensArray = user.auth.tokens.refreshTokens;
+    } else {
+        // Initialize new structure
         if (!user.auth) user.auth = {};
         if (!user.auth.tokens) user.auth.tokens = {};
         user.auth.tokens.refreshTokens = [];
+        refreshTokensArray = user.auth.tokens.refreshTokens;
     }
     
     // If we've reached the limit, remove the oldest device (sorted by createdAt)
-    if (user.auth.tokens.refreshTokens.length >= MAX_DEVICES) {
+    if (refreshTokensArray.length >= MAX_DEVICES) {
         // Sort by createdAt (oldest first) and remove the first one
-        user.auth.tokens.refreshTokens.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-        user.auth.tokens.refreshTokens.shift(); // Remove the oldest device
+        refreshTokensArray.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        refreshTokensArray.shift(); // Remove the oldest device
     }
 };
 
@@ -34,6 +54,24 @@ const signup = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: 'Email, password, first name, last name, phone number, and gender are required'
+            });
+        }
+
+        // Normalize and validate email
+        const normalizedEmail = email.trim().toLowerCase();
+        if (!normalizedEmail || normalizedEmail.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email cannot be empty'
+            });
+        }
+
+        // Basic email format validation
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(normalizedEmail)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid email format'
             });
         }
 
@@ -62,8 +100,13 @@ const signup = async (req, res) => {
             });
         }
 
-        // Check if user already exists
-        const existingUser = await User.findOne({ 'profile.email': email.toLowerCase() });
+        // Check if user already exists (check both new and old structure for migration)
+        const existingUser = await User.findOne({
+            $or: [
+                { 'profile.email': normalizedEmail },
+                { email: normalizedEmail } // Old structure for backward compatibility
+            ]
+        });
         if (existingUser) {
             return res.status(400).json({
                 success: false,
@@ -76,6 +119,8 @@ const signup = async (req, res) => {
         if (!normalizedPhone.startsWith('+')) {
             normalizedPhone = '+' + normalizedPhone;
         }
+        console.log('Phone',phoneNumber);
+        console.log('Normalized Phone',normalizedPhone);
 
         // Check if phone number is already taken
         const existingPhoneUser = await User.findOne({ 'profile.phoneNumbers.primary': normalizedPhone });
@@ -85,6 +130,7 @@ const signup = async (req, res) => {
                 message: 'Phone number is already registered'
             });
         }
+        console.log('Existing Phone User',existingPhoneUser);
 
         // OTP verification is MANDATORY for signup - both email and phone
         const { emailVerificationToken, phoneVerificationToken } = req.body;
@@ -129,7 +175,7 @@ const signup = async (req, res) => {
         if (emailDecoded.purpose !== 'otp_verification' || 
             emailDecoded.verificationType !== 'email' ||
             !emailDecoded.forSignup ||
-            emailDecoded.email !== email.toLowerCase()) {
+            emailDecoded.email !== normalizedEmail) {
             return res.status(401).json({
                 success: false,
                 message: 'Invalid email verification token. Email does not match or token is invalid.'
@@ -161,16 +207,16 @@ const signup = async (req, res) => {
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Create user (use normalized phone number)
+        // Create user (use normalized phone number and email)
         const fullName = name || `${firstName} ${lastName}`.trim();
         const user = await User.create({
             profile: {
                 name: {
-                    first: firstName,
-                    last: lastName,
+                    first: firstName.trim(),
+                    last: lastName.trim(),
                     full: fullName
                 },
-                email: email.toLowerCase(),
+                email: normalizedEmail, // Use normalized email
                 phoneNumbers: {
                     primary: normalizedPhone
                 },
@@ -246,6 +292,37 @@ const signup = async (req, res) => {
         });
 
     } catch (error) {
+        // Handle duplicate key errors with more specific messages
+        if (error.code === 11000) {
+            const field = Object.keys(error.keyPattern || {})[0] || 'field';
+            const errorMessage = error.message || '';
+            
+            // Check if this is the specific null email duplicate error
+            if (field.includes('email') || errorMessage.includes('email_1') || errorMessage.includes('dup key: { email: null }')) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Database configuration error: Old email index detected. This needs to be fixed by running the database migration script.',
+                    error: 'Duplicate email index conflict',
+                    hint: 'Run "node fix-email-index.js" to fix the database indexes. This will remove the old email index and ensure the correct profile.email index is in place.',
+                    technicalDetails: error.message
+                });
+            }
+            
+            if (field.includes('email')) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Email is already registered. If you continue to see this error, there may be an old database index that needs to be removed.',
+                    error: 'Duplicate email',
+                    hint: 'Run "node fix-email-index.js" to fix the database indexes.'
+                });
+            }
+            return res.status(400).json({
+                success: false,
+                message: `Duplicate key error on ${field}`,
+                error: error.message
+            });
+        }
+
         res.status(500).json({
             success: false,
             message: 'Error in user signup',
@@ -268,22 +345,67 @@ const login = async (req, res) => {
         }
 
         // Find user by email or phone number
+        // Support both old flat structure and new nested structure for backward compatibility
         let user;
         if (email) {
-            user = await User.findOne({ 'profile.email': email.toLowerCase() });
+            const normalizedEmail = email.toLowerCase();
+            console.log('🔍 Searching for user with email:', normalizedEmail);
+            // Use $or to check both structures simultaneously - more reliable
+            user = await User.findOne({
+                $or: [
+                    { 'profile.email': normalizedEmail },
+                    { email: normalizedEmail }
+                ]
+            });
+            console.log('   Query result:', user ? `Found (ID: ${user._id})` : 'Not found');
         } else if (phoneNumber) {
-            user = await User.findOne({ 'profile.phoneNumbers.primary': phoneNumber });
+            console.log('🔍 Searching for user with phone:', phoneNumber);
+            // Use $or to check both structures simultaneously - more reliable
+            user = await User.findOne({
+                $or: [
+                    { 'profile.phoneNumbers.primary': phoneNumber },
+                    { phoneNumber: phoneNumber }
+                ]
+            });
+            console.log('   Query result:', user ? `Found (ID: ${user._id})` : 'Not found');
         }
 
         if (!user) {
+            console.log('❌ User not found');
             return res.status(400).json({
                 success: false,
                 message: 'Invalid email/phone number or password'
             });
         }
 
-        // Check password
-        const isPasswordValid = await bcrypt.compare(password, user.auth.password);
+        console.log('✅ User found:', user._id);
+        console.log('   User structure check - auth.password:', !!user.auth?.password, 'password:', !!user.password);
+        console.log('   User email:', user.profile?.email || user.email);
+        console.log('   User keys:', Object.keys(user).slice(0, 10).join(', '));
+
+        // Check password - support both old and new structure
+        let userPassword;
+        if (user.auth?.password) {
+            // New nested structure
+            userPassword = user.auth.password;
+            console.log('   Using password from: auth.password (new structure)');
+        } else if (user.password) {
+            // Old flat structure
+            userPassword = user.password;
+            console.log('   Using password from: password (old structure)');
+            console.log('   Password hash preview:', userPassword ? userPassword.substring(0, 20) + '...' : 'null');
+        } else {
+            console.log('❌ No password field found in user document');
+            console.log('   Available fields:', Object.keys(user).join(', '));
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid email/phone number or password'
+            });
+        }
+        
+        console.log('🔐 Comparing password...');
+        const isPasswordValid = await bcrypt.compare(password, userPassword);
+        console.log('   Password valid:', isPasswordValid);
         if (!isPasswordValid) {
             return res.status(400).json({
                 success: false,
@@ -291,16 +413,35 @@ const login = async (req, res) => {
             });
         }
 
-        // Update last login
+        // Update last login - support both structures
         if (!user.account) user.account = {};
         user.account.lastLogin = new Date();
 
+        // Get user email - support both old and new structure
+        const userEmail = user.profile?.email || user.email;
+        
         // Generate access token and refresh token
-        const accessToken = generateAccessToken({ id: user._id, email: user.profile.email });
+        const accessToken = generateAccessToken({ id: user._id, email: userEmail });
         const { token: refreshToken, expiryDate: refreshTokenExpiry } = generateRefreshToken();
 
         // Get device info from request (optional)
         const deviceInfo = req.headers['user-agent'] || req.body.deviceInfo || 'Unknown Device';
+
+        // Ensure auth structure exists for old users
+        if (!user.auth) user.auth = {};
+        if (!user.auth.tokens) user.auth.tokens = {};
+        
+        // Migrate old refreshTokens array to new structure if it exists
+        if (Array.isArray(user.refreshTokens) && user.refreshTokens.length > 0 && !user.auth.tokens.refreshTokens) {
+            user.auth.tokens.refreshTokens = user.refreshTokens.map(rt => ({
+                token: rt.token || rt,
+                expiresAt: rt.expiresAt || rt.expiryDate || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+                device: rt.device || rt.deviceInfo || 'Unknown Device',
+                createdAt: rt.createdAt || new Date()
+            }));
+        } else if (!user.auth.tokens.refreshTokens) {
+            user.auth.tokens.refreshTokens = [];
+        }
 
         // Manage device limit - remove oldest device if limit is reached
         manageDeviceLimit(user);
@@ -313,11 +454,26 @@ const login = async (req, res) => {
             createdAt: new Date()
         });
 
-        // Keep backward compatibility - set single token fields
+        // Keep backward compatibility - set single token fields in both old and new structures
         user.auth.refreshToken = refreshToken;
         user.auth.refreshTokenExpiry = refreshTokenExpiry;
+        // Also update old flat structure for backward compatibility
+        user.refreshToken = refreshToken;
+        user.refreshTokenExpiry = refreshTokenExpiry;
 
         await user.save();
+
+        // Get user data - support both old and new structure
+        const userData = {
+            id: user._id,
+            email: user.profile?.email || user.email,
+            firstName: user.profile?.name?.first || user.firstName,
+            lastName: user.profile?.name?.last || user.lastName,
+            phoneNumber: user.profile?.phoneNumbers?.primary || user.phoneNumber,
+            gender: user.profile?.gender || user.gender,
+            name: user.profile?.name?.full || user.name || `${user.profile?.name?.first || user.firstName} ${user.profile?.name?.last || user.lastName}`.trim(),
+            profileImage: user.profile?.profileImage || user.profileImage
+        };
 
         res.status(200).json({
             success: true,
@@ -326,16 +482,7 @@ const login = async (req, res) => {
                 accessToken,
                 refreshToken,
                 token: accessToken, // For backward compatibility
-                user: {
-                    id: user._id,
-                    email: user.profile.email,
-                    firstName: user.profile.name.first,
-                    lastName: user.profile.name.last,
-                    phoneNumber: user.profile.phoneNumbers.primary,
-                    gender: user.profile.gender,
-                    name: user.profile.name.full,
-                    profileImage: user.profile.profileImage
-                }
+                user: userData
             }
         });
 
@@ -854,11 +1001,29 @@ const refreshToken = async (req, res) => {
         }
 
         // Find user by refresh token (check both old single token and new array)
+        // Support both old flat structure and new nested structure
         let user = await User.findOne({ 'auth.refreshToken': refreshToken });
         
-        // If not found in single token field, check refreshTokens array
+        // If not found in new structure, check old flat structure
+        if (!user) {
+            user = await User.findOne({ refreshToken: refreshToken });
+        }
+        
+        // If not found in single token field, check refreshTokens array (new structure)
         if (!user) {
             user = await User.findOne({ 'auth.tokens.refreshTokens.token': refreshToken });
+        }
+        
+        // If not found, check old flat refreshTokens array
+        if (!user) {
+            // Try to find user by searching in old refreshTokens array
+            const users = await User.find({ refreshTokens: { $exists: true } });
+            user = users.find(u => {
+                if (Array.isArray(u.refreshTokens)) {
+                    return u.refreshTokens.some(rt => (rt.token || rt) === refreshToken);
+                }
+                return false;
+            });
         }
 
         if (!user) {
@@ -868,17 +1033,21 @@ const refreshToken = async (req, res) => {
             });
         }
 
-        // Check if token exists in refreshTokens array
+        // Check if token exists in refreshTokens array - support both structures
         let tokenRecord = null;
         if (user.auth?.tokens?.refreshTokens && Array.isArray(user.auth.tokens.refreshTokens)) {
+            // New nested structure
             tokenRecord = user.auth.tokens.refreshTokens.find(rt => rt.token === refreshToken);
+        } else if (Array.isArray(user.refreshTokens)) {
+            // Old flat structure
+            tokenRecord = user.refreshTokens.find(rt => (rt.token || rt) === refreshToken);
         }
 
         // Fallback to single token field for backward compatibility
-        if (!tokenRecord && user.auth?.refreshToken === refreshToken) {
-            // Token found in single field - check if it's still valid
+        const singleToken = user.auth?.refreshToken || user.refreshToken;
+        if (!tokenRecord && singleToken === refreshToken) {
+            // Token found in single field - it's valid (no expiry check)
             // Note: We no longer check expiry date - tokens only expire on explicit logout
-            // The expiryDate check is removed to allow indefinite login
         } else if (tokenRecord) {
             // Token found in array - it's valid (no expiry check)
             // Tokens only expire when user explicitly logs out
@@ -889,8 +1058,9 @@ const refreshToken = async (req, res) => {
             });
         }
 
-        // Generate new access token
-        const accessToken = generateAccessToken({ id: user._id, email: user.profile.email });
+        // Generate new access token - support both old and new structure
+        const userEmail = user.profile?.email || user.email;
+        const accessToken = generateAccessToken({ id: user._id, email: userEmail });
 
         res.status(200).json({
             success: true,

@@ -17,8 +17,23 @@ const sendOTPForSignup = async (req, res) => {
             });
         }
         
-        // Check if user already exists
-        const existingUser = await User.findOne({ email });
+        // Normalize email: trim whitespace and convert to lowercase
+        const normalizedEmail = email.trim().toLowerCase();
+        
+        // Validate normalized email is not empty
+        if (!normalizedEmail || normalizedEmail.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email cannot be empty'
+            });
+        }
+        
+        // Check if user already exists - support both old and new structure
+        // Check with normalized email (trimmed and lowercase)
+        let existingUser = await User.findOne({ 'profile.email': normalizedEmail });
+        if (!existingUser) {
+            existingUser = await User.findOne({ email: normalizedEmail });
+        }
         if (existingUser) {
             return res.status(400).json({
                 success: false,
@@ -26,8 +41,8 @@ const sendOTPForSignup = async (req, res) => {
             });
         }
         
-        // Create OTP record for signup
-        const { otpRecord, plainOTP } = await createOTPRecord(email, 'signup');
+        // Create OTP record for signup (use normalized email)
+        const { otpRecord, plainOTP } = await createOTPRecord(normalizedEmail, 'signup');
         
         // Check if email service is configured
         if (!emailService.transporter) {
@@ -38,8 +53,8 @@ const sendOTPForSignup = async (req, res) => {
             });
         }
         
-        // Send email
-        const emailSent = await emailService.sendOTPEmail(email, plainOTP);
+        // Send email (use normalized email)
+        const emailSent = await emailService.sendOTPEmail(normalizedEmail, plainOTP);
         
         if (!emailSent) {
             // Provide helpful error message based on common issues
@@ -72,7 +87,7 @@ const sendOTPForSignup = async (req, res) => {
             success: true,
             message: 'OTP sent successfully to your email',
             data: {
-                email,
+                email: normalizedEmail,
                 expiresAt: otpRecord.expiresAt
             }
         });
@@ -147,14 +162,21 @@ const sendPhoneOTPForSignup = async (req, res) => {
             });
         }
 
-        // Normalize phone number
-        let normalizedPhone = phone.replace(/[\s\-\(\)]/g, '');
+        // Normalize phone number: remove spaces, dashes, parentheses, and ensure it starts with +
+        let normalizedPhone = phone.trim().replace(/[\s\-\(\)]/g, '');
         if (!normalizedPhone.startsWith('+')) {
             normalizedPhone = '+' + normalizedPhone;
         }
 
-        // Check if phone number is already taken
-        const existingUser = await User.findOne({ 'profile.phoneNumbers.primary': normalizedPhone });
+        // Check if phone number is already taken - check multiple variations using a single query
+        const phoneWithoutPlus = normalizedPhone.replace(/^\+/, '');
+        const existingUser = await User.findOne({
+            $or: [
+                { 'profile.phoneNumbers.primary': normalizedPhone },
+                { 'profile.phoneNumbers.primary': phoneWithoutPlus }
+            ]
+        });
+        
         if (existingUser) {
             return res.status(400).json({
                 success: false,
@@ -193,16 +215,37 @@ const sendPhoneOTPForSignup = async (req, res) => {
     } catch (error) {
         console.error('Send phone OTP for signup error:', error);
         
-        // Provide more helpful error messages
+        // Provide more helpful error messages based on error type
         let errorMessage = error.message || 'Failed to send OTP';
-        if (error.message && error.message.includes('Invalid parameter `To`')) {
+        let hint = 'Phone number must be in E.164 format: +[country code][subscriber number]';
+        let statusCode = 500;
+        
+        // Check for network connectivity issues
+        if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+            errorMessage = 'Network connectivity issue: Cannot reach Twilio service';
+            hint = 'Please check your internet connection and ensure verify.twilio.com is accessible. This may be a DNS or network configuration issue.';
+            statusCode = 503; // Service Unavailable
+        } else if (error.message && error.message.includes('Invalid parameter `To`')) {
             errorMessage = 'Invalid phone number format. Please ensure the phone number is in E.164 format (e.g., +1234567890) with country code.';
+        } else if (error.status === 401 || error.message?.includes('Authentication')) {
+            errorMessage = 'Twilio authentication failed. Please check your TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN.';
+            hint = 'Verify your Twilio credentials are correctly set in environment variables.';
+        } else if (error.status === 404 || error.message?.includes('Service')) {
+            errorMessage = 'Twilio Verify Service not found. Please check your TWILIO_VERIFY_SERVICE_SID.';
+            hint = 'Verify your Twilio Verify Service SID is correctly set in environment variables.';
         }
         
-        res.status(500).json({
+        res.status(statusCode).json({
             success: false,
             message: errorMessage,
-            hint: 'Phone number must be in E.164 format: +[country code][subscriber number]'
+            hint: hint,
+            ...(process.env.NODE_ENV === 'development' && {
+                errorDetails: {
+                    code: error.code,
+                    status: error.status,
+                    hostname: error.hostname
+                }
+            })
         });
     }
 };
@@ -219,14 +262,21 @@ const verifyPhoneOTPForSignup = async (req, res) => {
             });
         }
 
-        // Normalize phone number
-        let normalizedPhone = phone.replace(/[\s\-\(\)]/g, '');
+        // Normalize phone number: remove spaces, dashes, parentheses, and ensure it starts with +
+        let normalizedPhone = phone.trim().replace(/[\s\-\(\)]/g, '');
         if (!normalizedPhone.startsWith('+')) {
             normalizedPhone = '+' + normalizedPhone;
         }
 
-        // Check if phone number is already taken
-        const existingUser = await User.findOne({ 'profile.phoneNumbers.primary': normalizedPhone });
+        // Check if phone number is already taken - check multiple variations using a single query
+        const phoneWithoutPlus = normalizedPhone.replace(/^\+/, '');
+        const existingUser = await User.findOne({
+            $or: [
+                { 'profile.phoneNumbers.primary': normalizedPhone },
+                { 'profile.phoneNumbers.primary': phoneWithoutPlus }
+            ]
+        });
+        
         if (existingUser) {
             return res.status(400).json({
                 success: false,
@@ -283,16 +333,37 @@ const verifyPhoneOTPForSignup = async (req, res) => {
     } catch (error) {
         console.error('Verify phone OTP for signup error:', error);
         
-        // Provide more helpful error messages
+        // Provide more helpful error messages based on error type
         let errorMessage = error.message || 'Failed to verify OTP';
-        if (error.message && error.message.includes('Invalid parameter `To`')) {
+        let hint = 'Phone number must be in E.164 format: +[country code][subscriber number]';
+        let statusCode = 500;
+        
+        // Check for network connectivity issues
+        if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+            errorMessage = 'Network connectivity issue: Cannot reach Twilio service';
+            hint = 'Please check your internet connection and ensure verify.twilio.com is accessible. This may be a DNS or network configuration issue.';
+            statusCode = 503; // Service Unavailable
+        } else if (error.message && error.message.includes('Invalid parameter `To`')) {
             errorMessage = 'Invalid phone number format. Please ensure the phone number is in E.164 format (e.g., +1234567890) with country code.';
+        } else if (error.status === 401 || error.message?.includes('Authentication')) {
+            errorMessage = 'Twilio authentication failed. Please check your TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN.';
+            hint = 'Verify your Twilio credentials are correctly set in environment variables.';
+        } else if (error.status === 404 || error.message?.includes('Service')) {
+            errorMessage = 'Twilio Verify Service not found. Please check your TWILIO_VERIFY_SERVICE_SID.';
+            hint = 'Verify your Twilio Verify Service SID is correctly set in environment variables.';
         }
         
-        res.status(500).json({
+        res.status(statusCode).json({
             success: false,
             message: errorMessage,
-            hint: 'Phone number must be in E.164 format: +[country code][subscriber number]'
+            hint: hint,
+            ...(process.env.NODE_ENV === 'development' && {
+                errorDetails: {
+                    code: error.code,
+                    status: error.status,
+                    hostname: error.hostname
+                }
+            })
         });
     }
 };
