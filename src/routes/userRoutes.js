@@ -15,7 +15,8 @@ const {
     removeWorkplaceEntry,
     blockUser,
     unblockUser,
-    listBlockedUsers
+    listBlockedUsers,
+    updateProfileVisibility
 } = require('../controllers/userController');
 const { limitOTPRequests, limitVerifyRequests } = require('../middleware/rateLimiter');
 
@@ -58,6 +59,9 @@ router.post('/block/:blockedUserId', blockUser);
 router.delete('/block/:blockedUserId', unblockUser);
 router.get('/blocked', listBlockedUsers);
 
+// Profile visibility (public/private)
+router.put('/profile/visibility', updateProfileVisibility);
+
 // Debug: Log all registered routes
 console.log('📋 User routes registered:');
 console.log('  GET    /api/user/search (protected)');
@@ -75,6 +79,7 @@ console.log('  DELETE /api/user/workplace/:index (protected)');
 console.log('  POST   /api/user/block/:blockedUserId (protected)');
 console.log('  DELETE /api/user/block/:blockedUserId (protected)');
 console.log('  GET    /api/user/blocked (protected)');
+console.log('  PUT    /api/user/profile/visibility (protected)');
 
 module.exports = router;
 

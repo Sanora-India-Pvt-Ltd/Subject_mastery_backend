@@ -1,17 +1,49 @@
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const User = require('../models/User');
+const mongoose = require('mongoose');
 const { getIO } = require('../socket/socketServer');
 const { isUserOnline, getUserLastSeen } = require('../config/redisStub');
+
+// Helper function to get all blocked user IDs (checks both root and social.blockedUsers)
+const getBlockedUserIds = async (userId) => {
+    try {
+        const user = await User.findById(userId).select('blockedUsers social.blockedUsers');
+        if (!user) return [];
+        
+        // Get blocked users from both locations
+        const rootBlocked = user.blockedUsers || [];
+        const socialBlocked = user.social?.blockedUsers || [];
+        
+        // Combine and deduplicate
+        const allBlocked = [...rootBlocked, ...socialBlocked];
+        const uniqueBlocked = [...new Set(allBlocked.map(id => id.toString()))];
+        
+        return uniqueBlocked.map(id => mongoose.Types.ObjectId(id));
+    } catch (error) {
+        console.error('Error getting blocked users:', error);
+        return [];
+    }
+};
+
+// Helper function to check if a user is blocked (checks both locations)
+const isUserBlocked = async (blockerId, blockedId) => {
+    try {
+        const blockedUserIds = await getBlockedUserIds(blockerId);
+        return blockedUserIds.some(id => id.toString() === blockedId.toString());
+    } catch (error) {
+        console.error('Error checking if user is blocked:', error);
+        return false;
+    }
+};
 
 // Get all conversations for a user
 const getConversations = async (req, res) => {
     try {
         const userId = req.user._id;
 
-        // Get current user's blocked users
-        const currentUser = await User.findById(userId).select('blockedUsers');
-        const blockedUserIds = currentUser.blockedUsers || [];
+        // Get current user's blocked users (from both locations)
+        const blockedUserIds = await getBlockedUserIds(userId);
 
         const conversations = await Conversation.find({
             participants: userId,
@@ -130,16 +162,17 @@ const getOrCreateConversation = async (req, res) => {
             });
         }
 
-        // Check if either user has blocked the other
-        const currentUser = await User.findById(userId).select('blockedUsers');
-        if (currentUser.blockedUsers && currentUser.blockedUsers.includes(participantId)) {
+        // Check if either user has blocked the other (check both locations)
+        const currentUserBlocked = await isUserBlocked(userId, participantId);
+        if (currentUserBlocked) {
             return res.status(403).json({
                 success: false,
                 message: 'You cannot create a conversation with a blocked user'
             });
         }
 
-        if (otherUser.blockedUsers && otherUser.blockedUsers.includes(userId)) {
+        const otherUserBlocked = await isUserBlocked(participantId, userId);
+        if (otherUserBlocked) {
             return res.status(403).json({
                 success: false,
                 message: 'Action not available'
@@ -428,22 +461,22 @@ const sendMessage = async (req, res) => {
             });
         }
 
-        // Check if current user has blocked any participant or vice versa
-        const currentUser = await User.findById(userId).select('blockedUsers');
+        // Check if current user has blocked any participant or vice versa (check both locations)
         const otherParticipants = conversation.participants.filter(
             p => p.toString() !== userId.toString()
         );
 
         for (const participant of otherParticipants) {
-            if (currentUser.blockedUsers && currentUser.blockedUsers.includes(participant)) {
+            const currentUserBlocked = await isUserBlocked(userId, participant);
+            if (currentUserBlocked) {
                 return res.status(403).json({
                     success: false,
                     message: 'You cannot send messages to a blocked user'
                 });
             }
 
-            const otherUser = await User.findById(participant).select('blockedUsers');
-            if (otherUser.blockedUsers && otherUser.blockedUsers.includes(userId)) {
+            const otherUserBlocked = await isUserBlocked(participant, userId);
+            if (otherUserBlocked) {
                 return res.status(403).json({
                     success: false,
                     message: 'Action not available'

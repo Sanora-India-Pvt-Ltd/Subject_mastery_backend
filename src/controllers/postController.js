@@ -6,6 +6,105 @@ const mongoose = require('mongoose');
 const { transcodeVideo, isVideo, cleanupFile } = require('../services/videoTranscoder');
 const { Report, REPORT_REASONS } = require('../models/Report');
 
+// Helper function to get all blocked user IDs (checks both root and social.blockedUsers)
+const getBlockedUserIds = async (userId) => {
+    try {
+        const user = await User.findById(userId).select('blockedUsers social.blockedUsers');
+        if (!user) return [];
+        
+        // Get blocked users from both locations
+        const rootBlocked = user.blockedUsers || [];
+        const socialBlocked = user.social?.blockedUsers || [];
+        
+        // Combine and deduplicate
+        const allBlocked = [...rootBlocked, ...socialBlocked];
+        const uniqueBlocked = [...new Set(allBlocked.map(id => id.toString()))];
+        
+        return uniqueBlocked.map(id => mongoose.Types.ObjectId(id));
+    } catch (error) {
+        console.error('Error getting blocked users:', error);
+        return [];
+    }
+};
+
+// Helper function to check if a user is blocked (checks both locations)
+const isUserBlocked = async (blockerId, blockedId) => {
+    try {
+        const blockedUserIds = await getBlockedUserIds(blockerId);
+        return blockedUserIds.some(id => id.toString() === blockedId.toString());
+    } catch (error) {
+        console.error('Error checking if user is blocked:', error);
+        return false;
+    }
+};
+
+// Helper function to check if two users are friends
+const areFriends = async (userId1, userId2) => {
+    try {
+        const user1 = await User.findById(userId1).select('social.friends friends');
+        if (!user1) return false;
+        
+        // Check both old and new friend structures
+        const friendsList = user1.social?.friends || user1.friends || [];
+        return friendsList.some(friendId => 
+            friendId.toString() === userId2.toString()
+        );
+    } catch (error) {
+        console.error('Error checking friendship:', error);
+        return false;
+    }
+};
+
+// Helper function to check if a post should be visible to viewer
+const isPostVisible = async (postUserId, viewingUserId) => {
+    try {
+        // If no viewing user (public feed), only show posts from public profiles
+        if (!viewingUserId) {
+            const postOwner = await User.findById(postUserId).select('profile.visibility');
+            return postOwner?.profile?.visibility !== 'private';
+        }
+
+        // If viewing own posts, always visible
+        if (postUserId.toString() === viewingUserId.toString()) {
+            return true;
+        }
+
+        // Check if viewing user has blocked the post owner (check both locations)
+        const viewerBlocked = await isUserBlocked(viewingUserId, postUserId);
+        if (viewerBlocked) {
+            return false; // Viewer has blocked the post owner, don't show
+        }
+
+        // Check if post owner has blocked the viewing user (check both locations)
+        const ownerBlocked = await isUserBlocked(postUserId, viewingUserId);
+        if (ownerBlocked) {
+            return false; // Post owner has blocked the viewer, don't show
+        }
+
+        // Get post owner's profile visibility
+        const postOwner = await User.findById(postUserId).select('profile.visibility social.friends friends');
+        if (!postOwner) return false;
+
+        const isProfilePrivate = postOwner.profile?.visibility === 'private';
+        
+        // If profile is public, post is visible
+        if (!isProfilePrivate) {
+            return true;
+        }
+
+        // If profile is private, check if viewer is a friend
+        const friendsList = postOwner.social?.friends || postOwner.friends || [];
+        const isFriend = friendsList.some(friendId => 
+            friendId.toString() === viewingUserId.toString()
+        );
+
+        return isFriend;
+    } catch (error) {
+        console.error('Error checking post visibility:', error);
+        return false;
+    }
+};
+
 // Helper function to limit comments to 15 most recent and format with user info
 const limitComments = (comments) => {
     if (!comments || !Array.isArray(comments)) return [];
@@ -229,9 +328,8 @@ const getAllPosts = async (req, res) => {
         let blockedUserIds = [];
         
         if (userId) {
-            // Get current user's blocked users
-            const currentUser = await User.findById(userId).select('blockedUsers');
-            blockedUserIds = currentUser.blockedUsers || [];
+            // Get current user's blocked users (from both locations)
+            blockedUserIds = await getBlockedUserIds(userId);
 
             // Get all post IDs that the user has reported
             const reportedPostIds = await Report.find({
@@ -239,43 +337,60 @@ const getAllPosts = async (req, res) => {
                 contentType: 'post'
             }).distinct('contentId');
 
-            // Exclude reported posts and posts from blocked users
+            // Exclude reported posts
             const excludeIds = [...reportedPostIds];
-            if (blockedUserIds.length > 0) {
-                // Also exclude posts from users who have blocked the current user
-                const usersWhoBlockedMe = await User.find({
-                    blockedUsers: userId
-                }).select('_id').lean();
-                const blockedByUserIds = usersWhoBlockedMe.map(u => u._id);
-                excludeIds.push(...blockedByUserIds);
-            }
-
             if (excludeIds.length > 0) {
                 query._id = { $nin: excludeIds };
             }
 
-            // Exclude posts from blocked users
-            if (blockedUserIds.length > 0) {
-                query.userId = { $nin: blockedUserIds };
+            // Get users who have blocked the current user (check both locations)
+            const usersWhoBlockedMe = await User.find({
+                $or: [
+                    { blockedUsers: userId },
+                    { 'social.blockedUsers': userId }
+                ]
+            }).select('_id').lean();
+            const blockedByUserIds = usersWhoBlockedMe.map(u => u._id);
+
+            // Exclude posts from blocked users AND users who have blocked the current user
+            const allExcludedUserIds = [...blockedUserIds, ...blockedByUserIds];
+            if (allExcludedUserIds.length > 0) {
+                query.userId = { $nin: allExcludedUserIds };
             }
         }
 
         // Get posts sorted by newest first
+        // We need to populate profile.visibility to check privacy
         const posts = await Post.find(query)
-            .populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage')
+            .populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage profile.visibility social.friends friends')
             .populate('comments.userId', 'profile.name.first profile.name.last profile.name.full profile.profileImage')
             .sort({ createdAt: -1 })
             .skip(skip)
-            .limit(limit);
+            .limit(limit * 2); // Get more posts to account for filtering
 
-        // Get total count for pagination
+        // Filter posts based on privacy settings
+        const visiblePosts = [];
+        for (const post of posts) {
+            const postUserId = post.userId._id ? post.userId._id : post.userId;
+            const isVisible = await isPostVisible(postUserId, userId);
+            
+            if (isVisible) {
+                visiblePosts.push(post);
+                // Stop once we have enough posts
+                if (visiblePosts.length >= limit) break;
+            }
+        }
+
+        // Get total count for pagination (we'll need to estimate or fetch more)
+        // For accurate pagination, we'd need to filter in the query, but that's complex
+        // So we'll use the filtered count
         const totalPosts = await Post.countDocuments(query);
 
         return res.status(200).json({
             success: true,
             message: 'Posts retrieved successfully',
             data: {
-                posts: posts.map(post => {
+                posts: visiblePosts.map(post => {
                     const userIdString = post.userId._id ? post.userId._id.toString() : post.userId.toString();
                     const userInfo = post.userId._id ? {
                         id: post.userId._id.toString(),
@@ -304,7 +419,7 @@ const getAllPosts = async (req, res) => {
                     currentPage: page,
                     totalPages: Math.ceil(totalPosts / limit),
                     totalPosts: totalPosts,
-                    hasNextPage: page < Math.ceil(totalPosts / limit),
+                    hasNextPage: visiblePosts.length === limit && page < Math.ceil(totalPosts / limit),
                     hasPrevPage: page > 1
                 }
             }
@@ -411,7 +526,7 @@ const getUserPosts = async (req, res) => {
         }
 
         // Check if user exists
-        const user = await User.findById(id);
+        const user = await User.findById(id).select('profile.visibility social.friends friends blockedUsers');
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -424,22 +539,47 @@ const getUserPosts = async (req, res) => {
 
         // Check if viewing user is blocked by the post owner or vice versa
         if (viewingUserId) {
-            const viewingUser = await User.findById(viewingUserId).select('blockedUsers');
-            const postOwner = await User.findById(id).select('blockedUsers');
-
-            // Check if viewing user has blocked the post owner
-            if (viewingUser.blockedUsers && viewingUser.blockedUsers.includes(id)) {
+            // Check if viewing user has blocked the post owner (check both locations)
+            const viewingUserBlocked = await isUserBlocked(viewingUserId, id);
+            if (viewingUserBlocked) {
                 return res.status(403).json({
                     success: false,
                     message: 'You cannot view posts from a blocked user'
                 });
             }
 
-            // Check if post owner has blocked the viewing user
-            if (postOwner.blockedUsers && postOwner.blockedUsers.includes(viewingUserId)) {
+            // Check if post owner has blocked the viewing user (check both locations)
+            const ownerBlocked = await isUserBlocked(id, viewingUserId);
+            if (ownerBlocked) {
                 return res.status(403).json({
                     success: false,
                     message: 'Content not available'
+                });
+            }
+
+            // Check privacy settings: if profile is private and viewer is not a friend, deny access
+            const isProfilePrivate = user.profile?.visibility === 'private';
+            if (isProfilePrivate) {
+                const friendsList = user.social?.friends || user.friends || [];
+                const isFriend = friendsList.some(friendId => 
+                    friendId.toString() === viewingUserId.toString()
+                );
+
+                // If viewing own posts, always allow
+                if (id.toString() !== viewingUserId.toString() && !isFriend) {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'This user has a private profile. Only friends can view their posts.'
+                    });
+                }
+            }
+        } else {
+            // If not authenticated and profile is private, deny access
+            const isProfilePrivate = user.profile?.visibility === 'private';
+            if (isProfilePrivate) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'This user has a private profile. Please log in to view their posts.'
                 });
             }
         }

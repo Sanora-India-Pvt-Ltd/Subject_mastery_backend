@@ -4,6 +4,38 @@ const cloudinary = require('../config/cloudinary');
 const mongoose = require('mongoose');
 const { transcodeVideo, isVideo, cleanupFile } = require('../services/videoTranscoder');
 
+// Helper function to get all blocked user IDs (checks both root and social.blockedUsers)
+const getBlockedUserIds = async (userId) => {
+    try {
+        const user = await User.findById(userId).select('blockedUsers social.blockedUsers');
+        if (!user) return [];
+        
+        // Get blocked users from both locations
+        const rootBlocked = user.blockedUsers || [];
+        const socialBlocked = user.social?.blockedUsers || [];
+        
+        // Combine and deduplicate
+        const allBlocked = [...rootBlocked, ...socialBlocked];
+        const uniqueBlocked = [...new Set(allBlocked.map(id => id.toString()))];
+        
+        return uniqueBlocked.map(id => mongoose.Types.ObjectId(id));
+    } catch (error) {
+        console.error('Error getting blocked users:', error);
+        return [];
+    }
+};
+
+// Helper function to check if a user is blocked (checks both locations)
+const isUserBlocked = async (blockerId, blockedId) => {
+    try {
+        const blockedUserIds = await getBlockedUserIds(blockerId);
+        return blockedUserIds.some(id => id.toString() === blockedId.toString());
+    } catch (error) {
+        console.error('Error checking if user is blocked:', error);
+        return false;
+    }
+};
+
 // Create a new story
 const createStory = async (req, res) => {
     try {
@@ -108,19 +140,18 @@ const getUserStories = async (req, res) => {
 
         // Check if viewing user is blocked by the story owner or vice versa
         if (viewingUserId) {
-            const viewingUser = await User.findById(viewingUserId).select('blockedUsers');
-            const storyOwner = await User.findById(id).select('blockedUsers');
-
-            // Check if viewing user has blocked the story owner
-            if (viewingUser.blockedUsers && viewingUser.blockedUsers.includes(id)) {
+            // Check if viewing user has blocked the story owner (check both locations)
+            const viewingUserBlocked = await isUserBlocked(viewingUserId, id);
+            if (viewingUserBlocked) {
                 return res.status(403).json({
                     success: false,
                     message: 'You cannot view stories from a blocked user'
                 });
             }
 
-            // Check if story owner has blocked the viewing user
-            if (storyOwner.blockedUsers && storyOwner.blockedUsers.includes(viewingUserId)) {
+            // Check if story owner has blocked the viewing user (check both locations)
+            const ownerBlocked = await isUserBlocked(id, viewingUserId);
+            if (ownerBlocked) {
                 return res.status(403).json({
                     success: false,
                     message: 'Content not available'
@@ -187,7 +218,7 @@ const getAllFriendsStories = async (req, res) => {
         const user = req.user; // From protect middleware
 
         // Get user's friends list and blocked users
-        const currentUser = await User.findById(user._id).select('friends blockedUsers');
+        const currentUser = await User.findById(user._id).select('friends');
         if (!currentUser) {
             return res.status(404).json({
                 success: false,
@@ -197,7 +228,8 @@ const getAllFriendsStories = async (req, res) => {
 
         // Include current user's own stories as well
         const friendIds = currentUser.friends || [];
-        const blockedUserIds = currentUser.blockedUsers || [];
+        // Get blocked users from both locations
+        const blockedUserIds = await getBlockedUserIds(user._id);
         
         // Filter out blocked users from friend list
         const unblockedFriendIds = friendIds.filter(
@@ -215,9 +247,12 @@ const getAllFriendsStories = async (req, res) => {
             .populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage')
             .sort({ createdAt: -1 }); // Most recent first
 
-        // Also filter out stories from users who have blocked the current user
+        // Also filter out stories from users who have blocked the current user (check both locations)
         const usersWhoBlockedMe = await User.find({
-            blockedUsers: user._id
+            $or: [
+                { blockedUsers: user._id },
+                { 'social.blockedUsers': user._id }
+            ]
         }).select('_id').lean();
         const blockedByUserIds = new Set(usersWhoBlockedMe.map(u => u._id.toString()));
         

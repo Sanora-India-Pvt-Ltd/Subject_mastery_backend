@@ -8,6 +8,81 @@ const twilio = require('twilio');
 const cloudinary = require('../config/cloudinary');
 const { transcodeVideo, isVideo, cleanupFile } = require('../services/videoTranscoder');
 
+// Helper function to check if two users are friends
+const areFriends = async (userId1, userId2) => {
+    try {
+        const user1 = await User.findById(userId1).select('social.friends friends');
+        if (!user1) return false;
+        
+        // Check both old and new friend structures
+        const friendsList = user1.social?.friends || user1.friends || [];
+        return friendsList.some(friendId => 
+            friendId.toString() === userId2.toString()
+        );
+    } catch (error) {
+        console.error('Error checking friendship:', error);
+        return false;
+    }
+};
+
+// Helper function to get all blocked user IDs (checks both root and social.blockedUsers)
+const getBlockedUserIds = async (userId) => {
+    try {
+        const user = await User.findById(userId).select('blockedUsers social.blockedUsers');
+        if (!user) return [];
+        
+        // Get blocked users from both locations
+        const rootBlocked = user.blockedUsers || [];
+        const socialBlocked = user.social?.blockedUsers || [];
+        
+        // Combine and deduplicate
+        const allBlocked = [...rootBlocked, ...socialBlocked];
+        const uniqueBlocked = [...new Set(allBlocked.map(id => id.toString()))];
+        
+        return uniqueBlocked.map(id => mongoose.Types.ObjectId(id));
+    } catch (error) {
+        console.error('Error getting blocked users:', error);
+        return [];
+    }
+};
+
+// Helper function to check if a user is blocked (checks both locations)
+const isUserBlocked = async (blockerId, blockedId) => {
+    try {
+        const blockedUserIds = await getBlockedUserIds(blockerId);
+        return blockedUserIds.some(id => id.toString() === blockedId.toString());
+    } catch (error) {
+        console.error('Error checking if user is blocked:', error);
+        return false;
+    }
+};
+
+// Helper function to get limited profile data for non-friends viewing private profiles
+const getLimitedProfileData = (user) => {
+    return {
+        id: user._id,
+        firstName: user.profile?.name?.first,
+        lastName: user.profile?.name?.last,
+        name: user.profile?.name?.full,
+        profileImage: user.profile?.profileImage || '',
+        // Exclude: bio, currentCity, hometown, and other detailed info
+    };
+};
+
+// Helper function to get full profile data (for friends or public profiles)
+const getFullProfileData = (user) => {
+    return {
+        id: user._id,
+        firstName: user.profile?.name?.first,
+        lastName: user.profile?.name?.last,
+        name: user.profile?.name?.full,
+        profileImage: user.profile?.profileImage,
+        bio: user.profile?.bio,
+        currentCity: user.location?.currentCity,
+        hometown: user.location?.hometown
+    };
+};
+
 // Update user profile (name, dob, gender) - no verification needed
 const updateProfile = async (req, res) => {
     try {
@@ -2235,16 +2310,27 @@ const searchUsers = async (req, res) => {
 
         const searchTerm = query.trim();
 
-        // Get current user's blocked users
-        const currentUser = await User.findById(user._id).select('blockedUsers');
-        const blockedUserIds = currentUser.blockedUsers || [];
+        // Get current user's blocked users (from both locations)
+        const blockedUserIds = await getBlockedUserIds(user._id);
+
+        // Get users who have blocked the current user (check both locations)
+        const usersWhoBlockedMe = await User.find({
+            $or: [
+                { blockedUsers: user._id },
+                { 'social.blockedUsers': user._id }
+            ]
+        }).select('_id').lean();
+        const blockedByUserIds = usersWhoBlockedMe.map(u => u._id);
 
         // Search for users that match the query (case-insensitive)
         // Search across firstName, lastName, and name fields
         // Exclude the current user and blocked users from results
         const searchQuery = {
-            _id: { $ne: user._id, $nin: blockedUserIds }, // Exclude current user and blocked users
-            blockedUsers: { $ne: user._id }, // Exclude users who have blocked the current user
+            _id: { $ne: user._id, $nin: [...blockedUserIds, ...blockedByUserIds] }, // Exclude current user, blocked users, and users who blocked me
+            $and: [
+                { $or: [{ blockedUsers: { $ne: user._id } }, { blockedUsers: { $exists: false } }] },
+                { $or: [{ 'social.blockedUsers': { $ne: user._id } }, { 'social.blockedUsers': { $exists: false } }] }
+            ],
             $or: [
                 { 'profile.name.first': { $regex: searchTerm, $options: 'i' } },
                 { 'profile.name.last': { $regex: searchTerm, $options: 'i' } },
@@ -2280,21 +2366,30 @@ const searchUsers = async (req, res) => {
             });
         }
 
-        // Return found users
+        // Get current user's friends list for privacy checks
+        const currentUserWithFriends = await User.findById(user._id).select('social.friends friends');
+        const currentUserFriends = currentUserWithFriends?.social?.friends || currentUserWithFriends?.friends || [];
+        const currentUserFriendsIds = currentUserFriends.map(f => f.toString());
+
+        // Return found users with privacy checks
+        const formattedUsers = await Promise.all(users.map(async (searchedUser) => {
+            const isProfilePrivate = searchedUser.profile?.visibility === 'private';
+            const isFriend = currentUserFriendsIds.includes(searchedUser._id.toString());
+            
+            // If profile is private and viewer is not a friend, return limited data
+            if (isProfilePrivate && !isFriend) {
+                return getLimitedProfileData(searchedUser);
+            }
+            
+            // Otherwise return full data (public profile or friend viewing private profile)
+            return getFullProfileData(searchedUser);
+        }));
+
         return res.status(200).json({
             success: true,
             message: `Found ${users.length} user/users`,
             data: {
-                users: users.map(user => ({
-                    id: user._id,
-                    firstName: user.profile?.name?.first,
-                    lastName: user.profile?.name?.last,
-                    name: user.profile?.name?.full,
-                    profileImage: user.profile?.profileImage,
-                    bio: user.profile?.bio,
-                    currentCity: user.location?.currentCity,
-                    hometown: user.location?.hometown
-                })),
+                users: formattedUsers,
                 pagination: {
                     currentPage: page,
                     totalPages: Math.ceil(totalUsers / limit),
@@ -2564,17 +2659,21 @@ const blockUser = async (req, res) => {
             });
         }
 
-        // Check if already blocked
-        if (currentUser.blockedUsers && currentUser.blockedUsers.includes(blockedUserId)) {
+        // Check if already blocked (check both locations)
+        const isAlreadyBlocked = await isUserBlocked(userId, blockedUserId);
+        if (isAlreadyBlocked) {
             return res.status(400).json({
                 success: false,
                 message: 'User is already blocked'
             });
         }
 
-        // Add to blocked users list
+        // Add to blocked users list (both locations for consistency)
         await User.findByIdAndUpdate(userId, {
-            $addToSet: { blockedUsers: blockedUserId }
+            $addToSet: { 
+                blockedUsers: blockedUserId,
+                'social.blockedUsers': blockedUserId
+            }
         });
 
         // Remove from friends list if they are friends (both directions)
@@ -2656,17 +2755,21 @@ const unblockUser = async (req, res) => {
             });
         }
 
-        // Check if user is blocked
-        if (!currentUser.blockedUsers || !currentUser.blockedUsers.includes(blockedUserId)) {
+        // Check if user is blocked (check both locations)
+        const isBlocked = await isUserBlocked(userId, blockedUserId);
+        if (!isBlocked) {
             return res.status(400).json({
                 success: false,
                 message: 'User is not blocked'
             });
         }
 
-        // Remove from blocked users list
+        // Remove from blocked users list (both locations)
         await User.findByIdAndUpdate(userId, {
-            $pull: { blockedUsers: blockedUserId }
+            $pull: { 
+                blockedUsers: blockedUserId,
+                'social.blockedUsers': blockedUserId
+            }
         });
 
         // Get updated user
@@ -2704,10 +2807,11 @@ const listBlockedUsers = async (req, res) => {
     try {
         const userId = req.user._id;
 
-        // Get user with populated blocked users
+        // Get user with populated blocked users from both locations
         const user = await User.findById(userId)
             .populate('blockedUsers', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email profile.bio location.currentCity location.hometown')
-            .select('blockedUsers');
+            .populate('social.blockedUsers', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email profile.bio location.currentCity location.hometown')
+            .select('blockedUsers social.blockedUsers');
 
         if (!user) {
             return res.status(404).json({
@@ -2716,12 +2820,28 @@ const listBlockedUsers = async (req, res) => {
             });
         }
 
+        // Merge blocked users from both locations and deduplicate
+        const rootBlocked = user.blockedUsers || [];
+        const socialBlocked = user.social?.blockedUsers || [];
+        const allBlocked = [...rootBlocked, ...socialBlocked];
+        
+        // Deduplicate by _id
+        const uniqueBlocked = [];
+        const seenIds = new Set();
+        for (const blockedUser of allBlocked) {
+            const userId = blockedUser._id ? blockedUser._id.toString() : blockedUser.toString();
+            if (!seenIds.has(userId)) {
+                seenIds.add(userId);
+                uniqueBlocked.push(blockedUser);
+            }
+        }
+
         res.status(200).json({
             success: true,
             message: 'Blocked users retrieved successfully',
             data: {
-                blockedUsers: user.blockedUsers || [],
-                count: user.blockedUsers ? user.blockedUsers.length : 0
+                blockedUsers: uniqueBlocked,
+                count: uniqueBlocked.length
             }
         });
     } catch (error) {
@@ -2729,6 +2849,62 @@ const listBlockedUsers = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Failed to retrieve blocked users',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Update profile visibility (public/private)
+const updateProfileVisibility = async (req, res) => {
+    try {
+        const user = req.user; // From protect middleware
+        const { visibility } = req.body;
+
+        // Validate visibility value
+        if (visibility === undefined) {
+            return res.status(400).json({
+                success: false,
+                message: 'Visibility field is required'
+            });
+        }
+
+        if (!['public', 'private'].includes(visibility)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Visibility must be either "public" or "private"'
+            });
+        }
+
+        // Update profile visibility
+        const updatedUser = await User.findByIdAndUpdate(
+            user._id,
+            { 'profile.visibility': visibility },
+            { new: true, runValidators: true }
+        ).select('-password -refreshToken -auth.password -auth.refreshToken');
+
+        if (!updatedUser) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: `Profile visibility updated to ${visibility}`,
+            data: {
+                user: {
+                    id: updatedUser._id,
+                    profileVisibility: updatedUser.profile?.visibility || 'public'
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Update profile visibility error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update profile visibility',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
@@ -2757,6 +2933,7 @@ module.exports = {
     removeWorkplaceEntry,
     blockUser,
     unblockUser,
-    listBlockedUsers
+    listBlockedUsers,
+    updateProfileVisibility
 };
 

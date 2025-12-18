@@ -999,7 +999,8 @@ const getProfile = async (req, res) => {
                         dob: user.profile?.dob,
                         bio: user.profile?.bio,
                         profileImage: user.profile?.profileImage,
-                        coverPhoto: user.profile?.coverPhoto
+                        coverPhoto: user.profile?.coverPhoto,
+                        visibility: user.profile?.visibility || 'public'
                     },
                     // Location section
                     location: {
@@ -1710,7 +1711,8 @@ const updateProfile = async (req, res) => {
                         dob: updatedUser.profile?.dob,
                         bio: updatedUser.profile?.bio,
                         profileImage: updatedUser.profile?.profileImage,
-                        coverPhoto: updatedUser.profile?.coverPhoto
+                        coverPhoto: updatedUser.profile?.coverPhoto,
+                        visibility: updatedUser.profile?.visibility || 'public'
                     },
                     // Location section
                     location: {

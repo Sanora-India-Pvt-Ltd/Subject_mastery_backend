@@ -275,6 +275,11 @@ const userSchema = new mongoose.Schema({
         coverPhoto: {
             type: String,
             default: ''
+        },
+        visibility: {
+            type: String,
+            enum: ['public', 'private'],
+            default: 'public'
         }
     },
     auth: {

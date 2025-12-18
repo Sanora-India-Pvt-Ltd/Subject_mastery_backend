@@ -2,6 +2,38 @@ const User = require('../models/User');
 const FriendRequest = require('../models/FriendRequest');
 const mongoose = require('mongoose');
 
+// Helper function to get all blocked user IDs (checks both root and social.blockedUsers)
+const getBlockedUserIds = async (userId) => {
+    try {
+        const user = await User.findById(userId).select('blockedUsers social.blockedUsers');
+        if (!user) return [];
+        
+        // Get blocked users from both locations
+        const rootBlocked = user.blockedUsers || [];
+        const socialBlocked = user.social?.blockedUsers || [];
+        
+        // Combine and deduplicate
+        const allBlocked = [...rootBlocked, ...socialBlocked];
+        const uniqueBlocked = [...new Set(allBlocked.map(id => id.toString()))];
+        
+        return uniqueBlocked.map(id => mongoose.Types.ObjectId(id));
+    } catch (error) {
+        console.error('Error getting blocked users:', error);
+        return [];
+    }
+};
+
+// Helper function to check if a user is blocked (checks both locations)
+const isUserBlocked = async (blockerId, blockedId) => {
+    try {
+        const blockedUserIds = await getBlockedUserIds(blockerId);
+        return blockedUserIds.some(id => id.toString() === blockedId.toString());
+    } catch (error) {
+        console.error('Error checking if user is blocked:', error);
+        return false;
+    }
+};
+
 // Send friend request
 const sendFriendRequest = async (req, res) => {
     try {
@@ -33,17 +65,18 @@ const sendFriendRequest = async (req, res) => {
             });
         }
 
-        // Check if sender has blocked the receiver
-        const sender = await User.findById(senderId);
-        if (sender.blockedUsers && sender.blockedUsers.includes(receiverId)) {
+        // Check if sender has blocked the receiver (check both locations)
+        const senderBlocked = await isUserBlocked(senderId, receiverId);
+        if (senderBlocked) {
             return res.status(403).json({
                 success: false,
                 message: 'You cannot send a friend request to a blocked user'
             });
         }
 
-        // Check if receiver has blocked the sender
-        if (receiver.blockedUsers && receiver.blockedUsers.includes(senderId)) {
+        // Check if receiver has blocked the sender (check both locations)
+        const receiverBlocked = await isUserBlocked(receiverId, senderId);
+        if (receiverBlocked) {
             return res.status(403).json({
                 success: false,
                 message: 'Action not available'
@@ -161,18 +194,17 @@ const acceptFriendRequest = async (req, res) => {
             });
         }
 
-        // Check if either user has blocked the other
-        const currentUser = await User.findById(userId).select('blockedUsers');
-        const senderUser = await User.findById(friendRequest.sender).select('blockedUsers');
-        
-        if (currentUser.blockedUsers && currentUser.blockedUsers.includes(friendRequest.sender)) {
+        // Check if either user has blocked the other (check both locations)
+        const currentUserBlocked = await isUserBlocked(userId, friendRequest.sender);
+        if (currentUserBlocked) {
             return res.status(403).json({
                 success: false,
                 message: 'You cannot accept a friend request from a blocked user'
             });
         }
 
-        if (senderUser.blockedUsers && senderUser.blockedUsers.includes(userId)) {
+        const senderBlocked = await isUserBlocked(friendRequest.sender, userId);
+        if (senderBlocked) {
             return res.status(403).json({
                 success: false,
                 message: 'Action not available'
@@ -295,14 +327,16 @@ const listFriends = async (req, res) => {
         const userId = req.user._id;
 
         // Get user with populated friends
+        // Include both nested profile structure and old flat fields for backward compatibility
         const user = await User.findById(userId)
-            .populate('friends', 'profile.name.full profile.profileImage')
-            .select('friends blockedUsers');
+            .populate('friends', 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage')
+            .select('friends');
         
-        // Filter out blocked users from friends list
-        const blockedUserIds = user.blockedUsers ? user.blockedUsers.map(id => id.toString()) : [];
+        // Filter out blocked users from friends list (get from both locations)
+        const blockedUserIds = await getBlockedUserIds(userId);
+        const blockedUserIdsStrings = blockedUserIds.map(id => id.toString());
         const filteredFriends = (user.friends || []).filter(friend => 
-            !blockedUserIds.includes(friend._id.toString())
+            !blockedUserIdsStrings.includes(friend._id.toString())
         );
 
         if (!user) {
@@ -313,11 +347,27 @@ const listFriends = async (req, res) => {
         }
 
         // Map friends to only include name, profileImage, and _id
-        const friendsList = filteredFriends.map(friend => ({
-            _id: friend._id,
-            name: friend.name,
-            profileImage: friend.profileImage
-        }));
+        // Handle both nested profile structure and old flat structure for backward compatibility
+        const friendsList = filteredFriends.map(friend => {
+            const friendObj = friend.toObject ? friend.toObject() : friend;
+            // Extract name from profile structure (new) or flat field (old) with fallback
+            const name = friendObj.profile?.name?.full || 
+                        (friendObj.profile?.name?.first && friendObj.profile?.name?.last 
+                            ? `${friendObj.profile.name.first} ${friendObj.profile.name.last}`.trim()
+                            : friendObj.profile?.name?.first || friendObj.profile?.name?.last || 
+                              friendObj.name || 
+                              (friendObj.firstName || friendObj.lastName 
+                                ? `${friendObj.firstName || ''} ${friendObj.lastName || ''}`.trim()
+                                : ''));
+            // Extract profileImage from profile structure (new) or flat field (old) with fallback
+            const profileImage = friendObj.profile?.profileImage || friendObj.profileImage || '';
+            
+            return {
+                _id: friend._id,
+                name: name,
+                profileImage: profileImage
+            };
+        });
 
         res.json({
             success: true,
@@ -342,9 +392,9 @@ const listReceivedRequests = async (req, res) => {
     try {
         const userId = req.user._id;
 
-        // Get current user's blocked users
-        const currentUser = await User.findById(userId).select('blockedUsers');
-        const blockedUserIds = currentUser.blockedUsers || [];
+        // Get current user's blocked users (from both locations)
+        const blockedUserIds = await getBlockedUserIds(userId);
+        const blockedUserIdsStrings = blockedUserIds.map(id => id.toString());
 
         const requests = await FriendRequest.find({
             receiver: userId,
@@ -377,9 +427,9 @@ const listSentRequests = async (req, res) => {
     try {
         const userId = req.user._id;
 
-        // Get current user's blocked users
-        const currentUser = await User.findById(userId).select('blockedUsers');
-        const blockedUserIds = currentUser.blockedUsers || [];
+        // Get current user's blocked users (from both locations)
+        const blockedUserIds = await getBlockedUserIds(userId);
+        const blockedUserIdsStrings = blockedUserIds.map(id => id.toString());
 
         const requests = await FriendRequest.find({
             sender: userId,
@@ -440,7 +490,18 @@ const unfriend = async (req, res) => {
 
         // Check if they are friends
         const user = await User.findById(userId);
-        if (!user.friends || !user.friends.includes(friendId)) {
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+        
+        // Convert friendId to string for comparison
+        const friendIdStr = friendId.toString();
+        const isFriend = user.friends && user.friends.some(f => f.toString() === friendIdStr);
+        
+        if (!isFriend) {
             return res.status(400).json({
                 success: false,
                 message: 'You are not friends with this user'
@@ -544,8 +605,8 @@ const getFriendSuggestions = async (req, res) => {
         const userId = req.user._id;
         const limit = parseInt(req.query.limit) || 10;
 
-        // Get current user with friends and blocked users
-        const user = await User.findById(userId).select('friends blockedUsers');
+        // Get current user with friends
+        const user = await User.findById(userId).select('friends');
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -553,27 +614,54 @@ const getFriendSuggestions = async (req, res) => {
             });
         }
 
-        const blockedUserIds = user.blockedUsers ? user.blockedUsers.map(id => id.toString()) : [];
+        // Get blocked users from both locations
+        const blockedUserIds = await getBlockedUserIds(userId);
 
         // If user has no friends, return empty suggestions or random users
         if (!user.friends || user.friends.length === 0) {
             // Return random users (excluding current user and blocked users)
             const randomUsers = await User.find({
-                _id: { $ne: userId, $nin: user.blockedUsers || [] }
+                _id: { $ne: userId, $nin: blockedUserIds },
+                $and: [
+                    { $or: [{ blockedUsers: { $ne: userId } }, { blockedUsers: { $exists: false } }] },
+                    { $or: [{ 'social.blockedUsers': { $ne: userId } }, { 'social.blockedUsers': { $exists: false } }] }
+                ]
             })
-            .select('firstName lastName name profileImage email bio currentCity hometown')
-            .limit(limit);
+            .select('profile.name.first profile.name.last profile.name.full profile.profileImage profile.email profile.bio location.currentCity location.hometown firstName lastName name profileImage email bio currentCity hometown')
+            .limit(limit)
+            .lean();
+
+            // Format users to include only name, profileImage, and bio (handle both nested and flat structures)
+            const formattedUsers = randomUsers.map(u => {
+                const name = u.profile?.name?.full || 
+                            (u.profile?.name?.first && u.profile?.name?.last 
+                                ? `${u.profile.name.first} ${u.profile.name.last}`.trim()
+                                : u.profile?.name?.first || u.profile?.name?.last || 
+                                  u.name || 
+                                  (u.firstName || u.lastName 
+                                    ? `${u.firstName || ''} ${u.lastName || ''}`.trim()
+                                    : ''));
+                const profileImage = u.profile?.profileImage || u.profileImage || '';
+                const bio = u.profile?.bio || u.bio || '';
+
+                return {
+                    _id: u._id,
+                    name: name,
+                    profileImage: profileImage,
+                    bio: bio
+                };
+            });
 
             return res.json({
                 success: true,
                 message: 'Friend suggestions retrieved successfully',
                 data: {
-                    suggestions: randomUsers.map(u => ({
+                    suggestions: formattedUsers.map(u => ({
                         user: u,
                         mutualFriends: 0,
                         mutualFriendsList: []
                     })),
-                    count: randomUsers.length
+                    count: formattedUsers.length
                 }
             });
         }
@@ -656,9 +744,12 @@ const getFriendSuggestions = async (req, res) => {
         const suggestionUserIds = filteredSuggestions.map(s => s.userId);
         const suggestedUsers = await User.find({
             _id: { $in: suggestionUserIds },
-            blockedUsers: { $ne: userId } // Exclude users who have blocked the current user
+            $and: [
+                { $or: [{ blockedUsers: { $ne: userId } }, { blockedUsers: { $exists: false } }] },
+                { $or: [{ 'social.blockedUsers': { $ne: userId } }, { 'social.blockedUsers': { $exists: false } }] }
+            ]
         })
-        .select('firstName lastName name profileImage email bio currentCity hometown')
+        .select('profile.name.first profile.name.last profile.name.full profile.profileImage profile.email profile.bio location.currentCity location.hometown firstName lastName name profileImage email bio currentCity hometown')
         .lean();
 
         // Get mutual friend details
@@ -670,19 +761,56 @@ const getFriendSuggestions = async (req, res) => {
         const mutualFriendsDetails = await User.find({
             _id: { $in: Array.from(allMutualFriendIds) }
         })
-        .select('firstName lastName name profileImage')
+        .select('profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage')
         .lean();
 
         const mutualFriendsMap = new Map();
         mutualFriendsDetails.forEach(mf => {
-            mutualFriendsMap.set(mf._id.toString(), mf);
+            // Format mutual friend to include name field (handle both nested and flat structures)
+            const name = mf.profile?.name?.full || 
+                        (mf.profile?.name?.first && mf.profile?.name?.last 
+                            ? `${mf.profile.name.first} ${mf.profile.name.last}`.trim()
+                            : mf.profile?.name?.first || mf.profile?.name?.last || 
+                              mf.name || 
+                              (mf.firstName || mf.lastName 
+                                ? `${mf.firstName || ''} ${mf.lastName || ''}`.trim()
+                                : ''));
+            const profileImage = mf.profile?.profileImage || mf.profileImage || '';
+            
+            mutualFriendsMap.set(mf._id.toString(), {
+                _id: mf._id,
+                name: name,
+                profileImage: profileImage
+            });
         });
 
         // Build final suggestions with user details and mutual friends
         const finalSuggestions = filteredSuggestions.map(suggestion => {
-            const userDetails = suggestedUsers.find(u => 
+            const userDetailsRaw = suggestedUsers.find(u => 
                 u._id.toString() === suggestion.userId.toString()
             );
+
+            // Format user details to include only name, profileImage, and bio (handle both nested and flat structures)
+            let userDetails = null;
+            if (userDetailsRaw) {
+                const name = userDetailsRaw.profile?.name?.full || 
+                            (userDetailsRaw.profile?.name?.first && userDetailsRaw.profile?.name?.last 
+                                ? `${userDetailsRaw.profile.name.first} ${userDetailsRaw.profile.name.last}`.trim()
+                                : userDetailsRaw.profile?.name?.first || userDetailsRaw.profile?.name?.last || 
+                                  userDetailsRaw.name || 
+                                  (userDetailsRaw.firstName || userDetailsRaw.lastName 
+                                    ? `${userDetailsRaw.firstName || ''} ${userDetailsRaw.lastName || ''}`.trim()
+                                    : ''));
+                const profileImage = userDetailsRaw.profile?.profileImage || userDetailsRaw.profileImage || '';
+                const bio = userDetailsRaw.profile?.bio || userDetailsRaw.bio || '';
+
+                userDetails = {
+                    _id: userDetailsRaw._id,
+                    name: name,
+                    profileImage: profileImage,
+                    bio: bio
+                };
+            }
 
             const mutualFriendsList = suggestion.mutualFriends
                 .map(mfId => mutualFriendsMap.get(mfId.toString()))
