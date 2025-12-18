@@ -83,8 +83,17 @@ const sendFriendRequest = async (req, res) => {
             });
         }
 
-        // Check if they are already friends (sender already fetched above)
-        if (sender.friends && sender.friends.includes(receiverId)) {
+        // Fetch sender to check friends list
+        const sender = await User.findById(senderId).select('friends');
+        if (!sender) {
+            return res.status(404).json({
+                success: false,
+                message: 'Sender user not found'
+            });
+        }
+
+        // Check if they are already friends
+        if (sender.friends && sender.friends.some(friendId => friendId.toString() === receiverId)) {
             return res.status(400).json({
                 success: false,
                 message: 'You are already friends with this user'
