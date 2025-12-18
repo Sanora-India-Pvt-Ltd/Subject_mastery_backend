@@ -471,16 +471,14 @@ const userSchema = new mongoose.Schema({
 });
 
 // Pre-save hook to update last login and handle authentication token migration
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function() {
     try {
         // Update last login timestamp
         if (this.account) {
             this.account.lastLogin = new Date();
         }
-        
-        next();
     } catch (error) {
-        next(error);
+        throw error;
     }
 });
 

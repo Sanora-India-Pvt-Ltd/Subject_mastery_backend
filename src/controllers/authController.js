@@ -898,10 +898,16 @@ const resetPassword = async (req, res) => {
         // Hash new password
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Update password
-        if (!user.auth) user.auth = {};
-        user.auth.password = hashedPassword;
-        await user.save();
+        // Update password using findByIdAndUpdate to avoid pre-hook issues
+        await User.findByIdAndUpdate(
+            user._id,
+            {
+                $set: {
+                    'auth.password': hashedPassword
+                }
+            },
+            { new: true }
+        );
 
         res.status(200).json({
             success: true,

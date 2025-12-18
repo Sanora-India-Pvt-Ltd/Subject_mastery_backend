@@ -8,26 +8,25 @@
 
 1. [Overview](#overview)
 2. [Posts](#posts)
-   - [Upload Post Media](#1-upload-post-media)
-   - [Create Post](#2-create-post)
-   - [Get All Posts](#3-get-all-posts)
-   - [Get My Posts](#4-get-my-posts)
-   - [Get User Posts](#5-get-user-posts)
-   - [React to Post](#6-react-to-post)
-   - [Add Comment to Post](#7-add-comment-to-post)
-   - [Delete Comment from Post](#8-delete-comment-from-post)
-   - [Report Post](#9-report-post)
-   - [Delete Post](#10-delete-post)
+   - [Create Post](#1-create-post)
+   - [Get All Posts](#2-get-all-posts)
+   - [Get My Posts](#3-get-my-posts)
+   - [Get User Posts](#4-get-user-posts)
+   - [React to Post](#5-react-to-post)
+   - [Add Comment to Post](#6-add-comment-to-post)
+   - [Delete Comment from Post](#7-delete-comment-from-post)
+   - [Report Post](#8-report-post)
+   - [Delete Post](#9-delete-post)
 3. [Reels](#reels)
-   - [Upload Reel Media](#11-upload-reel-media)
-   - [Create Reel](#12-create-reel)
-   - [Get Reels by Content Type](#13-get-reels-by-content-type)
-   - [Get User Reels](#14-get-user-reels)
-   - [React to Reel](#15-react-to-reel)
-   - [Add Comment to Reel](#16-add-comment-to-reel)
-   - [Delete Comment from Reel](#17-delete-comment-from-reel)
-   - [Report Reel](#18-report-reel)
-   - [Delete Reel](#19-delete-reel)
+   - [Upload Reel Media](#10-upload-reel-media)
+   - [Create Reel](#11-create-reel)
+   - [Get Reels by Content Type](#12-get-reels-by-content-type)
+   - [Get User Reels](#13-get-user-reels)
+   - [React to Reel](#14-react-to-reel)
+   - [Add Comment to Reel](#15-add-comment-to-reel)
+   - [Delete Comment from Reel](#16-delete-comment-from-reel)
+   - [Report Reel](#17-report-reel)
+   - [Delete Reel](#18-delete-reel)
 4. [Reactions System](#reactions-system)
 5. [Comments System](#comments-system)
 6. [Blocking System](#blocking-system)
@@ -58,73 +57,45 @@ The Social Features API provides endpoints for creating and managing posts, reel
 
 ## Posts
 
-### 1. Upload Post Media
+### 1. Create Post
 
 **Method:** `POST`  
-**URL:** `/api/posts/upload-media`  
+**URL:** `/api/posts/create`  
 **Authentication:** Required
 
 **Description:**  
-Upload images or videos for posts. Files are uploaded to Cloudinary in user-specific folders (`user_uploads/{userId}/posts`). This endpoint is used as part of the post creation flow - upload media first, then create the post with the returned URLs.
+Create a new post with optional file uploads. This endpoint combines media upload and post creation in a single API call. Posts can have a caption, media (images/videos), or both.
 
 **Content-Type:** `multipart/form-data`
-
-**Request:**
-- **Field Name:** `media` (required)
-- **File Types:** Images (JPEG, PNG, GIF, WebP, etc.) and Videos (MP4, MOV, AVI, etc.)
-- **Max File Size:** 20MB
 
 **Headers:**
 ```
 Authorization: Bearer your_access_token_here
 ```
 
-**Note:** Videos uploaded to posts are automatically transcoded to H.264 Baseline Profile 3.1 with yuv420p pixel format and faststart enabled for maximum compatibility across devices and browsers.
+**Request:**
+- **Field Name:** `caption` (string, optional): Post caption (max 2200 characters)
+- **Field Name:** `media` (file, optional): Can upload multiple files (up to 10 files)
+  - **File Types:** Images (JPEG, PNG, GIF, WebP, etc.) and Videos (MP4, MOV, AVI, etc.)
+  - **Max File Size:** 20MB per file
 
-**Success Response (200):**
-```json
-{
-  "success": true,
-  "message": "Media uploaded successfully",
-  "data": {
-    "url": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/posts/abc123.jpg",
-    "publicId": "user_uploads/user_id/posts/abc123",
-    "type": "image",
-    "format": "jpg",
-    "fileSize": 245678,
-    "mediaId": "media_record_id"
-  }
-}
-```
-
-**Response Fields:**
-- `url` (string): Secure HTTPS URL of the uploaded file
-- `publicId` (string): Cloudinary public ID
-- `type` (string): Media type - "image" or "video"
-- `format` (string): File format (e.g., "jpg", "png", "mp4")
-- `fileSize` (number): File size in bytes
-- `mediaId` (string): Database record ID for the upload
-
-**Error Responses:**
-- `400`: No file uploaded
-- `401`: Not authenticated
-- `500`: Upload failed
-
-**Note:** Use the returned `url`, `publicId`, and `type` in the create post endpoint.
-
----
+**Example using cURL:**
 ```bash
-curl -X POST https://api.ulearnandearn.com/api/posts/upload-media \
+curl -X POST https://api.ulearnandearn.com/api/posts/create \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
-  -F "media=@/path/to/your/image.jpg"
+  -F "caption=Check out this amazing sunset! 🌅" \
+  -F "media=@/path/to/image1.jpg" \
+  -F "media=@/path/to/image2.jpg"
 ```
 
 **Example using JavaScript (FormData):**
 ```javascript
 const formData = new FormData();
-formData.append('media', fileInput.files[0]);
+formData.append('caption', 'Check out this amazing sunset! 🌅');
+formData.append('media', fileInput1.files[0]); // First image
+formData.append('media', fileInput2.files[0]); // Second image (optional)
 
-const response = await fetch('https://api.ulearnandearn.com/api/posts/upload-media', {
+const response = await fetch('https://api.ulearnandearn.com/api/posts/create', {
   method: 'POST',
   headers: {
     'Authorization': `Bearer ${accessToken}`
@@ -135,46 +106,6 @@ const response = await fetch('https://api.ulearnandearn.com/api/posts/upload-med
 const result = await response.json();
 ```
 
----
-
-### 2. Create Post
-
-**Method:** `POST`  
-**URL:** `/api/posts/create`  
-**Authentication:** Required
-
-**Description:**  
-Create a new post. Posts can have a caption, media (images/videos), or both. Media URLs should be obtained from the upload post media endpoint first.
-
-**Headers:**
-```
-Authorization: Bearer your_access_token_here
-Content-Type: application/json
-```
-
-**Request Body:**
-```json
-{
-  "caption": "Check out this amazing sunset! 🌅",
-  "mediaUrls": [
-    {
-      "url": "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/user_uploads/user_id/posts/abc123.jpg",
-      "publicId": "user_uploads/user_id/posts/abc123",
-      "type": "image",
-      "format": "jpg"
-    }
-  ]
-}
-```
-
-**Fields:**
-- `caption` (string, optional): Post caption (max 2200 characters). Post must have either caption or media (or both).
-- `mediaUrls` (array, optional): Array of media objects. Each object must have:
-  - `url` (string, required): Media URL from upload endpoint
-  - `publicId` (string, required): Cloudinary public ID from upload endpoint
-  - `type` (string, required): "image" or "video"
-  - `format` (string, optional): File format (e.g., "jpg", "mp4")
-
 **Text-Only Post Example:**
 ```json
 {
@@ -182,18 +113,24 @@ Content-Type: application/json
 }
 ```
 
-**Media-Only Post Example:**
-```json
-{
-  "mediaUrls": [
-    {
-      "url": "https://res.cloudinary.com/...",
-      "publicId": "user_uploads/user_id/posts/abc123",
-      "type": "image"
-    }
-  ]
-}
+**Media-Only Post Example (with file upload):**
+```javascript
+const formData = new FormData();
+formData.append('media', fileInput.files[0]);
+
+const response = await fetch('https://api.ulearnandearn.com/api/posts/create', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`
+  },
+  body: formData
+});
 ```
+
+**Note:** 
+- When uploading files directly, videos are automatically transcoded to H.264 Baseline Profile 3.1 with yuv420p pixel format and faststart enabled for maximum compatibility
+- You can upload up to 10 files in a single request
+- Files are automatically uploaded to Cloudinary and the post is created in one step
 
 **Success Response (201):**
 ```json
@@ -238,13 +175,14 @@ Content-Type: application/json
 - `500`: Failed to create post
 
 **Note:** 
-- At least one of `caption` or `mediaUrls` must be provided
-- Media URLs should come from the `/api/posts/upload-media` endpoint
-- Posts support multiple media items (carousel posts)
+- At least one of `caption` or media files must be provided
+- Upload files directly using `multipart/form-data` - this handles upload and post creation in one step
+- Posts support multiple media items (carousel posts) - upload multiple files in a single request (up to 10 files)
+- Videos are automatically transcoded to H.264 Baseline Profile 3.1 with yuv420p pixel format and faststart enabled for maximum compatibility
 
 ---
 
-### 3. Get All Posts
+### 2. Get All Posts
 
 **Method:** `GET`  
 **URL:** `/api/posts/all`  
@@ -322,7 +260,7 @@ const data = await response.json();
 
 ---
 
-### 4. Get My Posts
+### 3. Get My Posts
 
 **Method:** `GET`  
 **URL:** `/api/posts/me`  
@@ -366,7 +304,7 @@ Same structure as "Get All Posts" but includes a `user` object and only posts fr
 
 ---
 
-### 5. Get User Posts
+### 4. Get User Posts
 
 **Method:** `GET`  
 **URL:** `/api/posts/user/:id`  
@@ -420,7 +358,7 @@ Same structure as "Get All Posts" but includes a `user` object and only posts fr
 
 ---
 
-### 6. React to Post
+### 5. React to Post
 
 **Method:** `POST`  
 **URL:** `/api/posts/:id/like`  
@@ -519,7 +457,7 @@ const data = await response.json();
 
 ---
 
-### 7. Add Comment to Post
+### 6. Add Comment to Post
 
 **Method:** `POST`  
 **URL:** `/api/posts/:id/comment`  
@@ -598,7 +536,7 @@ Content-Type: application/json
 
 ---
 
-### 8. Delete Comment from Post
+### 7. Delete Comment from Post
 
 **Method:** `DELETE`  
 **URL:** `/api/posts/:id/comment/:commentId`  
@@ -633,7 +571,7 @@ Authorization: Bearer your_access_token_here
 
 ---
 
-### 9. Report Post
+### 8. Report Post
 
 **Method:** `POST`  
 **URL:** `/api/posts/:id/report`  
@@ -714,7 +652,7 @@ curl -X POST https://api.ulearnandearn.com/api/posts/post_id_123/report \
 
 ---
 
-### 10. Delete Post
+### 9. Delete Post
 
 **Method:** `DELETE`  
 **URL:** `/api/posts/:id`  
@@ -750,7 +688,7 @@ Authorization: Bearer your_access_token_here
 
 ## Reels
 
-### 11. Upload Reel Media
+### 10. Upload Reel Media
 
 **Method:** `POST`  
 **URL:** `/api/reels/upload-media`  
@@ -812,7 +750,7 @@ Authorization: Bearer your_access_token_here
 
 ---
 
-### 12. Create Reel
+### 11. Create Reel
 
 **Method:** `POST`  
 **URL:** `/api/reels/create`  
@@ -914,7 +852,7 @@ Content-Type: application/json
 
 ---
 
-### 13. Get Reels by Content Type
+### 12. Get Reels by Content Type
 
 **Method:** `GET`  
 **URL:** `/api/reels`  
@@ -979,7 +917,7 @@ GET /api/reels?contentType=education&page=1&limit=10
 
 ---
 
-### 14. Get User Reels
+### 13. Get User Reels
 
 **Method:** `GET`  
 **URL:** `/api/reels/user/:id`  
@@ -1033,7 +971,7 @@ Same structure as "Get Reels by Content Type" but includes a `user` object and o
 
 ---
 
-### 15. React to Reel
+### 14. React to Reel
 
 **Method:** `POST`  
 **URL:** `/api/reels/:id/like`  
@@ -1097,7 +1035,7 @@ Content-Type: application/json
 
 ---
 
-### 16. Add Comment to Reel
+### 15. Add Comment to Reel
 
 **Method:** `POST`  
 **URL:** `/api/reels/:id/comment`  
@@ -1136,7 +1074,7 @@ Same structure as post comments but for reels.
 
 ---
 
-### 17. Delete Comment from Reel
+### 16. Delete Comment from Reel
 
 **Method:** `DELETE`  
 **URL:** `/api/reels/:id/comment/:commentId`  
@@ -1171,7 +1109,7 @@ Authorization: Bearer your_access_token_here
 
 ---
 
-### 18. Report Reel
+### 17. Report Reel
 
 **Method:** `POST`  
 **URL:** `/api/reels/:id/report`  
@@ -1243,7 +1181,7 @@ curl -X POST https://api.ulearnandearn.com/api/reels/reel_id_123/report \
 
 ---
 
-### 19. Delete Reel
+### 18. Delete Reel
 
 **Method:** `DELETE`  
 **URL:** `/api/reels/:id`  
@@ -1917,43 +1855,33 @@ async function reportReel(reelId, reason) {
 
 ### Complete Workflow: Create Post with Reaction and Comment
 
-#### Step 1: Upload Media
-```bash
-curl -X POST https://api.ulearnandearn.com/api/posts/upload-media \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -F "media=@image.jpg"
-```
-
-Response:
-```json
-{
-  "success": true,
-  "data": {
-    "url": "https://res.cloudinary.com/...",
-    "publicId": "user_uploads/user_id/posts/abc123",
-    "type": "image",
-    "format": "jpg"
-  }
-}
-```
-
-#### Step 2: Create Post
+#### Step 1: Create Post with File Upload
 ```bash
 curl -X POST https://api.ulearnandearn.com/api/posts/create \
   -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "caption": "Beautiful sunset today!",
-    "mediaUrls": [{
-      "url": "https://res.cloudinary.com/...",
-      "publicId": "user_uploads/user_id/posts/abc123",
-      "type": "image",
-      "format": "jpg"
-    }]
-  }'
+  -F "caption=Beautiful sunset today!" \
+  -F "media=@image.jpg"
 ```
 
-#### Step 3: React to Post
+**JavaScript Example:**
+```javascript
+const formData = new FormData();
+formData.append('caption', 'Beautiful sunset today!');
+formData.append('media', fileInput.files[0]);
+
+const response = await fetch('https://api.ulearnandearn.com/api/posts/create', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`
+  },
+  body: formData
+});
+
+const result = await response.json();
+// Post is created with uploaded media in one step!
+```
+
+#### Step 2: React to Post
 ```bash
 curl -X POST https://api.ulearnandearn.com/api/posts/POST_ID/like \
   -H "Authorization: Bearer YOUR_TOKEN" \
@@ -1961,7 +1889,7 @@ curl -X POST https://api.ulearnandearn.com/api/posts/POST_ID/like \
   -d '{"reaction": "happy"}'
 ```
 
-#### Step 4: Add Comment
+#### Step 3: Add Comment
 ```bash
 curl -X POST https://api.ulearnandearn.com/api/posts/POST_ID/comment \
   -H "Authorization: Bearer YOUR_TOKEN" \
@@ -2097,17 +2025,18 @@ async function reportReel(reelId, reason) {
 
 ## Best Practices
 
-1. **Media Upload**: Always upload media first before creating posts/reels
+1. **Media Upload**: Upload files directly when creating posts using the `/api/posts/create` endpoint with `multipart/form-data` - this combines upload and post creation in one step
 2. **Pagination**: Use pagination for large datasets to improve performance
 3. **Error Handling**: Always check the `success` field in responses
 4. **Reaction Updates**: Handle the three possible actions: "liked", "unliked", "reaction_updated"
 5. **Comment Length**: Respect character limits (1000 for posts, 500 for reels)
 6. **Comment Display**: Only 15 most recent comments are returned. Use `commentCount` to determine if more comments exist and implement "View more comments" functionality if needed
-6. **Reporting**: Select the most appropriate reason when reporting content
-7. **Blocking**: Use blocking to prevent seeing unwanted content and to prevent others from seeing your content
-8. **Authentication**: Store and refresh access tokens securely
-9. **Rate Limiting**: Be mindful of API rate limits when making multiple requests
-10. **Feed Filtering**: Remember that both reported and blocked content is automatically filtered from authenticated user feeds
+7. **Reporting**: Select the most appropriate reason when reporting content
+8. **Blocking**: Use blocking to prevent seeing unwanted content and to prevent others from seeing your content
+9. **Authentication**: Store and refresh access tokens securely
+10. **Rate Limiting**: Be mindful of API rate limits when making multiple requests
+11. **Feed Filtering**: Remember that both reported and blocked content is automatically filtered from authenticated user feeds
+12. **Multiple Files**: You can upload up to 10 files in a single post creation request for carousel posts
 
 ---
 
@@ -2144,11 +2073,18 @@ This ensures videos play smoothly across all devices and browsers.
 
 ### Media Upload Flow
 
-1. **Upload media first** using `/api/posts/upload-media` or `/api/reels/upload-media`
-2. **Use the response data** to create the post/reel with the returned `url`, `publicId`, and other metadata
+**For Posts:**
+1. **Upload files directly** when creating a post using `/api/posts/create` with `multipart/form-data`
+2. **Files are automatically** uploaded to Cloudinary, transcoded (if videos), and the post is created in one API call
+3. **Media is stored** in Cloudinary and referenced in the database automatically
+4. **Supports multiple files** - upload up to 10 files in a single request for carousel posts
+
+**For Reels:**
+1. **Upload media first** using `/api/reels/upload-media`
+2. **Use the response data** to create the reel with the returned `url`, `publicId`, and other metadata
 3. **Media is stored** in Cloudinary and referenced in the database
 
-This two-step process allows for better error handling and validation before creating the post/reel.
+**Note:** The single-step approach for posts simplifies the workflow and reduces the number of API calls needed.
 
 ### Content Moderation
 

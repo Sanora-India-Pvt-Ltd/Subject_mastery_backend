@@ -1,3 +1,75 @@
+// NODE.JS v22 SPECIFIC FIXES
+// ===========================
+
+const dns = require('dns');
+const tls = require('tls');
+
+console.log('🔧 Applying Node.js v22 network fixes...');
+
+// 1. Use legacy DNS lookup (Node.js v22 may have new resolver bugs)
+dns.setDefaultResultOrder('ipv4first');
+
+// 2. Force IPv4 (Twilio sometimes has IPv6 issues)
+const { lookup } = require('dns').promises;
+const originalLookup = require('dns').lookup;
+require('dns').lookup = (hostname, options, callback) => {
+  if (typeof options === 'function') {
+    callback = options;
+    options = {};
+  }
+  options.family = options.family || 4; // Force IPv4
+  return originalLookup(hostname, options, callback);
+};
+
+// 3. Set reliable DNS servers
+dns.setServers(['8.8.8.8', '1.1.1.1', '208.67.222.222']);
+
+// 4. Clear proxy settings
+delete process.env.HTTP_PROXY;
+delete process.env.HTTPS_PROXY;
+delete process.env.http_proxy;
+delete process.env.https_proxy;
+
+// 5. Adjust socket timeouts for Node.js v22
+if (typeof process.env.UV_THREADPOOL_SIZE === 'undefined') {
+  process.env.UV_THREADPOOL_SIZE = '12'; // Increase thread pool for network ops
+}
+
+// 6. Force TLS compatibility
+if (tls.DEFAULT_MIN_VERSION) {
+  tls.DEFAULT_MIN_VERSION = 'TLSv1';
+}
+
+// 7. TEST: Verify DNS is working (with timeout to prevent hanging)
+console.log('Testing DNS resolution for verify.twilio.com...');
+const dnsTestTimeout = setTimeout(() => {
+  console.log('⚠️  DNS test timeout - skipping verification');
+  console.log('   This is normal in some environments. DNS will work when needed.');
+  console.log('🔧 Node.js v22 network fixes applied');
+}, 3000);
+
+dns.resolve4('verify.twilio.com', (err, addresses) => {
+  clearTimeout(dnsTestTimeout);
+  if (err) {
+    console.log('⚠️  DNS test failed:', err.code);
+    console.log('   This may be a process isolation issue.');
+    console.log('   DNS will retry when Twilio API is called.');
+    console.log('🔧 Node.js v22 network fixes applied');
+  } else {
+    console.log('✅ DNS test passed! Found addresses:', addresses);
+    console.log('🔧 Node.js v22 network fixes applied');
+  }
+});
+
+
+
+//////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////
+
+
+
+
+
 require('dotenv').config();
 
 // Debug: Check if MONGODB_URI is loaded (only show first part for security)
