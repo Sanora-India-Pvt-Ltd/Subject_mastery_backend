@@ -18,15 +18,16 @@
    - [Report Post](#8-report-post)
    - [Delete Post](#9-delete-post)
 3. [Reels](#reels)
-   - [Upload Reel Media](#10-upload-reel-media)
-   - [Create Reel](#11-create-reel)
-   - [Get Reels by Content Type](#12-get-reels-by-content-type)
-   - [Get User Reels](#13-get-user-reels)
-   - [React to Reel](#14-react-to-reel)
-   - [Add Comment to Reel](#15-add-comment-to-reel)
-   - [Delete Comment from Reel](#16-delete-comment-from-reel)
-   - [Report Reel](#17-report-reel)
-   - [Delete Reel](#18-delete-reel)
+   - [Create Reel with Video Upload](#10-create-reel-with-video-upload) ⭐ Recommended
+   - [Upload Reel Media](#11-upload-reel-media) (Legacy)
+   - [Create Reel with Pre-uploaded Media](#12-create-reel-with-pre-uploaded-media) (Legacy)
+   - [Get Reels by Content Type](#13-get-reels-by-content-type)
+   - [Get User Reels](#14-get-user-reels)
+   - [React to Reel](#15-react-to-reel)
+   - [Add Comment to Reel](#16-add-comment-to-reel)
+   - [Delete Comment from Reel](#17-delete-comment-from-reel)
+   - [Report Reel](#18-report-reel)
+   - [Delete Reel](#19-delete-reel)
 4. [Reactions System](#reactions-system)
 5. [Comments System](#comments-system)
 6. [Blocking System](#blocking-system)
@@ -688,14 +689,124 @@ Authorization: Bearer your_access_token_here
 
 ## Reels
 
-### 10. Upload Reel Media
+### 10. Create Reel with Video Upload ⭐ Recommended
+
+**Method:** `POST`  
+**URL:** `/api/reels/create`  
+**Authentication:** Required
+
+**Description:**  
+Create a new reel with video upload in a single API call. This endpoint combines video upload, transcoding, and reel creation in one step. Videos are automatically transcoded to H.264 Baseline Profile 3.1 with yuv420p pixel format and faststart enabled for maximum Android and cross-platform compatibility.
+
+**Content-Type:** `multipart/form-data`
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+```
+
+**Request:**
+- **Field Name:** `media` (file, required): Video file
+  - **File Types:** MP4, MOV, AVI, and other video formats
+  - **Max File Size:** 20MB
+- **Field Name:** `caption` (string, optional): Reel caption (max 2200 characters)
+- **Field Name:** `contentType` (string, required): Content type - must be "education" or "fun"
+- **Field Name:** `visibility` (string, optional): Visibility setting - "public", "followers", or "private" (default: "public")
+
+**Example using cURL:**
+```bash
+curl -X POST https://api.ulearnandearn.com/api/reels/create \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -F "media=@/path/to/video.mp4" \
+  -F "caption=Check out this amazing tutorial! 🎓" \
+  -F "contentType=education" \
+  -F "visibility=public"
+```
+
+**Example using JavaScript (FormData):**
+```javascript
+const formData = new FormData();
+formData.append('media', videoFileInput.files[0]);
+formData.append('caption', 'Check out this amazing tutorial! 🎓');
+formData.append('contentType', 'education');
+formData.append('visibility', 'public');
+
+const response = await fetch('https://api.ulearnandearn.com/api/reels/create', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`
+  },
+  body: formData
+});
+
+const result = await response.json();
+```
+
+**Note:** 
+- Videos are automatically transcoded to H.264 Baseline Profile 3.1 with yuv420p pixel format and faststart enabled for maximum Android and cross-platform compatibility
+- The video file is uploaded to Cloudinary, transcoded if needed, and the reel is created in one step
+- This is the recommended approach as it simplifies the workflow
+
+**Success Response (201):**
+```json
+{
+  "success": true,
+  "message": "Reel created successfully",
+  "data": {
+    "reel": {
+      "id": "reel_id_123",
+      "userId": "user_id_456",
+      "user": {
+        "id": "user_id_456",
+        "firstName": "John",
+        "lastName": "Doe",
+        "name": "John Doe",
+        "email": "john@example.com",
+        "profileImage": "https://..."
+      },
+      "caption": "Check out this amazing tutorial! 🎓",
+      "media": {
+        "url": "https://res.cloudinary.com/...",
+        "publicId": "user_uploads/user_id/reels/abc123",
+        "thumbnailUrl": "https://...",
+        "type": "video",
+        "format": "mp4",
+        "duration": 30.5,
+        "dimensions": {
+          "width": 1280,
+          "height": 720
+        },
+        "size": 5242880
+      },
+      "contentType": "education",
+      "visibility": "public",
+      "views": 0,
+      "likes": [[], [], [], [], [], []],
+      "comments": [],
+      "likeCount": 0,
+      "commentCount": 0,
+      "createdAt": "2024-01-15T10:30:00.000Z",
+      "updatedAt": "2024-01-15T10:30:00.000Z"
+    }
+  }
+}
+```
+
+**Error Responses:**
+- `400`: Video file is required, contentType is required, invalid contentType, invalid file type (not video)
+- `401`: Not authenticated
+- `500`: Failed to create reel
+
+---
+
+### 11. Upload Reel Media (Legacy)
 
 **Method:** `POST`  
 **URL:** `/api/reels/upload-media`  
 **Authentication:** Required
 
 **Description:**  
-Upload video media for a reel. This must be done before creating a reel. The endpoint returns video URL, thumbnail, and metadata.
+Upload video media for a reel. This is a legacy endpoint that requires a separate call to create the reel. **For new implementations, use the combined endpoint `/api/reels/create` instead.**
 
 **Headers:**
 ```
@@ -750,14 +861,14 @@ Authorization: Bearer your_access_token_here
 
 ---
 
-### 11. Create Reel
+### 12. Create Reel with Pre-uploaded Media (Legacy)
 
 **Method:** `POST`  
-**URL:** `/api/reels/create`  
+**URL:** `/api/reels/create-with-media`  
 **Authentication:** Required
 
 **Description:**  
-Create a new reel with video media. Reels must have a contentType (education or fun) and can have an optional caption.
+Create a new reel using pre-uploaded media. This is a legacy endpoint that requires media to be uploaded first using `/api/reels/upload-media`. **For new implementations, use the combined endpoint `/api/reels/create` instead.**
 
 **Headers:**
 ```
@@ -852,7 +963,7 @@ Content-Type: application/json
 
 ---
 
-### 12. Get Reels by Content Type
+### 13. Get Reels by Content Type
 
 **Method:** `GET`  
 **URL:** `/api/reels`  
@@ -917,7 +1028,7 @@ GET /api/reels?contentType=education&page=1&limit=10
 
 ---
 
-### 13. Get User Reels
+### 14. Get User Reels
 
 **Method:** `GET`  
 **URL:** `/api/reels/user/:id`  
@@ -971,7 +1082,7 @@ Same structure as "Get Reels by Content Type" but includes a `user` object and o
 
 ---
 
-### 14. React to Reel
+### 15. React to Reel
 
 **Method:** `POST`  
 **URL:** `/api/reels/:id/like`  
@@ -1035,7 +1146,7 @@ Content-Type: application/json
 
 ---
 
-### 15. Add Comment to Reel
+### 16. Add Comment to Reel
 
 **Method:** `POST`  
 **URL:** `/api/reels/:id/comment`  
@@ -1074,7 +1185,7 @@ Same structure as post comments but for reels.
 
 ---
 
-### 16. Delete Comment from Reel
+### 17. Delete Comment from Reel
 
 **Method:** `DELETE`  
 **URL:** `/api/reels/:id/comment/:commentId`  
@@ -1109,7 +1220,7 @@ Authorization: Bearer your_access_token_here
 
 ---
 
-### 17. Report Reel
+### 18. Report Reel
 
 **Method:** `POST`  
 **URL:** `/api/reels/:id/report`  
@@ -1181,7 +1292,7 @@ curl -X POST https://api.ulearnandearn.com/api/reels/reel_id_123/report \
 
 ---
 
-### 18. Delete Reel
+### 19. Delete Reel
 
 **Method:** `DELETE`  
 **URL:** `/api/reels/:id`  
@@ -1897,7 +2008,39 @@ curl -X POST https://api.ulearnandearn.com/api/posts/POST_ID/comment \
   -d '{"text": "Amazing photo! 📸"}'
 ```
 
-### Complete Workflow: Create Reel
+### Complete Workflow: Create Reel (Recommended - Single Step)
+
+#### Create Reel with Video Upload (Combined)
+```bash
+curl -X POST https://api.ulearnandearn.com/api/reels/create \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "media=@video.mp4" \
+  -F "caption=Tutorial on React hooks!" \
+  -F "contentType=education" \
+  -F "visibility=public"
+```
+
+**JavaScript Example:**
+```javascript
+const formData = new FormData();
+formData.append('media', videoFileInput.files[0]);
+formData.append('caption', 'Tutorial on React hooks!');
+formData.append('contentType', 'education');
+formData.append('visibility', 'public');
+
+const response = await fetch('https://api.ulearnandearn.com/api/reels/create', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`
+  },
+  body: formData
+});
+
+const result = await response.json();
+// Reel is created with uploaded video in one step!
+```
+
+### Complete Workflow: Create Reel (Legacy - Two Steps)
 
 #### Step 1: Upload Video
 ```bash
@@ -1906,9 +2049,9 @@ curl -X POST https://api.ulearnandearn.com/api/reels/upload-media \
   -F "media=@video.mp4"
 ```
 
-#### Step 2: Create Reel
+#### Step 2: Create Reel with Pre-uploaded Media
 ```bash
-curl -X POST https://api.ulearnandearn.com/api/reels/create \
+curl -X POST https://api.ulearnandearn.com/api/reels/create-with-media \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -1928,6 +2071,8 @@ curl -X POST https://api.ulearnandearn.com/api/reels/create \
     "visibility": "public"
   }'
 ```
+
+**Note:** The two-step approach is maintained for backward compatibility. New implementations should use the combined endpoint.
 
 ### Complete Workflow: Report Content
 
@@ -2080,11 +2225,14 @@ This ensures videos play smoothly across all devices and browsers.
 4. **Supports multiple files** - upload up to 10 files in a single request for carousel posts
 
 **For Reels:**
-1. **Upload media first** using `/api/reels/upload-media`
-2. **Use the response data** to create the reel with the returned `url`, `publicId`, and other metadata
-3. **Media is stored** in Cloudinary and referenced in the database
+1. **Recommended:** Upload video and create reel in one step using `/api/reels/create` with `multipart/form-data`
+   - **Files are automatically** uploaded to Cloudinary, transcoded (if needed), and the reel is created in one API call
+   - **Media is stored** in Cloudinary and referenced in the database automatically
+2. **Legacy:** Two-step process (for backward compatibility)
+   - **Upload media first** using `/api/reels/upload-media`
+   - **Use the response data** to create the reel with `/api/reels/create-with-media` using the returned `url`, `publicId`, and other metadata
 
-**Note:** The single-step approach for posts simplifies the workflow and reduces the number of API calls needed.
+**Note:** The single-step approach for both posts and reels simplifies the workflow and reduces the number of API calls needed. Videos are automatically transcoded to H.264 Baseline Profile 3.1 with yuv420p pixel format and faststart enabled for maximum Android and cross-platform compatibility.
 
 ### Content Moderation
 

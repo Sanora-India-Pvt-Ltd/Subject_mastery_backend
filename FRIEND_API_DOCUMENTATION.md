@@ -8,21 +8,23 @@
 
 1. [Overview](#overview)
 2. [Authentication](#authentication)
-3. [Friend Request Management](#friend-request-management)
+3. [Search Users](#search-users)
+   - [Search Users by Name](#search-users-by-name)
+4. [Friend Request Management](#friend-request-management)
    - [Send Friend Request](#1-send-friend-request)
    - [Accept Friend Request](#2-accept-friend-request)
    - [Reject Friend Request](#3-reject-friend-request)
    - [Cancel Sent Friend Request](#4-cancel-sent-friend-request)
-4. [Friend List Management](#friend-list-management)
+5. [Friend List Management](#friend-list-management)
    - [List All Friends](#5-list-all-friends)
    - [List Received Friend Requests](#6-list-received-friend-requests)
    - [List Sent Friend Requests](#7-list-sent-friend-requests)
    - [Unfriend a User](#8-unfriend-a-user)
-5. [Friend Suggestions](#friend-suggestions)
+6. [Friend Suggestions](#friend-suggestions)
    - [Get Friend Suggestions](#9-get-friend-suggestions)
-6. [Data Models](#data-models)
-7. [Error Handling](#error-handling)
-8. [Examples](#examples)
+7. [Data Models](#data-models)
+8. [Error Handling](#error-handling)
+9. [Examples](#examples)
 
 ---
 
@@ -54,6 +56,128 @@ Authorization: Bearer <access_token>
 ```
 
 **Note:** The access token is obtained from the authentication endpoints. See [AUTH_API_DOCUMENTATION.md](./AUTH_API_DOCUMENTATION.md) for details.
+
+---
+
+## Search Users
+
+### Search Users by Name
+
+**Method:** `GET`  
+**URL:** `/api/user/search`  
+**Authentication:** Required
+
+**Description:**  
+Search for users by name. Returns all users matching the search query, excluding only blocked users (in both directions). This endpoint is useful for finding users before sending friend requests. Results respect privacy settings - private profiles return limited data for non-friends, while public profiles or friends viewing private profiles return full data.
+
+**Query Parameters:**
+- `query` (string, required): Search term to match against first name, last name, or full name (case-insensitive)
+- `page` (integer, optional): Page number for pagination (default: 1)
+- `limit` (integer, optional): Number of results per page (default: 20)
+
+**Request Example:**
+```bash
+curl -X GET "https://api.ulearnandearn.com/api/user/search?query=john&page=1&limit=20" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Found 5 user/users",
+  "data": {
+    "users": [
+      {
+        "id": "507f1f77bcf86cd799439011",
+        "firstName": "John",
+        "lastName": "Doe",
+        "name": "John Doe",
+        "profileImage": "https://res.cloudinary.com/dxb1fppe3/image/upload/v1765539668/user_uploads/profile.jpg",
+        "bio": "Software developer passionate about coding",
+        "currentCity": "New York",
+        "hometown": "Boston"
+      },
+      {
+        "id": "507f1f77bcf86cd799439012",
+        "firstName": "Johnny",
+        "lastName": "Smith",
+        "name": "Johnny Smith",
+        "profileImage": "https://res.cloudinary.com/dxb1fppe3/image/upload/v1765539668/user_uploads/profile2.jpg",
+        "bio": "Designer and creative thinker",
+        "currentCity": "San Francisco",
+        "hometown": "Los Angeles"
+      }
+    ],
+    "pagination": {
+      "currentPage": 1,
+      "totalPages": 2,
+      "totalUsers": 25,
+      "hasNextPage": true,
+      "hasPrevPage": false
+    }
+  }
+}
+```
+
+**Response for Private Profile (Non-Friend):**
+If a user has a private profile and the viewer is not a friend, limited data is returned:
+```json
+{
+  "id": "507f1f77bcf86cd799439013",
+  "firstName": "Jane",
+  "lastName": "Private",
+  "name": "Jane Private",
+  "profileImage": "https://res.cloudinary.com/dxb1fppe3/image/upload/v1765539668/user_uploads/profile3.jpg"
+  // Note: bio, currentCity, hometown are excluded for private profiles when viewer is not a friend
+}
+```
+
+**No Results Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "No users found",
+  "data": {
+    "users": [],
+    "pagination": {
+      "currentPage": 1,
+      "totalPages": 0,
+      "totalUsers": 0,
+      "hasNextPage": false,
+      "hasPrevPage": false
+    }
+  }
+}
+```
+
+**Error Responses:**
+
+| Status Code | Error Message | Description |
+|------------|---------------|-------------|
+| 400 | Search query is required | The query parameter is missing or empty |
+| 500 | Error searching users | Internal server error |
+
+**Key Features:**
+- **Returns ALL users** matching the search query (not just friends)
+- **Excludes only:**
+  - Current user
+  - Users the current user has blocked (checks both `blockedUsers` and `social.blockedUsers`)
+  - Users who have blocked the current user (checks both locations)
+- **Case-insensitive search** across:
+  - `profile.name.first`
+  - `profile.name.last`
+  - `profile.name.full`
+- **Privacy-aware:** Private profiles return limited data (name, profileImage) for non-friends
+- **Pagination support** for large result sets
+- **Alphabetical sorting** by full name
+
+**Notes:**
+- Search results include all users in the system (friends and non-friends)
+- Blocked users are automatically excluded from search results
+- Private profiles are still visible in search, but with limited information
+- Use the returned user `id` to send friend requests via the [Send Friend Request](#1-send-friend-request) endpoint
+- Results are sorted alphabetically by full name
 
 ---
 
@@ -861,6 +985,20 @@ All endpoints follow a consistent error response format:
 
 ## Examples
 
+### Search and Send Friend Request Flow
+
+**1. Search for users:**
+```bash
+curl -X GET "https://api.ulearnandearn.com/api/user/search?query=john&page=1&limit=20" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+**2. Send a friend request to a user found in search:**
+```bash
+curl -X POST https://api.ulearnandearn.com/api/friend/send/507f1f77bcf86cd799439011 \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
 ### Complete Friend Request Flow
 
 **1. Send a friend request:**
@@ -890,6 +1028,22 @@ curl -X GET https://api.ulearnandearn.com/api/friend/list \
 ### JavaScript Example (Fetch API)
 
 ```javascript
+// Search for users
+async function searchUsers(query, accessToken, page = 1, limit = 20) {
+  const response = await fetch(
+    `https://api.ulearnandearn.com/api/user/search?query=${encodeURIComponent(query)}&page=${page}&limit=${limit}`,
+    {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    }
+  );
+  
+  const data = await response.json();
+  return data;
+}
+
 // Send friend request
 async function sendFriendRequest(receiverId, accessToken) {
   const response = await fetch(
@@ -976,12 +1130,23 @@ async function unfriendUser(friendId, accessToken) {
 ```python
 import requests
 
-BASE_URL = "https://api.ulearnandearn.com/api/friend"
+BASE_URL = "https://api.ulearnandearn.com/api"
+FRIEND_BASE_URL = f"{BASE_URL}/friend"
+USER_BASE_URL = f"{BASE_URL}/user"
 ACCESS_TOKEN = "your_access_token_here"
 
 headers = {
     "Authorization": f"Bearer {ACCESS_TOKEN}"
 }
+
+# Search for users
+def search_users(query, page=1, limit=20):
+    response = requests.get(
+        f"{USER_BASE_URL}/search",
+        headers=headers,
+        params={"query": query, "page": page, "limit": limit}
+    )
+    return response.json()
 
 # Send friend request
 def send_friend_request(receiver_id):
@@ -1092,6 +1257,7 @@ For issues or questions regarding the Friend API, please refer to:
 **API Version:** 1.0
 
 ### Recent Updates:
+- ✅ Added Search Users API documentation (`/api/user/search`) - search for all users excluding blocked users
 - ✅ Added `bio` field to friends list response
 - ✅ Enhanced blocking support to check both `blockedUsers` and `social.blockedUsers`
 - ✅ Improved friend suggestions response format (simplified structure)

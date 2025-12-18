@@ -2322,15 +2322,18 @@ const searchUsers = async (req, res) => {
         }).select('_id').lean();
         const blockedByUserIds = usersWhoBlockedMe.map(u => u._id);
 
+        // Combine all users to exclude (current user + users I blocked + users who blocked me)
+        const excludedUserIds = [
+            user._id,
+            ...blockedUserIds,
+            ...blockedByUserIds
+        ];
+
         // Search for users that match the query (case-insensitive)
-        // Search across firstName, lastName, and name fields
-        // Exclude the current user and blocked users from results
+        // Returns ALL users except: current user, users I blocked, and users who blocked me
+        // Search across firstName, lastName, and full name fields
         const searchQuery = {
-            _id: { $ne: user._id, $nin: [...blockedUserIds, ...blockedByUserIds] }, // Exclude current user, blocked users, and users who blocked me
-            $and: [
-                { $or: [{ blockedUsers: { $ne: user._id } }, { blockedUsers: { $exists: false } }] },
-                { $or: [{ 'social.blockedUsers': { $ne: user._id } }, { 'social.blockedUsers': { $exists: false } }] }
-            ],
+            _id: { $nin: excludedUserIds }, // Exclude current user, blocked users, and users who blocked me
             $or: [
                 { 'profile.name.first': { $regex: searchTerm, $options: 'i' } },
                 { 'profile.name.last': { $regex: searchTerm, $options: 'i' } },

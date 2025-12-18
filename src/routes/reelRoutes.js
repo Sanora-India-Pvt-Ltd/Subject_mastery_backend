@@ -3,6 +3,7 @@ const { protect } = require('../middleware/auth');
 const upload = require('../middleware/upload');
 const {
     uploadReelMedia,
+    createReelWithUpload,
     createReel,
     getReels,
     getUserReels,
@@ -15,13 +16,19 @@ const {
 
 const router = express.Router();
 
-// Upload media for reels (video only)
+// Create a new reel with video upload and creation in one API call (combined - recommended)
+// POST /api/reels/create
+// Body: { caption: string (optional), contentType: string (required), visibility: string (optional), media: file }
+router.post('/create', protect, upload.single('media'), createReelWithUpload);
+
+// Upload media for reels (video only) - legacy endpoint for backward compatibility
 // POST /api/reels/upload-media
 router.post('/upload-media', protect, upload.single('media'), uploadReelMedia);
 
-// Create a new reel with mandatory contentType
-// POST /api/reels/create
-router.post('/create', protect, createReel);
+// Create a new reel with mandatory contentType - legacy endpoint (requires pre-uploaded media)
+// POST /api/reels/create-with-media
+// Body: { caption: string (optional), contentType: string (required), visibility: string (optional), media: object }
+router.post('/create-with-media', protect, createReel);
 
 // Fetch reels by contentType (logical cluster)
 // GET /api/reels?contentType=education&page=1&limit=10
@@ -53,8 +60,9 @@ router.delete('/:id', protect, deleteReel);
 
 // Debug: Log registered routes
 console.log('📋 Reel routes registered:');
-console.log('  POST   /api/reels/upload-media (protected)');
-console.log('  POST   /api/reels/create (protected)');
+console.log('  POST   /api/reels/create (protected, combined upload + create, supports file upload)');
+console.log('  POST   /api/reels/upload-media (protected, legacy)');
+console.log('  POST   /api/reels/create-with-media (protected, legacy)');
 console.log('  GET    /api/reels?contentType=education|fun&page=1&limit=10');
 console.log('  GET    /api/reels/user/:id?page=1&limit=10');
 console.log('  POST   /api/reels/:id/like (protected)');
