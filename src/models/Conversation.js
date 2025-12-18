@@ -47,7 +47,7 @@ conversationSchema.statics.findOrCreateConversation = async function(userId1, us
     let conversation = await this.findOne({
         participants: { $all: [userId1, userId2] },
         isGroup: false
-    }).populate('participants', 'firstName lastName name profileImage')
+    }).populate('participants', 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage')
       .populate('lastMessage');
 
     if (!conversation) {
@@ -56,7 +56,7 @@ conversationSchema.statics.findOrCreateConversation = async function(userId1, us
             participants: [userId1, userId2],
             isGroup: false
         });
-        await conversation.populate('participants', 'firstName lastName name profileImage');
+        await conversation.populate('participants', 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage');
     }
 
     return conversation;

@@ -86,7 +86,10 @@ const updateProfile = async (req, res) => {
 
         // Handle bio
         if (bio !== undefined) {
-            updateData['profile.bio'] = bio.trim();
+            const trimmedBio = bio.trim();
+            updateData['profile.bio'] = trimmedBio;
+            // Also update root-level for backward compatibility
+            updateData.bio = trimmedBio;
         }
 
         // Handle currentCity
@@ -104,11 +107,16 @@ const updateProfile = async (req, res) => {
             if (coverPhoto === null || coverPhoto === '') {
                 // Allow explicitly setting to null/empty to clear the field
                 updateData['profile.coverPhoto'] = '';
+                // Also update root-level for backward compatibility
+                updateData.coverPhoto = '';
             } else {
                 // Validate that it's a valid URL format
                 try {
                     new URL(coverPhoto);
-                    updateData['profile.coverPhoto'] = coverPhoto.trim();
+                    const trimmedCoverPhoto = coverPhoto.trim();
+                    updateData['profile.coverPhoto'] = trimmedCoverPhoto;
+                    // Also update root-level for backward compatibility
+                    updateData.coverPhoto = trimmedCoverPhoto;
                 } catch (urlError) {
                     return res.status(400).json({
                         success: false,
@@ -1463,13 +1471,21 @@ const deleteUserMedia = async (req, res) => {
         await Media.findByIdAndDelete(mediaId);
 
         // If this was the user's profile image, clear it from user record
-        if (user.profileImage === media.url) {
-            await User.findByIdAndUpdate(user._id, { profileImage: '' });
+        const currentProfileImage = user.profile?.profileImage || user.profileImage;
+        if (currentProfileImage === media.url) {
+            await User.findByIdAndUpdate(user._id, { 
+                'profile.profileImage': '',
+                profileImage: '' // Also update root-level for backward compatibility
+            });
         }
 
         // If this was the user's cover photo, clear it from user record
-        if (user.coverPhoto === media.url) {
-            await User.findByIdAndUpdate(user._id, { coverPhoto: '' });
+        const currentCoverPhoto = user.profile?.coverPhoto || user.coverPhoto;
+        if (currentCoverPhoto === media.url) {
+            await User.findByIdAndUpdate(user._id, { 
+                'profile.coverPhoto': '',
+                coverPhoto: '' // Also update root-level for backward compatibility
+            });
         }
 
         return res.status(200).json({
@@ -1496,20 +1512,27 @@ const updateProfileMedia = async (req, res) => {
         // Build update object with only provided fields
         const updateData = {};
 
-        // Handle bio
+        // Handle bio - update nested profile.bio field
         if (bio !== undefined) {
+            updateData['profile.bio'] = bio.trim();
+            // Also update root-level for backward compatibility
             updateData.bio = bio.trim();
         }
 
-        // Handle coverPhoto (can be URL string)
+        // Handle coverPhoto (can be URL string) - update nested profile.coverPhoto field
         if (coverPhoto !== undefined) {
             if (coverPhoto === null || coverPhoto === '') {
+                updateData['profile.coverPhoto'] = '';
+                // Also update root-level for backward compatibility
                 updateData.coverPhoto = '';
             } else {
                 // Validate that it's a valid URL format
                 try {
                     new URL(coverPhoto);
-                    updateData.coverPhoto = coverPhoto.trim();
+                    const trimmedCoverPhoto = coverPhoto.trim();
+                    updateData['profile.coverPhoto'] = trimmedCoverPhoto;
+                    // Also update root-level for backward compatibility
+                    updateData.coverPhoto = trimmedCoverPhoto;
                 } catch (urlError) {
                     return res.status(400).json({
                         success: false,
@@ -1522,12 +1545,15 @@ const updateProfileMedia = async (req, res) => {
         // Handle coverImage (alias for coverPhoto)
         // if (coverImage !== undefined) {
         //     if (coverImage === null || coverImage === '') {
+        //         updateData['profile.coverPhoto'] = '';
         //         updateData.coverPhoto = '';
         //     } else {
         //         // Validate that it's a valid URL format
         //         try {
         //             new URL(coverImage);
-        //             updateData.coverPhoto = coverImage.trim();
+        //             const trimmedCoverImage = coverImage.trim();
+        //             updateData['profile.coverPhoto'] = trimmedCoverImage;
+        //             updateData.coverPhoto = trimmedCoverImage;
         //         } catch (urlError) {
         //             return res.status(400).json({
         //                 success: false,
@@ -1537,25 +1563,31 @@ const updateProfileMedia = async (req, res) => {
         //     }
         // }
 
-        // Handle profileImage (can be URL string)
+        // Handle profileImage (can be URL string) - update nested profile.profileImage field
         // Only update profileImage if it's explicitly provided in the request
         // IMPORTANT: Do NOT automatically set profileImage from coverPhoto
         // If profileImage is empty and coverPhoto is being updated, profileImage should remain unchanged
         if (profileImage !== undefined) {
             // Prevent automatic assignment: if profileImage is being set to coverPhoto value
             // and the user's current profileImage is empty, skip the update
+            const currentProfileImage = user.profile?.profileImage || user.profileImage || '';
             if (coverPhoto !== undefined && 
                 profileImage === coverPhoto && 
-                (!user.profileImage || user.profileImage === '')) {
+                (!currentProfileImage || currentProfileImage === '')) {
                 // Skip updating profileImage - this prevents automatic assignment from coverPhoto
                 // Only update coverPhoto, leave profileImage unchanged
             } else if (profileImage === null || profileImage === '') {
+                updateData['profile.profileImage'] = '';
+                // Also update root-level for backward compatibility
                 updateData.profileImage = '';
             } else {
                 // Validate that it's a valid URL format
                 try {
                     new URL(profileImage);
-                    updateData.profileImage = profileImage.trim();
+                    const trimmedProfileImage = profileImage.trim();
+                    updateData['profile.profileImage'] = trimmedProfileImage;
+                    // Also update root-level for backward compatibility
+                    updateData.profileImage = trimmedProfileImage;
                 } catch (urlError) {
                     return res.status(400).json({
                         success: false,
@@ -1586,9 +1618,9 @@ const updateProfileMedia = async (req, res) => {
             data: {
                 user: {
                     id: updatedUser._id,
-                    bio: updatedUser.bio,
-                    coverPhoto: updatedUser.coverPhoto,
-                    profileImage: updatedUser.profileImage,
+                    bio: updatedUser.profile?.bio || updatedUser.bio,
+                    coverPhoto: updatedUser.profile?.coverPhoto || updatedUser.coverPhoto,
+                    profileImage: updatedUser.profile?.profileImage || updatedUser.profileImage,
                     updatedAt: updatedUser.updatedAt
                 }
             }

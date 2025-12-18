@@ -1310,7 +1310,10 @@ const updateProfile = async (req, res) => {
             allowedUpdates['profile.phoneNumbers.alternate'] = normalizedAltPhone;
         }
         if (profileImage !== undefined) {
-            allowedUpdates['profile.profileImage'] = profileImage;
+            const trimmedProfileImage = profileImage.trim();
+            allowedUpdates['profile.profileImage'] = trimmedProfileImage;
+            // Also update root-level for backward compatibility
+            allowedUpdates.profileImage = trimmedProfileImage;
         }
         
         // Handle age field - convert to dob if provided
@@ -1329,7 +1332,10 @@ const updateProfile = async (req, res) => {
 
         // Handle bio
         if (bio !== undefined) {
-            allowedUpdates['profile.bio'] = bio.trim();
+            const trimmedBio = bio.trim();
+            allowedUpdates['profile.bio'] = trimmedBio;
+            // Also update root-level for backward compatibility
+            allowedUpdates.bio = trimmedBio;
         }
 
         // Handle currentCity

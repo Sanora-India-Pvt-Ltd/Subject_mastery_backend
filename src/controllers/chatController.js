@@ -36,11 +36,10 @@ const getConversations = async (req, res) => {
                 ]
             }
         })
-        .populate('participants', 'profile.name.first profile.name.last profile.name.full profile.profileImage')
+        .populate('participants', 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage')
         .populate('lastMessage')
         .populate('createdBy', 'profile.name.first profile.name.last profile.name.full profile.profileImage')
-        .sort({ lastMessageAt: -1, updatedAt: -1 })
-        .lean();
+        .sort({ lastMessageAt: -1, updatedAt: -1 });
 
         // Add online status for each participant
         const conversationsWithStatus = await Promise.all(
@@ -53,8 +52,27 @@ const getConversations = async (req, res) => {
                     conv.participants.map(async (participant) => {
                         const online = await isUserOnline(participant._id.toString());
                         const lastSeen = await getUserLastSeen(participant._id.toString());
+                        
+                        // Convert to plain object if needed
+                        const participantObj = participant.toObject ? participant.toObject() : participant;
+                        
+                        // Extract name from profile structure (new) or flat fields (old) with fallback - same as posts
+                        const name = participantObj.profile?.name?.full || 
+                                    (participantObj.profile?.name?.first && participantObj.profile?.name?.last 
+                                        ? `${participantObj.profile.name.first} ${participantObj.profile.name.last}`.trim()
+                                        : participantObj.profile?.name?.first || participantObj.profile?.name?.last || 
+                                          participantObj.name || 
+                                          (participantObj.firstName || participantObj.lastName 
+                                            ? `${participantObj.firstName || ''} ${participantObj.lastName || ''}`.trim()
+                                            : ''));
+                        
+                        // Extract profileImage from profile structure (new) or flat field (old) with fallback - same as posts
+                        const profileImage = participantObj.profile?.profileImage || participantObj.profileImage || '';
+                        
                         return {
-                            ...participant,
+                            _id: participantObj._id,
+                            name: name,
+                            profileImage: profileImage,
                             isOnline: online,
                             lastSeen: lastSeen
                         };
@@ -137,13 +155,44 @@ const getOrCreateConversation = async (req, res) => {
             await conversation.lastMessage.populate('senderId', 'profile.name.first profile.name.last profile.name.full profile.profileImage');
         }
 
+        // Populate participants with profile fields if not already populated
+        if (conversation.participants && conversation.participants.length > 0 && !conversation.participants[0].profile) {
+            await conversation.populate('participants', 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage');
+        }
+        
         // Add online status
         const participantsWithStatus = await Promise.all(
             conversation.participants.map(async (participant) => {
                 const online = await isUserOnline(participant._id.toString());
                 const lastSeen = await getUserLastSeen(participant._id.toString());
+                
+                const participantObj = participant.toObject ? participant.toObject() : participant;
+                
+                // Extract name from profile structure (new) or flat fields (old) with fallback
+                let name = '';
+                if (participantObj.profile?.name?.full) {
+                    name = participantObj.profile.name.full;
+                } else if (participantObj.profile?.name?.first || participantObj.profile?.name?.last) {
+                    const first = participantObj.profile.name.first || '';
+                    const last = participantObj.profile.name.last || '';
+                    name = `${first} ${last}`.trim();
+                } else if (participantObj.name) {
+                    // Fallback to old flat name field
+                    name = participantObj.name;
+                } else if (participantObj.firstName || participantObj.lastName) {
+                    // Fallback to old flat firstName/lastName fields
+                    const first = participantObj.firstName || '';
+                    const last = participantObj.lastName || '';
+                    name = `${first} ${last}`.trim();
+                }
+                
+                // Extract profileImage from profile structure (new) or flat field (old) with fallback
+                const profileImage = participantObj.profile?.profileImage || participantObj.profileImage || '';
+                
                 return {
-                    ...participant.toObject(),
+                    _id: participantObj._id,
+                    name: name,
+                    profileImage: profileImage,
                     isOnline: online,
                     lastSeen: lastSeen
                 };
@@ -204,20 +253,85 @@ const getMessages = async (req, res) => {
                 { deletedFor: { $exists: false } }
             ]
         })
-        .populate('senderId', 'profile.name.first profile.name.last profile.name.full profile.profileImage')
-        .populate('replyTo')
+        .populate('senderId', 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage')
+        .populate({
+            path: 'replyTo',
+            populate: {
+                path: 'senderId',
+                select: 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage'
+            }
+        })
         .sort({ createdAt: -1 })
         .limit(parseInt(limit))
-        .skip(skip)
-        .lean();
+        .skip(skip);
 
         // Reverse to get chronological order
         messages.reverse();
+        
+        // Transform messages to include proper sender name and profileImage
+        const transformedMessages = messages.map(msg => {
+            const msgObj = msg.toObject ? msg.toObject() : msg;
+            const senderObj = msgObj.senderId?.toObject ? msgObj.senderId.toObject() : msgObj.senderId;
+            
+            // Extract name from profile structure (new) or flat fields (old) with fallback - same as posts
+            const senderName = senderObj?.profile?.name?.full || 
+                              (senderObj?.profile?.name?.first && senderObj?.profile?.name?.last 
+                                  ? `${senderObj.profile.name.first} ${senderObj.profile.name.last}`.trim()
+                                  : senderObj?.profile?.name?.first || senderObj?.profile?.name?.last || 
+                                    senderObj?.name || 
+                                    (senderObj?.firstName || senderObj?.lastName 
+                                      ? `${senderObj.firstName || ''} ${senderObj.lastName || ''}`.trim()
+                                      : ''));
+            
+            // Extract profileImage from profile structure (new) or flat field (old) with fallback
+            const senderProfileImage = senderObj?.profile?.profileImage || senderObj?.profileImage || '';
+            
+            // Transform replyTo sender if exists
+            let transformedReplyTo = null;
+            if (msgObj.replyTo) {
+                const replyToObj = msgObj.replyTo.toObject ? msgObj.replyTo.toObject() : msgObj.replyTo;
+                const replyToSenderObj = replyToObj.senderId?.toObject ? replyToObj.senderId.toObject() : replyToObj.senderId;
+                
+                if (replyToSenderObj) {
+                    const replyToSenderName = replyToSenderObj?.profile?.name?.full || 
+                                            (replyToSenderObj?.profile?.name?.first && replyToSenderObj?.profile?.name?.last 
+                                                ? `${replyToSenderObj.profile.name.first} ${replyToSenderObj.profile.name.last}`.trim()
+                                                : replyToSenderObj?.profile?.name?.first || replyToSenderObj?.profile?.name?.last || 
+                                                  replyToSenderObj?.name || 
+                                                  (replyToSenderObj?.firstName || replyToSenderObj?.lastName 
+                                                    ? `${replyToSenderObj.firstName || ''} ${replyToSenderObj.lastName || ''}`.trim()
+                                                    : ''));
+                    
+                    const replyToSenderProfileImage = replyToSenderObj?.profile?.profileImage || replyToSenderObj?.profileImage || '';
+                    
+                    transformedReplyTo = {
+                        ...replyToObj,
+                        senderId: {
+                            _id: replyToSenderObj._id,
+                            name: replyToSenderName,
+                            profileImage: replyToSenderProfileImage
+                        }
+                    };
+                } else {
+                    transformedReplyTo = replyToObj;
+                }
+            }
+            
+            return {
+                ...msgObj,
+                senderId: senderObj ? {
+                    _id: senderObj._id,
+                    name: senderName,
+                    profileImage: senderProfileImage
+                } : senderObj,
+                replyTo: transformedReplyTo
+            };
+        });
 
         // Mark messages as read
-        const unreadMessageIds = messages
+        const unreadMessageIds = transformedMessages
             .filter(msg => 
-                msg.senderId._id.toString() !== userId.toString() && 
+                msg.senderId?._id?.toString() !== userId.toString() && 
                 msg.status !== 'read'
             )
             .map(msg => msg._id);
@@ -242,7 +356,7 @@ const getMessages = async (req, res) => {
 
         res.json({
             success: true,
-            data: messages,
+            data: transformedMessages,
             pagination: {
                 page: parseInt(page),
                 limit: parseInt(limit),
@@ -350,10 +464,42 @@ const sendMessage = async (req, res) => {
         if (replyTo) messageData.replyTo = replyTo;
 
         const message = await Message.create(messageData);
-        await message.populate('senderId', 'firstName lastName name profileImage');
+        await message.populate('senderId', 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage');
         if (message.replyTo) {
-            await message.populate('replyTo');
+            await message.populate({
+                path: 'replyTo',
+                populate: {
+                    path: 'senderId',
+                    select: 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage'
+                }
+            });
         }
+
+        // Transform message sender data
+        const messageObj = message.toObject();
+        const senderObj = messageObj.senderId?.toObject ? messageObj.senderId.toObject() : messageObj.senderId;
+        
+        // Extract name from profile structure (new) or flat fields (old) with fallback
+        const senderName = senderObj?.profile?.name?.full || 
+                          (senderObj?.profile?.name?.first && senderObj?.profile?.name?.last 
+                              ? `${senderObj.profile.name.first} ${senderObj.profile.name.last}`.trim()
+                              : senderObj?.profile?.name?.first || senderObj?.profile?.name?.last || 
+                                senderObj?.name || 
+                                (senderObj?.firstName || senderObj?.lastName 
+                                  ? `${senderObj.firstName || ''} ${senderObj.lastName || ''}`.trim()
+                                  : ''));
+        
+        // Extract profileImage from profile structure (new) or flat field (old) with fallback
+        const senderProfileImage = senderObj?.profile?.profileImage || senderObj?.profileImage || '';
+        
+        const transformedMessage = {
+            ...messageObj,
+            senderId: senderObj ? {
+                _id: senderObj._id,
+                name: senderName,
+                profileImage: senderProfileImage
+            } : senderObj
+        };
 
         // Update conversation
         conversation.lastMessage = message._id;
@@ -363,12 +509,12 @@ const sendMessage = async (req, res) => {
         // Emit via WebSocket
         const io = getIO();
         io.to(`conversation:${conversationId}`).emit('new:message', {
-            message: message.toObject()
+            message: transformedMessage
         });
 
         res.json({
             success: true,
-            data: message
+            data: transformedMessage
         });
     } catch (error) {
         console.error('Send message error:', error);

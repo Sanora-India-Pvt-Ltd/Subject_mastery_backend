@@ -157,10 +157,42 @@ const initSocketServer = async (httpServer) => {
                 if (replyTo) messageData.replyTo = replyTo;
 
                 const message = await Message.create(messageData);
-                await message.populate('senderId', 'firstName lastName name profileImage');
+                await message.populate('senderId', 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage');
                 if (message.replyTo) {
-                    await message.populate('replyTo');
+                    await message.populate({
+                        path: 'replyTo',
+                        populate: {
+                            path: 'senderId',
+                            select: 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage'
+                        }
+                    });
                 }
+
+                // Transform message sender data
+                const messageObj = message.toObject();
+                const senderObj = messageObj.senderId?.toObject ? messageObj.senderId.toObject() : messageObj.senderId;
+                
+                // Extract name from profile structure (new) or flat fields (old) with fallback
+                const senderName = senderObj?.profile?.name?.full || 
+                                  (senderObj?.profile?.name?.first && senderObj?.profile?.name?.last 
+                                      ? `${senderObj.profile.name.first} ${senderObj.profile.name.last}`.trim()
+                                      : senderObj?.profile?.name?.first || senderObj?.profile?.name?.last || 
+                                        senderObj?.name || 
+                                        (senderObj?.firstName || senderObj?.lastName 
+                                          ? `${senderObj.firstName || ''} ${senderObj.lastName || ''}`.trim()
+                                          : ''));
+                
+                // Extract profileImage from profile structure (new) or flat field (old) with fallback
+                const senderProfileImage = senderObj?.profile?.profileImage || senderObj?.profileImage || '';
+                
+                const transformedMessage = {
+                    ...messageObj,
+                    senderId: senderObj ? {
+                        _id: senderObj._id,
+                        name: senderName,
+                        profileImage: senderProfileImage
+                    } : senderObj
+                };
 
                 // Update conversation last message
                 conversation.lastMessage = message._id;
@@ -169,7 +201,7 @@ const initSocketServer = async (httpServer) => {
 
                 // Emit to all participants in the conversation
                 io.to(`conversation:${conversationId}`).emit('new:message', {
-                    message: message.toObject()
+                    message: transformedMessage
                 });
 
                 // Emit to sender for confirmation
