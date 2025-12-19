@@ -361,8 +361,6 @@ if (client && validClientIds.length > 0) {
             });
             
             // Keep backward compatibility
-            user.auth.refreshToken = refreshToken;
-            user.auth.refreshTokenExpiry = refreshTokenExpiry;
             await user.save();
             
             res.json({
@@ -1120,4 +1118,3 @@ process.on('SIGINT', async () => {
     console.log('🛑 SIGINT received, shutting down gracefully...');
     process.exit(0);
 });
-

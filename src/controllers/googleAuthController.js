@@ -8,15 +8,15 @@ const MAX_DEVICES = 5;
 
 // Helper function to manage device limit - removes oldest device if limit is reached
 const manageDeviceLimit = (user) => {
-    if (!user.refreshTokens) {
-        user.refreshTokens = [];
-    }
+    if (!user.auth) user.auth = {};
+    if (!user.auth.tokens) user.auth.tokens = {};
+    if (!user.auth.tokens.refreshTokens) user.auth.tokens.refreshTokens = [];
     
     // If we've reached the limit, remove the oldest device (sorted by createdAt)
-    if (user.refreshTokens.length >= MAX_DEVICES) {
+    if (user.auth.tokens.refreshTokens.length >= MAX_DEVICES) {
         // Sort by createdAt (oldest first) and remove the first one
-        user.refreshTokens.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-        user.refreshTokens.shift(); // Remove the oldest device
+        user.auth.tokens.refreshTokens.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        user.auth.tokens.refreshTokens.shift(); // Remove the oldest device
     }
 };
 
@@ -26,7 +26,7 @@ const generateToken = (user) => {
         id: user._id,
         email: user.profile?.email,
         name: user.profile?.name?.full,
-        isGoogleOAuth: user.googleId ? true : false
+        isGoogleOAuth: user.auth?.googleId ? true : false
     });
 };
 
@@ -168,30 +168,16 @@ const googleLoginMobile = async (req, res) => {
         const deviceInfo = req.headers['user-agent'] || req.body.deviceInfo || 'Unknown Device';
 
         // Initialize refreshTokens array if it doesn't exist
-        if (!user.refreshTokens) {
-            user.refreshTokens = [];
-        }
-
         // Manage device limit - remove oldest device if limit is reached
         manageDeviceLimit(user);
 
         // Add new refresh token to array (allows multiple devices, max 5)
-        user.refreshTokens.push({
+        user.auth.tokens.refreshTokens.push({
             token: refreshToken,
-            expiryDate: expiryDate,
-            deviceInfo: deviceInfo.substring(0, 200), // Limit length
+            expiresAt: expiryDate,
+            device: deviceInfo.substring(0, 200), // Limit length
             createdAt: new Date()
         });
-
-        // Clean up expired tokens (older than 90 days)
-        const now = new Date();
-        user.refreshTokens = user.refreshTokens.filter(
-            rt => rt.expiryDate > now
-        );
-
-        // Keep backward compatibility - set single token fields
-        user.refreshToken = refreshToken;
-        user.refreshTokenExpiry = expiryDate;
         
         await user.save();
 
@@ -287,18 +273,14 @@ const googleCallback = (req, res, next) => {
             const deviceInfo = req.headers['user-agent'] || req.body.deviceInfo || 'Unknown Device';
 
             // Initialize refreshTokens array if it doesn't exist
-            if (!user.refreshTokens) {
-                user.refreshTokens = [];
-            }
-
             // Manage device limit - remove oldest device if limit is reached
             manageDeviceLimit(user);
 
             // Add new refresh token to array (allows multiple devices, max 5)
-            user.refreshTokens.push({
+            user.auth.tokens.refreshTokens.push({
                 token: refreshToken,
-                expiryDate: refreshTokenExpiry,
-                deviceInfo: deviceInfo.substring(0, 200), // Limit length
+                expiresAt: refreshTokenExpiry,
+                device: deviceInfo.substring(0, 200), // Limit length
                 createdAt: new Date()
             });
 
@@ -307,10 +289,6 @@ const googleCallback = (req, res, next) => {
             // This allows users to stay logged in indefinitely
             // Maximum of 5 devices are allowed - oldest device is removed when limit is reached
 
-            // Keep backward compatibility - set single token fields
-            user.refreshToken = refreshToken;
-            user.refreshTokenExpiry = refreshTokenExpiry;
-            
             await user.save();
         
             // For backward compatibility, use accessToken as token
@@ -518,13 +496,13 @@ const googleCallback = (req, res, next) => {
                     isNewUser,
                     user: {
                         id: user._id,
-                        email: user.email,
-                        firstName: user.firstName,
-                        lastName: user.lastName,
-                        phoneNumber: user.phoneNumber,
-                        gender: user.gender,
-                        name: user.name,
-                        profileImage: user.profileImage
+                        email: user.profile.email,
+                        firstName: user.profile.name.full,
+                        lastName: user.profile.name.last,
+                        phoneNumber: user.profile.phoneNumbers?.primary,
+                        gender: user.profile.gender,
+                        name: user.profile.name.full,
+                        profileImage: user.profile.profileImage
                     }
                 },
                 redirectUrl: `${frontendUrl}/auth/callback?token=${token}&email=${encodeURIComponent(user.profile?.email || '')}`,

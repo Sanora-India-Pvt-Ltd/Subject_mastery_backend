@@ -2,6 +2,175 @@ const User = require('../models/User');
 const Media = require('../models/Media');
 const Company = require('../models/Company');
 const Institution = require('../models/Institution');
+const { formatEducation, formatWorkplace, formatUserProfile } = require('../utils/formatters');
+const NodeCache = require('node-cache');
+
+// Initialize caches with 1-hour TTL (time-to-live)
+const companyCache = new NodeCache({ stdTTL: 3600 });
+const institutionCache = new NodeCache({ stdTTL: 3600 });
+
+/**
+ * Get or create companies in bulk to minimize database queries
+ * @param {string[]} companyNames - Array of company names to look up or create
+ * @param {string} userId - ID of the user creating the companies
+ * @returns {Promise<Map>} Map of normalized company names to company documents
+ */
+async function getOrCreateCompanies(companyNames, userId) {
+    const uniqueNames = [...new Set(companyNames.map(name => name.toLowerCase().trim()))];
+    const existingCompanies = await Company.find({
+        normalizedName: { $in: uniqueNames }
+    }).lean();
+
+    const existingMap = new Map();
+    existingCompanies.forEach(company => {
+        existingMap.set(company.normalizedName, company);
+        // Update cache with found companies
+        companyCache.set(company.normalizedName, company);
+    });
+
+    const toCreate = [];
+    const result = new Map();
+
+    // Check cache and existing companies
+    for (const name of uniqueNames) {
+        const normalized = name.toLowerCase();
+        const cached = companyCache.get(normalized);
+        
+        if (cached) {
+            result.set(normalized, cached);
+        } else if (existingMap.has(normalized)) {
+            const company = existingMap.get(normalized);
+            companyCache.set(normalized, company);
+            result.set(normalized, company);
+        } else {
+            toCreate.push({
+                name: name.charAt(0).toUpperCase() + name.slice(1),
+                normalizedName: normalized,
+                isCustom: true,
+                createdBy: userId
+            });
+        }
+    }
+
+    // Bulk create any missing companies
+    if (toCreate.length > 0) {
+        try {
+            const created = await Company.insertMany(toCreate, { ordered: false });
+            created.forEach(company => {
+                const normalized = company.normalizedName;
+                companyCache.set(normalized, company);
+                result.set(normalized, company);
+            });
+        } catch (error) {
+            // Handle potential race condition where company was created by another request
+            if (error.code === 11000) {
+                const existing = await Company.find({
+                    normalizedName: { $in: toCreate.map(c => c.normalizedName) }
+                }).lean();
+                
+                existing.forEach(company => {
+                    const normalized = company.normalizedName;
+                    companyCache.set(normalized, company);
+                    result.set(normalized, company);
+                });
+            } else {
+                throw error;
+            }
+        }
+    }
+
+    return result;
+}
+
+/**
+ * Get or create institutions in bulk to minimize database queries
+ * @param {Array<{name: string, type?: string, city?: string, country?: string}>} institutionData - Array of institution data objects
+ * @param {string} userId - ID of the user creating the institutions
+ * @returns {Promise<Map>} Map of normalized institution names to institution documents
+ */
+async function getOrCreateInstitutions(institutionData, userId) {
+    const uniqueInstitutions = [];
+    const nameToData = new Map();
+    
+    // Deduplicate and normalize institution data
+    institutionData.forEach(data => {
+        const normalized = data.name.toLowerCase().trim();
+        if (!nameToData.has(normalized)) {
+            nameToData.set(normalized, data);
+            uniqueInstitutions.push(normalized);
+        }
+    });
+
+    // Find existing institutions
+    const existingInstitutions = await Institution.find({
+        normalizedName: { $in: uniqueInstitutions }
+    }).lean();
+
+    const existingMap = new Map();
+    existingInstitutions.forEach(inst => {
+        existingMap.set(inst.normalizedName, inst);
+        // Update cache with found institutions
+        institutionCache.set(inst.normalizedName, inst);
+    });
+
+    const toCreate = [];
+    const result = new Map();
+
+    // Check cache and existing institutions
+    for (const normalized of uniqueInstitutions) {
+        const cached = institutionCache.get(normalized);
+        
+        if (cached) {
+            result.set(normalized, cached);
+        } else if (existingMap.has(normalized)) {
+            const inst = existingMap.get(normalized);
+            institutionCache.set(normalized, inst);
+            result.set(normalized, inst);
+        } else {
+            const data = nameToData.get(normalized);
+            toCreate.push({
+                name: data.name.charAt(0).toUpperCase() + data.name.slice(1),
+                normalizedName: normalized,
+                type: ['school', 'college', 'university', 'others'].includes(data.type) ? data.type : 'school',
+                city: data.city || '',
+                country: data.country || '',
+                logo: data.logo || '',
+                verified: false,
+                isCustom: true,
+                createdBy: userId
+            });
+        }
+    }
+
+    // Bulk create any missing institutions
+    if (toCreate.length > 0) {
+        try {
+            const created = await Institution.insertMany(toCreate, { ordered: false });
+            created.forEach(inst => {
+                const normalized = inst.normalizedName;
+                institutionCache.set(normalized, inst);
+                result.set(normalized, inst);
+            });
+        } catch (error) {
+            // Handle potential race condition where institution was created by another request
+            if (error.code === 11000) {
+                const existing = await Institution.find({
+                    normalizedName: { $in: toCreate.map(i => i.normalizedName) }
+                }).lean();
+                
+                existing.forEach(inst => {
+                    const normalized = inst.normalizedName;
+                    institutionCache.set(normalized, inst);
+                    result.set(normalized, inst);
+                });
+            } else {
+                throw error;
+            }
+        }
+    }
+
+    return result;
+}
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const twilio = require('twilio');
@@ -11,11 +180,11 @@ const { transcodeVideo, isVideo, cleanupFile } = require('../services/videoTrans
 // Helper function to check if two users are friends
 const areFriends = async (userId1, userId2) => {
     try {
-        const user1 = await User.findById(userId1).select('social.friends friends');
+        const user1 = await User.findById(userId1).select('social.friends');
         if (!user1) return false;
         
-        // Check both old and new friend structures
-        const friendsList = user1.social?.friends || user1.friends || [];
+        // Check friend structure
+        const friendsList = user1.social?.friends || [];
         return friendsList.some(friendId => 
             friendId.toString() === userId2.toString()
         );
@@ -25,32 +194,26 @@ const areFriends = async (userId1, userId2) => {
     }
 };
 
-// Helper function to get all blocked user IDs (checks both root and social.blockedUsers)
+// Helper function to get all blocked user IDs
 const getBlockedUserIds = async (userId) => {
     try {
-        const user = await User.findById(userId).select('blockedUsers social.blockedUsers');
+        const user = await User.findById(userId).select('social.blockedUsers');
         if (!user) return [];
         
-        // Get blocked users from both locations
-        const rootBlocked = user.blockedUsers || [];
-        const socialBlocked = user.social?.blockedUsers || [];
-        
-        // Combine and deduplicate
-        const allBlocked = [...rootBlocked, ...socialBlocked];
-        const uniqueBlocked = [...new Set(allBlocked.map(id => id.toString()))];
-        
-        return uniqueBlocked.map(id => mongoose.Types.ObjectId(id));
+        // Get blocked users from social.blockedUsers
+        const blockedUsers = user.social?.blockedUsers || [];
+        return blockedUsers.map(id => id.toString());
     } catch (error) {
         console.error('Error getting blocked users:', error);
         return [];
     }
 };
 
-// Helper function to check if a user is blocked (checks both locations)
+// Helper function to check if a user is blocked
 const isUserBlocked = async (blockerId, blockedId) => {
     try {
         const blockedUserIds = await getBlockedUserIds(blockerId);
-        return blockedUserIds.some(id => id.toString() === blockedId.toString());
+        return blockedUserIds.includes(blockedId.toString());
     } catch (error) {
         console.error('Error checking if user is blocked:', error);
         return false;
@@ -87,7 +250,7 @@ const getFullProfileData = (user) => {
 const updateProfile = async (req, res) => {
     try {
         const user = req.user; // From protect middleware
-        const { firstName, lastName, name, dob, gender, bio, currentCity, hometown, relationshipStatus, workplace, education, coverPhoto } = req.body;
+        const { firstName, lastName, name, dob, gender, bio, currentCity, hometown, relationshipStatus, workplace: workplaceData, education, coverPhoto } = req.body;
 
         // Build update object with only provided fields
         const updateData = {};
@@ -163,8 +326,6 @@ const updateProfile = async (req, res) => {
         if (bio !== undefined) {
             const trimmedBio = bio.trim();
             updateData['profile.bio'] = trimmedBio;
-            // Also update root-level for backward compatibility
-            updateData.bio = trimmedBio;
         }
 
         // Handle currentCity
@@ -182,16 +343,12 @@ const updateProfile = async (req, res) => {
             if (coverPhoto === null || coverPhoto === '') {
                 // Allow explicitly setting to null/empty to clear the field
                 updateData['profile.coverPhoto'] = '';
-                // Also update root-level for backward compatibility
-                updateData.coverPhoto = '';
             } else {
                 // Validate that it's a valid URL format
                 try {
                     new URL(coverPhoto);
                     const trimmedCoverPhoto = coverPhoto.trim();
                     updateData['profile.coverPhoto'] = trimmedCoverPhoto;
-                    // Also update root-level for backward compatibility
-                    updateData.coverPhoto = trimmedCoverPhoto;
                 } catch (urlError) {
                     return res.status(400).json({
                         success: false,
@@ -205,7 +362,7 @@ const updateProfile = async (req, res) => {
         if (relationshipStatus !== undefined) {
             if (relationshipStatus === null || relationshipStatus === '') {
                 // Allow explicitly setting to null/empty to clear the field
-                updateData.relationshipStatus = null;
+                updateData['social.relationshipStatus'] = null;
             } else {
                 const validStatuses = ['Single', 'In a relationship', 'Engaged', 'Married', 'In a civil partnership', 'In a domestic partnership', 'In an open relationship', "It's complicated", 'Separated', 'Divorced', 'Widowed'];
                 if (!validStatuses.includes(relationshipStatus)) {
@@ -214,7 +371,7 @@ const updateProfile = async (req, res) => {
                         message: `Relationship status must be one of: ${validStatuses.join(', ')}`
                     });
                 }
-                updateData.relationshipStatus = relationshipStatus;
+                updateData['social.relationshipStatus'] = relationshipStatus;
             }
         }
 
@@ -316,7 +473,11 @@ const updateProfile = async (req, res) => {
                 };
                 processedWorkplace.push(processedWork);
             }
-            updateData.workplace = processedWorkplace;
+            // Initialize professional object if it doesn't exist
+            if (!updateData.professional) {
+                updateData.professional = {};
+            }
+            updateData.professional.workplace = processedWorkplace;
         }
 
         // Handle education (array of education entries)
@@ -330,10 +491,12 @@ const updateProfile = async (req, res) => {
             // Validate each education entry and ensure institutions exist (if provided)
             const processedEducation = [];
             for (const edu of education) {
-                // Skip validation if institution or startYear are not provided (education is optional)
+                // Validate required fields for education entry
                 if (!edu.institution || !edu.startYear) {
-                    // Allow partial education entries - skip this entry if institution or startYear missing
-                    continue;
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Institution and startYear are required for each education entry'
+                    });
                 }
                 
                 if (isNaN(parseInt(edu.startYear)) || parseInt(edu.startYear) < 1900 || parseInt(edu.startYear) > new Date().getFullYear() + 10) {
@@ -476,7 +639,7 @@ const updateProfile = async (req, res) => {
                 };
                 processedEducation.push(processedEdu);
             }
-            updateData.education = processedEducation;
+            updateData['professional.education'] = processedEducation;
         }
 
         // Check if there's anything to update
@@ -492,47 +655,14 @@ const updateProfile = async (req, res) => {
             user._id,
             updateData,
             { new: true, runValidators: true }
-        )
-        .populate('workplace.company', 'name isCustom')
-        .populate('education.institution', 'name type city country logo verified isCustom')
-        .select('-password -refreshToken');
+        ).lean()
+        .populate('professional.workplace.company', 'name isCustom')
+        .populate('professional.education.institution', 'name type city country logo verified isCustom')
+        .select('-auth');
 
-        // Format workplace to include company name
-        const formattedWorkplace = updatedUser.workplace.map(work => ({
-            company: work.company ? {
-                id: work.company._id,
-                name: work.company.name,
-                isCustom: work.company.isCustom
-            } : null,
-            position: work.position,
-            startDate: work.startDate,
-            endDate: work.endDate,
-            isCurrent: work.isCurrent
-        }));
-
-        // Format education to include institution details
-        const formattedEducation = (updatedUser.education || []).map(edu => ({
-            institution: edu.institution ? {
-                id: edu.institution._id,
-                name: edu.institution.name,
-                type: edu.institution.type,
-                city: edu.institution.city,
-                country: edu.institution.country,
-                logo: edu.institution.logo,
-                verified: edu.institution.verified,
-                isCustom: edu.institution.isCustom
-            } : null,
-            description: edu.description,
-            degree: edu.degree,
-            field: edu.field,
-            institutionType: edu.institutionType,
-            startMonth: edu.startMonth,
-            startYear: edu.startYear,
-            endMonth: edu.endMonth,
-            endYear: edu.endYear,
-            cgpa: edu.cgpa,
-            percentage: edu.percentage
-        }));
+        // Format workplace and education using helper functions
+        const formattedWorkplace = formatWorkplace(updatedUser.professional?.workplace);
+        const formattedEducation = formatEducation(updatedUser.professional?.education);
 
         res.status(200).json({
             success: true,
@@ -545,7 +675,9 @@ const updateProfile = async (req, res) => {
                     lastName: updatedUser.profile?.name?.last,
                     name: updatedUser.profile?.name?.full,
                     dob: updatedUser.profile?.dob,
+                    // @deprecated - use profile.phoneNumbers.primary instead
                     phoneNumber: updatedUser.profile?.phoneNumbers?.primary,
+                    // @deprecated - use profile.phoneNumbers.alternate instead
                     alternatePhoneNumber: updatedUser.profile?.phoneNumbers?.alternate,
                     gender: updatedUser.profile?.gender,
                     profileImage: updatedUser.profile?.profileImage,
@@ -553,7 +685,7 @@ const updateProfile = async (req, res) => {
                     bio: updatedUser.profile?.bio,
                     currentCity: updatedUser.location?.currentCity,
                     hometown: updatedUser.location?.hometown,
-                    relationshipStatus: updatedUser.relationshipStatus,
+                    relationshipStatus: updatedUser.social?.relationshipStatus,
                     workplace: formattedWorkplace,
                     education: formattedEducation,
                     createdAt: updatedUser.createdAt,
@@ -674,9 +806,12 @@ const verifyOTPAndUpdatePhone = async (req, res) => {
             normalizedPhone = '+' + normalizedPhone;
         }
 
-        // Check if phone number is already taken by another user
-        const existingUser = await User.findOne({ 
-            phoneNumber: normalizedPhone,
+        // Check if phone number is already taken by another user in either primary or alternate numbers
+        const existingUser = await User.findOne({
+            $or: [
+                { 'profile.phoneNumbers.primary': normalizedPhone },
+                { 'profile.phoneNumbers.alternate': normalizedPhone }
+            ],
             _id: { $ne: user._id }
         });
         
@@ -716,7 +851,7 @@ const verifyOTPAndUpdatePhone = async (req, res) => {
             user._id,
             { 'profile.phoneNumbers.primary': normalizedPhone },
             { new: true, runValidators: true }
-        ).select('-password -refreshToken');
+        ).lean().select('-auth');
 
         res.status(200).json({
             success: true,
@@ -729,7 +864,9 @@ const verifyOTPAndUpdatePhone = async (req, res) => {
                     lastName: updatedUser.profile?.name?.last,
                     name: updatedUser.profile?.name?.full,
                     dob: updatedUser.profile?.dob,
+                    // @deprecated - use profile.phoneNumbers.primary instead
                     phoneNumber: updatedUser.profile?.phoneNumbers?.primary,
+                    // @deprecated - use profile.phoneNumbers.alternate instead
                     alternatePhoneNumber: updatedUser.profile?.phoneNumbers?.alternate,
                     gender: updatedUser.profile?.gender,
                     profileImage: updatedUser.profile?.profileImage,
@@ -920,7 +1057,7 @@ const verifyOTPAndUpdateAlternatePhone = async (req, res) => {
             user._id,
             { $set: { alternatePhoneNumber: normalizedPhone } },
             { new: true, runValidators: true }
-        ).select('-password -refreshToken');
+        ).lean().select('-auth');
 
         // Verify the update was successful
         if (!updatedUser) {
@@ -941,7 +1078,7 @@ const verifyOTPAndUpdateAlternatePhone = async (req, res) => {
         }
 
         // Reload the full user document to ensure we have the latest data
-        const finalUser = await User.findById(user._id).select('-password -refreshToken');
+        const finalUser = await User.findById(user._id).select('-auth');
 
         res.status(200).json({
             success: true,
@@ -949,15 +1086,15 @@ const verifyOTPAndUpdateAlternatePhone = async (req, res) => {
             data: {
                 user: {
                     id: finalUser._id,
-                    email: finalUser.email,
-                    firstName: finalUser.firstName,
-                    lastName: finalUser.lastName,
-                    name: finalUser.name,
-                    dob: finalUser.dob,
-                    phoneNumber: finalUser.phoneNumber,
-                    alternatePhoneNumber: finalUser.alternatePhoneNumber,
-                    gender: finalUser.gender,
-                    profileImage: finalUser.profileImage,
+                    email: finalUser.profile?.email,
+                    firstName: finalUser.profile?.name?.first,
+                    lastName: finalUser.profile?.name?.last,
+                    name: finalUser.profile?.name?.full,
+                    dob: finalUser.profile?.dob,
+                    phoneNumber: finalUser.profile?.phoneNumbers?.primary,
+                    alternatePhoneNumber: finalUser.profile?.phoneNumbers?.alternate,
+                    gender: finalUser.profile?.gender,
+                    profileImage: finalUser.profile?.profileImage,
                     createdAt: finalUser.createdAt,
                     updatedAt: finalUser.updatedAt
                 }
@@ -988,9 +1125,9 @@ const removeAlternatePhone = async (req, res) => {
         // Remove alternate phone number using $unset to properly remove the field
         const updatedUser = await User.findByIdAndUpdate(
             user._id,
-            { $unset: { alternatePhoneNumber: '' } },
+            { $unset: { 'profile.phoneNumbers.alternate': '' } },
             { new: true, runValidators: true }
-        ).select('-password -refreshToken');
+        ).lean().select('-auth');
 
         res.status(200).json({
             success: true,
@@ -1003,7 +1140,9 @@ const removeAlternatePhone = async (req, res) => {
                     lastName: updatedUser.profile?.name?.last,
                     name: updatedUser.profile?.name?.full,
                     dob: updatedUser.profile?.dob,
+                    // @deprecated - use profile.phoneNumbers.primary instead
                     phoneNumber: updatedUser.profile?.phoneNumbers?.primary,
+                    // @deprecated - use profile.phoneNumbers.alternate instead
                     alternatePhoneNumber: updatedUser.profile?.phoneNumbers?.alternate,
                     gender: updatedUser.profile?.gender,
                     profileImage: updatedUser.profile?.profileImage,
@@ -1179,7 +1318,7 @@ const uploadProfileImage = async (req, res) => {
             user._id,
             { 'profile.profileImage': result.secure_url },
             { new: true, runValidators: true }
-        ).select('-password -refreshToken');
+        ).lean().select('-auth');
 
         // Save upload record to database - associated with this specific user
         const mediaRecord = await Media.create({
@@ -1204,9 +1343,9 @@ const uploadProfileImage = async (req, res) => {
                 fileSize: result.bytes || req.file.size,
                 user: {
                     id: updatedUser._id,
-                    email: updatedUser.email,
-                    name: updatedUser.name,
-                    profileImage: updatedUser.profileImage
+                    email: updatedUser.profile?.email,
+                    name: updatedUser.profile?.name?.full,
+                    profileImage: updatedUser.profile?.profileImage
                 },
                 uploadedAt: mediaRecord.createdAt
             }
@@ -1247,17 +1386,17 @@ const uploadCoverPhoto = async (req, res) => {
         const userFolder = `user_uploads/${user._id}/cover`;
 
         // Delete old cover photo from Cloudinary if it exists
-        if (user.coverPhoto) {
+        if (user.profile?.coverPhoto) {
             try {
                 // Extract public_id from the old cover photo URL
-                const oldPublicId = user.coverPhoto.split('/').slice(-2).join('/').split('.')[0];
+                const oldPublicId = user.profile.coverPhoto.split('/').slice(-2).join('/').split('.')[0];
                 // Try to delete the old image
                 await cloudinary.uploader.destroy(oldPublicId, { invalidate: true });
                 
                 // Also delete from Media collection
                 await Media.findOneAndDelete({ 
                     userId: user._id, 
-                    url: user.coverPhoto 
+                    url: user.profile.coverPhoto 
                 });
             } catch (deleteError) {
                 // Log but don't fail if old image deletion fails
@@ -1279,9 +1418,9 @@ const uploadCoverPhoto = async (req, res) => {
         // Update user's coverPhoto field
         const updatedUser = await User.findByIdAndUpdate(
             user._id,
-            { coverPhoto: result.secure_url },
+            { 'profile.coverPhoto': result.secure_url },
             { new: true, runValidators: true }
-        ).select('-password -refreshToken');
+        ).lean().select('-auth');
 
         // Save upload record to database - associated with this specific user
         const mediaRecord = await Media.create({
@@ -1306,9 +1445,9 @@ const uploadCoverPhoto = async (req, res) => {
                 fileSize: result.bytes || req.file.size,
                 user: {
                     id: updatedUser._id,
-                    email: updatedUser.email,
-                    name: updatedUser.name,
-                    coverPhoto: updatedUser.coverPhoto
+                    email: updatedUser.profile?.email,
+                    name: updatedUser.profile?.name?.full,
+                    coverPhoto: updatedUser.profile?.coverPhoto
                 },
                 uploadedAt: mediaRecord.createdAt
             }
@@ -1546,21 +1685,19 @@ const deleteUserMedia = async (req, res) => {
         await Media.findByIdAndDelete(mediaId);
 
         // If this was the user's profile image, clear it from user record
-        const currentProfileImage = user.profile?.profileImage || user.profileImage;
+        const currentProfileImage = user.profile?.profileImage;
         if (currentProfileImage === media.url) {
             await User.findByIdAndUpdate(user._id, { 
-                'profile.profileImage': '',
-                profileImage: '' // Also update root-level for backward compatibility
-            });
+                'profile.profileImage': ''
+            }).lean();
         }
 
         // If this was the user's cover photo, clear it from user record
-        const currentCoverPhoto = user.profile?.coverPhoto || user.coverPhoto;
+        const currentCoverPhoto = user.profile?.coverPhoto;
         if (currentCoverPhoto === media.url) {
-            await User.findByIdAndUpdate(user._id, { 
-                'profile.coverPhoto': '',
-                coverPhoto: '' // Also update root-level for backward compatibility
-            });
+await User.findByIdAndUpdate(user._id, { 
+                'profile.coverPhoto': ''
+            }).lean();
         }
 
         return res.status(200).json({
@@ -1590,24 +1727,18 @@ const updateProfileMedia = async (req, res) => {
         // Handle bio - update nested profile.bio field
         if (bio !== undefined) {
             updateData['profile.bio'] = bio.trim();
-            // Also update root-level for backward compatibility
-            updateData.bio = bio.trim();
         }
 
         // Handle coverPhoto (can be URL string) - update nested profile.coverPhoto field
         if (coverPhoto !== undefined) {
             if (coverPhoto === null || coverPhoto === '') {
                 updateData['profile.coverPhoto'] = '';
-                // Also update root-level for backward compatibility
-                updateData.coverPhoto = '';
             } else {
                 // Validate that it's a valid URL format
                 try {
                     new URL(coverPhoto);
                     const trimmedCoverPhoto = coverPhoto.trim();
                     updateData['profile.coverPhoto'] = trimmedCoverPhoto;
-                    // Also update root-level for backward compatibility
-                    updateData.coverPhoto = trimmedCoverPhoto;
                 } catch (urlError) {
                     return res.status(400).json({
                         success: false,
@@ -1645,7 +1776,7 @@ const updateProfileMedia = async (req, res) => {
         if (profileImage !== undefined) {
             // Prevent automatic assignment: if profileImage is being set to coverPhoto value
             // and the user's current profileImage is empty, skip the update
-            const currentProfileImage = user.profile?.profileImage || user.profileImage || '';
+            const currentProfileImage = user.profile?.profileImage || '';
             if (coverPhoto !== undefined && 
                 profileImage === coverPhoto && 
                 (!currentProfileImage || currentProfileImage === '')) {
@@ -1653,16 +1784,12 @@ const updateProfileMedia = async (req, res) => {
                 // Only update coverPhoto, leave profileImage unchanged
             } else if (profileImage === null || profileImage === '') {
                 updateData['profile.profileImage'] = '';
-                // Also update root-level for backward compatibility
-                updateData.profileImage = '';
             } else {
                 // Validate that it's a valid URL format
                 try {
                     new URL(profileImage);
                     const trimmedProfileImage = profileImage.trim();
                     updateData['profile.profileImage'] = trimmedProfileImage;
-                    // Also update root-level for backward compatibility
-                    updateData.profileImage = trimmedProfileImage;
                 } catch (urlError) {
                     return res.status(400).json({
                         success: false,
@@ -1685,7 +1812,7 @@ const updateProfileMedia = async (req, res) => {
             user._id,
             updateData,
             { new: true, runValidators: true }
-        ).select('-password -refreshToken');
+        ).lean().select('-auth');
 
         res.status(200).json({
             success: true,
@@ -1693,9 +1820,9 @@ const updateProfileMedia = async (req, res) => {
             data: {
                 user: {
                     id: updatedUser._id,
-                    bio: updatedUser.profile?.bio || updatedUser.bio,
-                    coverPhoto: updatedUser.profile?.coverPhoto || updatedUser.coverPhoto,
-                    profileImage: updatedUser.profile?.profileImage || updatedUser.profileImage,
+                    bio: updatedUser.profile?.bio,
+                    coverPhoto: updatedUser.profile?.coverPhoto,
+                    profileImage: updatedUser.profile?.profileImage,
                     updatedAt: updatedUser.updatedAt
                 }
             }
@@ -1879,7 +2006,7 @@ const updatePersonalInfo = async (req, res) => {
             user._id,
             updateQuery,
             { new: true, runValidators: true }
-        ).select('-password -refreshToken');
+        ).lean().select('-auth');
 
         res.status(200).json({
             success: true,
@@ -1887,13 +2014,13 @@ const updatePersonalInfo = async (req, res) => {
             data: {
                 user: {
                     id: updatedUser._id,
-                    firstName: updatedUser.firstName,
-                    lastName: updatedUser.lastName,
-                    name: updatedUser.name,
-                    gender: updatedUser.gender,
-                    dob: updatedUser.dob,
-                    phoneNumber: updatedUser.phoneNumber,
-                    alternatePhoneNumber: updatedUser.alternatePhoneNumber,
+                    firstName: updatedUser.profile?.name?.first,
+                    lastName: updatedUser.profile?.name?.last,
+                    name: updatedUser.profile?.name?.full,
+                    gender: updatedUser.profile?.gender,
+                    dob: updatedUser.profile?.dob,
+                    phoneNumber: updatedUser.profile?.phoneNumbers?.primary,
+                    alternatePhoneNumber: updatedUser.profile?.phoneNumbers?.alternate,
                     updatedAt: updatedUser.updatedAt
                 }
             }
@@ -1920,23 +2047,23 @@ const updateLocationAndDetails = async (req, res) => {
 
         // Handle currentCity
         if (currentCity !== undefined) {
-            updateData.currentCity = currentCity.trim();
+            updateData['location.currentCity'] = currentCity.trim();
         }
 
         // Handle hometown
         if (hometown !== undefined) {
-            updateData.hometown = hometown.trim();
+            updateData['location.hometown'] = hometown.trim();
         }
 
         // Handle pronouns
         if (pronouns !== undefined) {
-            updateData.pronouns = pronouns.trim();
+            updateData['profile.pronouns'] = pronouns.trim();
         }
 
         // Handle relationshipStatus
         if (relationshipStatus !== undefined) {
             if (relationshipStatus === null || relationshipStatus === '') {
-                updateData.relationshipStatus = null;
+                updateData['social.relationshipStatus'] = null;
             } else {
                 const validStatuses = ['Single', 'In a relationship', 'Engaged', 'Married', 'In a civil partnership', 'In a domestic partnership', 'In an open relationship', "It's complicated", 'Separated', 'Divorced', 'Widowed'];
                 if (!validStatuses.includes(relationshipStatus)) {
@@ -1945,7 +2072,7 @@ const updateLocationAndDetails = async (req, res) => {
                         message: `Relationship status must be one of: ${validStatuses.join(', ')}`
                     });
                 }
-                updateData.relationshipStatus = relationshipStatus;
+                updateData['social.relationshipStatus'] = relationshipStatus;
             }
         }
 
@@ -2047,7 +2174,11 @@ const updateLocationAndDetails = async (req, res) => {
                 };
                 processedWorkplace.push(processedWork);
             }
-            updateData.workplace = processedWorkplace;
+            // Initialize professional object if it doesn't exist
+            if (!updateData.professional) {
+                updateData.professional = {};
+            }
+            updateData.professional.workplace = processedWorkplace;
         }
 
         // Handle education (array of education entries)
@@ -2058,13 +2189,18 @@ const updateLocationAndDetails = async (req, res) => {
                     message: 'Education must be an array'
                 });
             }
-            // Validate each education entry and ensure institutions exist (if provided)
-            const processedEducation = [];
+
+            // Validate all education entries first and collect institution data
+            const validEducations = [];
+            const institutionData = [];
+
             for (const edu of education) {
-                // Skip validation if institution or startYear are not provided (education is optional)
+                // Validate required fields for education entry
                 if (!edu.institution || !edu.startYear) {
-                    // Allow partial education entries - skip this entry if institution or startYear missing
-                    continue;
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Institution and startYear are required for each education entry'
+                    });
                 }
                 
                 if (isNaN(parseInt(edu.startYear)) || parseInt(edu.startYear) < 1900 || parseInt(edu.startYear) > new Date().getFullYear() + 10) {
@@ -2080,7 +2216,92 @@ const updateLocationAndDetails = async (req, res) => {
                     });
                 }
 
-                // Handle institution - can be ObjectId (string) or institution name (string)
+                // Validate startMonth if provided
+                if (edu.startMonth !== undefined) {
+                    const startMonth = parseInt(edu.startMonth);
+                    if (isNaN(startMonth) || startMonth < 1 || startMonth > 12) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Invalid startMonth (must be between 1 and 12)'
+                        });
+                    }
+                }
+
+                // Validate endMonth if provided
+                if (edu.endMonth !== undefined && edu.endMonth !== null) {
+                    const endMonth = parseInt(edu.endMonth);
+                    if (isNaN(endMonth) || endMonth < 1 || endMonth > 12) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Invalid endMonth (must be between 1 and 12)'
+                        });
+                    }
+                }
+
+                // Validate institutionType if provided
+                if (edu.institutionType !== undefined) {
+                    const validTypes = ['school', 'college', 'university', 'others'];
+                    if (!validTypes.includes(edu.institutionType)) {
+                        return res.status(400).json({
+                            success: false,
+                            message: `Institution type must be one of: ${validTypes.join(', ')}`
+                        });
+                    }
+                }
+
+                // Validate CGPA if provided
+                if (edu.cgpa !== undefined && edu.cgpa !== null) {
+                    const cgpa = parseFloat(edu.cgpa);
+                    if (isNaN(cgpa) || cgpa < 0 || cgpa > 10) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Invalid CGPA (must be between 0 and 10)'
+                        });
+                    }
+                }
+
+                // Validate percentage if provided
+                if (edu.percentage !== undefined && edu.percentage !== null) {
+                    const percentage = parseFloat(edu.percentage);
+                    if (isNaN(percentage) || percentage < 0 || percentage > 100) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Invalid percentage (must be between 0 and 100)'
+                        });
+                    }
+                }
+
+                // Collect institution data for batch processing
+                if (typeof edu.institution === 'string' && !mongoose.Types.ObjectId.isValid(edu.institution)) {
+                    institutionData.push({
+                        name: edu.institution,
+                        type: edu.institutionType || 'school',
+                        city: edu.city,
+                        country: edu.country,
+                        logo: edu.logo
+                    });
+                }
+                validEducations.push(edu);
+            }
+
+            // Batch process institutions
+            let institutionsMap;
+            try {
+                institutionsMap = institutionData.length > 0
+                    ? await getOrCreateInstitutions(institutionData, user._id)
+                    : new Map();
+            } catch (error) {
+                console.error('Error processing institutions:', error);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to process institution information',
+                    error: process.env.NODE_ENV === 'development' ? error.message : undefined
+                });
+            }
+
+            // Process education entries with cached/created institutions
+            const processedEducation = [];
+            for (const edu of validEducations) {
                 let institution;
                 if (mongoose.Types.ObjectId.isValid(edu.institution)) {
                     // It's an ObjectId - find by ID
@@ -2092,47 +2313,16 @@ const updateLocationAndDetails = async (req, res) => {
                         });
                     }
                 } else {
-                    // It's a name - find or create institution
-                    const institutionName = edu.institution.trim();
-                    const normalizedInstitutionName = institutionName.toLowerCase();
+                    // Look up institution from our batch-loaded map
+                    const normalizedName = String(edu.institution).toLowerCase().trim();
+                    institution = institutionsMap.get(normalizedName);
                     
-                    institution = await Institution.findOne({
-                        $or: [
-                            { name: institutionName },
-                            { normalizedName: normalizedInstitutionName }
-                        ]
-                    });
-
-                    // If institution doesn't exist, create it
                     if (!institution) {
-                        try {
-                            // Determine type from context or default to 'school'
-                            const institutionType = edu.institutionType || 'school';
-                            institution = await Institution.create({
-                                name: institutionName,
-                                normalizedName: normalizedInstitutionName,
-                                type: ['school', 'college', 'university', 'others'].includes(institutionType) ? institutionType : 'school',
-                                city: edu.city || '',
-                                country: edu.country || '',
-                                logo: edu.logo || '',
-                                verified: false,
-                                isCustom: true,
-                                createdBy: user._id
-                            });
-                            console.log(`✅ Created new institution: ${institutionName}`);
-                        } catch (error) {
-                            // Handle race condition - institution might have been created by another request
-                            if (error.code === 11000) {
-                                institution = await Institution.findOne({
-                                    $or: [
-                                        { name: institutionName },
-                                        { normalizedName: normalizedInstitutionName }
-                                    ]
-                                });
-                            } else {
-                                throw error;
-                            }
-                        }
+                        console.error(`Failed to find institution in batch: ${edu.institution}`);
+                        return res.status(400).json({
+                            success: false,
+                            message: `Failed to process institution: ${edu.institution}`
+                        });
                     }
                 }
 
@@ -2207,7 +2397,7 @@ const updateLocationAndDetails = async (req, res) => {
                 };
                 processedEducation.push(processedEdu);
             }
-            updateData.education = processedEducation;
+            updateData['professional.education'] = processedEducation;
         }
 
         // Check if there's anything to update
@@ -2223,47 +2413,14 @@ const updateLocationAndDetails = async (req, res) => {
             user._id,
             updateData,
             { new: true, runValidators: true }
-        )
-        .populate('workplace.company', 'name isCustom')
-        .populate('education.institution', 'name type city country logo verified isCustom')
-        .select('-password -refreshToken');
+        ).lean()
+        .populate('professional.workplace.company', 'name isCustom')
+        .populate('professional.education.institution', 'name type city country logo verified isCustom')
+        .select('-auth');
 
-        // Format workplace to include company name
-        const formattedWorkplace = updatedUser.workplace.map(work => ({
-            company: work.company ? {
-                id: work.company._id,
-                name: work.company.name,
-                isCustom: work.company.isCustom
-            } : null,
-            position: work.position,
-            startDate: work.startDate,
-            endDate: work.endDate,
-            isCurrent: work.isCurrent
-        }));
-
-        // Format education to include institution details
-        const formattedEducation = (updatedUser.education || []).map(edu => ({
-            institution: edu.institution ? {
-                id: edu.institution._id,
-                name: edu.institution.name,
-                type: edu.institution.type,
-                city: edu.institution.city,
-                country: edu.institution.country,
-                logo: edu.institution.logo,
-                verified: edu.institution.verified,
-                isCustom: edu.institution.isCustom
-            } : null,
-            description: edu.description,
-            degree: edu.degree,
-            field: edu.field,
-            institutionType: edu.institutionType,
-            startMonth: edu.startMonth,
-            startYear: edu.startYear,
-            endMonth: edu.endMonth,
-            endYear: edu.endYear,
-            cgpa: edu.cgpa,
-            percentage: edu.percentage
-        }));
+        // Format workplace and education using helper functions
+        const formattedWorkplace = formatWorkplace(updatedUser.professional?.workplace);
+        const formattedEducation = formatEducation(updatedUser.professional?.education);
 
         res.status(200).json({
             success: true,
@@ -2271,10 +2428,10 @@ const updateLocationAndDetails = async (req, res) => {
             data: {
                 user: {
                     id: updatedUser._id,
-                    currentCity: updatedUser.currentCity,
-                    hometown: updatedUser.hometown,
-                    pronouns: updatedUser.pronouns,
-                    relationshipStatus: updatedUser.relationshipStatus,
+                    currentCity: updatedUser.location?.currentCity,
+                    hometown: updatedUser.location?.hometown,
+                    pronouns: updatedUser.profile?.pronouns,
+                    relationshipStatus: updatedUser.social?.relationshipStatus,
                     workplace: formattedWorkplace,
                     education: formattedEducation,
                     updatedAt: updatedUser.updatedAt
@@ -2310,15 +2467,12 @@ const searchUsers = async (req, res) => {
 
         const searchTerm = query.trim();
 
-        // Get current user's blocked users (from both locations)
+        // Get current user's blocked users
         const blockedUserIds = await getBlockedUserIds(user._id);
 
-        // Get users who have blocked the current user (check both locations)
+        // Get users who have blocked the current user
         const usersWhoBlockedMe = await User.find({
-            $or: [
-                { blockedUsers: user._id },
-                { 'social.blockedUsers': user._id }
-            ]
+            'social.blockedUsers': user._id
         }).select('_id').lean();
         const blockedByUserIds = usersWhoBlockedMe.map(u => u._id);
 
@@ -2346,7 +2500,7 @@ const searchUsers = async (req, res) => {
 
         // Search for users that match the query
         const users = await User.find(searchQuery)
-            .select('-password -refreshToken -refreshTokens -email') // Exclude sensitive data
+            .select('-auth -profile.email') // Exclude sensitive data
             .sort({ 'profile.name.full': 1 }) // Sort alphabetically
             .skip(skip)
             .limit(limit);
@@ -2369,15 +2523,16 @@ const searchUsers = async (req, res) => {
             });
         }
 
-        // Get current user's friends list for privacy checks
-        const currentUserWithFriends = await User.findById(user._id).select('social.friends friends');
-        const currentUserFriends = currentUserWithFriends?.social?.friends || currentUserWithFriends?.friends || [];
-        const currentUserFriendsIds = currentUserFriends.map(f => f.toString());
+        // Preload current user's friends list once and convert to Set for O(1) lookups
+        const currentUserWithFriends = await User.findById(user._id).select('social.friends');
+        const currentUserFriends = currentUserWithFriends?.social?.friends || [];
+        const currentUserFriendsSet = new Set(currentUserFriends.map(id => id.toString()));
 
-        // Return found users with privacy checks
-        const formattedUsers = await Promise.all(users.map(async (searchedUser) => {
+        // Process users with privacy checks
+        const formattedUsers = users.map(searchedUser => {
+            const userId = searchedUser._id.toString();
             const isProfilePrivate = searchedUser.profile?.visibility === 'private';
-            const isFriend = currentUserFriendsIds.includes(searchedUser._id.toString());
+            const isFriend = currentUserFriendsSet.has(userId);
             
             // If profile is private and viewer is not a friend, return limited data
             if (isProfilePrivate && !isFriend) {
@@ -2386,7 +2541,7 @@ const searchUsers = async (req, res) => {
             
             // Otherwise return full data (public profile or friend viewing private profile)
             return getFullProfileData(searchedUser);
-        }));
+        });
 
         return res.status(200).json({
             success: true,
@@ -2413,67 +2568,66 @@ const searchUsers = async (req, res) => {
     }
 };
 
-// Remove education entry by index
+// Remove education entry by ID or index
 const removeEducationEntry = async (req, res) => {
     try {
-        const user = req.user; // From protect middleware
-        const { index } = req.params;
-
-        // Validate index
-        const entryIndex = parseInt(index);
-        if (isNaN(entryIndex) || entryIndex < 0) {
-            return res.status(400).json({
+        const { educationId } = req.params;
+        
+        // First, get a fresh copy of the user
+        const user = await User.findById(req.user._id);
+        if (!user) {
+            return res.status(404).json({
                 success: false,
-                message: 'Invalid education entry index. Index must be a non-negative number.'
+                message: 'User not found'
             });
         }
 
-        // Check if education array exists and has the entry
-        if (!user.education || !Array.isArray(user.education)) {
+        // Check if education array exists
+        if (!user.professional?.education || !Array.isArray(user.professional.education)) {
             return res.status(400).json({
                 success: false,
                 message: 'No education entries found'
             });
         }
 
-        if (entryIndex >= user.education.length) {
-            return res.status(404).json({
-                success: false,
-                message: `Education entry at index ${entryIndex} not found. You have ${user.education.length} education entries.`
-            });
+        let educationToRemove;
+        let educationIdToRemove;
+
+        // First try to find by ID if it's a valid ObjectId
+        if (mongoose.Types.ObjectId.isValid(educationId)) {
+            educationToRemove = user.professional.education.find(edu => edu._id.toString() === educationId);
+            if (educationToRemove) {
+                educationIdToRemove = educationToRemove._id;
+            }
         }
-
-        // Get the education entry to be removed (for response)
-        const educationToRemove = user.education[entryIndex];
-
-        // Remove the education entry using $pull with the entry's _id
-        // Since subdocuments have _id by default in Mongoose, we can use it for removal
-        const educationId = user.education[entryIndex]._id;
         
-        if (!educationId) {
-            // Fallback: if _id doesn't exist, use array filtering
-            // This shouldn't happen, but adding as a safety measure
-            const updatedEducation = user.education.filter((_, idx) => idx !== entryIndex);
-            await User.findByIdAndUpdate(
-                user._id,
-                { education: updatedEducation },
-                { new: true, runValidators: true }
-            );
-        } else {
-            await User.findByIdAndUpdate(
-                user._id,
-                { $pull: { education: { _id: educationId } } },
-                { new: true, runValidators: true }
-            );
+        // If not found by ID, try to use as index (for backward compatibility)
+        if (!educationToRemove) {
+            const entryIndex = parseInt(educationId);
+            if (isNaN(entryIndex) || entryIndex < 0 || entryIndex >= user.professional.education.length) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid education entry ID or index.'
+                });
+            }
+            educationToRemove = user.professional.education[entryIndex];
+            educationIdToRemove = educationToRemove._id;
         }
+
+        // Remove the education entry by ID
+        await User.findByIdAndUpdate(
+            user._id,
+            { $pull: { 'professional.education': { _id: educationIdToRemove } } },
+            { new: true, runValidators: true }
+        ).lean();
 
         // Get updated user with populated fields
         const updatedUser = await User.findById(user._id)
-            .populate('education.institution', 'name type city country logo verified isCustom')
-            .select('-password -refreshToken');
+            .populate('professional.education.institution', 'name type city country logo verified isCustom')
+            .select('-auth');
 
         // Format education to include institution details
-        const formattedEducation = (updatedUser.education || []).map(edu => ({
+        const formattedEducation = (updatedUser.professional?.education || []).map(edu => ({
             institution: edu.institution ? {
                 id: edu.institution._id,
                 name: edu.institution.name,
@@ -2528,9 +2682,8 @@ const removeWorkplaceEntry = async (req, res) => {
     try {
         const user = req.user; // From protect middleware
         const { index } = req.params;
-
-        // Validate index
         const entryIndex = parseInt(index);
+
         if (isNaN(entryIndex) || entryIndex < 0) {
             return res.status(400).json({
                 success: false,
@@ -2538,52 +2691,49 @@ const removeWorkplaceEntry = async (req, res) => {
             });
         }
 
-        // Check if workplace array exists and has the entry
-        if (!user.workplace || !Array.isArray(user.workplace)) {
+        // Check if professional.workplace array exists and has the entry
+        if (!user.professional?.workplace || !Array.isArray(user.professional.workplace)) {
             return res.status(400).json({
                 success: false,
                 message: 'No workplace entries found'
             });
         }
 
-        if (entryIndex >= user.workplace.length) {
+        if (entryIndex >= user.professional.workplace.length) {
             return res.status(404).json({
                 success: false,
-                message: `Workplace entry at index ${entryIndex} not found. You have ${user.workplace.length} workplace entries.`
+                message: `Workplace entry at index ${entryIndex} not found. You have ${user.professional.workplace.length} workplace entries.`
             });
         }
 
         // Get the workplace entry to be removed (for response)
-        const workplaceToRemove = user.workplace[entryIndex];
-
-        // Remove the workplace entry using $pull with the entry's _id
-        // Since subdocuments have _id by default in Mongoose, we can use it for removal
-        const workplaceId = user.workplace[entryIndex]._id;
+        const workplaceToRemove = user.professional.workplace[entryIndex];
+        const workplaceId = workplaceToRemove._id;
         
+        // Remove the workplace entry using $pull with the entry's _id
+        await User.findByIdAndUpdate(
+            user._id,
+            { $pull: { 'professional.workplace': { _id: workplaceId } } },
+            { new: true, runValidators: true }
+        ).lean();
+
+        // Fallback: if _id doesn't exist (shouldn't happen with Mongoose)
         if (!workplaceId) {
-            // Fallback: if _id doesn't exist, use array filtering
-            // This shouldn't happen, but adding as a safety measure
-            const updatedWorkplace = user.workplace.filter((_, idx) => idx !== entryIndex);
+            const updatedWorkplace = user.professional.workplace.filter((_, idx) => idx !== entryIndex);
             await User.findByIdAndUpdate(
                 user._id,
-                { workplace: updatedWorkplace },
+                { $set: { 'professional.workplace': updatedWorkplace } },
                 { new: true, runValidators: true }
-            );
-        } else {
-            await User.findByIdAndUpdate(
-                user._id,
-                { $pull: { workplace: { _id: workplaceId } } },
-                { new: true, runValidators: true }
-            );
+            ).lean();
         }
 
         // Get updated user with populated fields
         const updatedUser = await User.findById(user._id)
-            .populate('workplace.company', 'name isCustom')
-            .select('-password -refreshToken');
+            .populate('professional.workplace.company', 'name isCustom')
+            .select('-auth');
 
         // Format workplace to include company name
-        const formattedWorkplace = updatedUser.workplace.map(work => ({
+        const formattedWorkplace = (updatedUser.professional?.workplace || []).map(work => ({
             company: work.company ? {
                 id: work.company._id,
                 name: work.company.name,
@@ -2662,7 +2812,7 @@ const blockUser = async (req, res) => {
             });
         }
 
-        // Check if already blocked (check both locations)
+        // Check if already blocked
         const isAlreadyBlocked = await isUserBlocked(userId, blockedUserId);
         if (isAlreadyBlocked) {
             return res.status(400).json({
@@ -2671,21 +2821,22 @@ const blockUser = async (req, res) => {
             });
         }
 
-        // Add to blocked users list (both locations for consistency)
+        // Add to blocked users list
         await User.findByIdAndUpdate(userId, {
             $addToSet: { 
-                blockedUsers: blockedUserId,
                 'social.blockedUsers': blockedUserId
-            }
-        });
+            },
+            // Ensure social object exists
+            $setOnInsert: { social: {} }
+        }).lean();
 
         // Remove from friends list if they are friends (both directions)
         await User.findByIdAndUpdate(userId, {
-            $pull: { friends: blockedUserId }
-        });
+            $pull: { 'social.friends': blockedUserId }
+        }).lean();
         await User.findByIdAndUpdate(blockedUserId, {
-            $pull: { friends: userId }
-        });
+            $pull: { 'social.friends': userId }
+        }).lean();
 
         // Cancel any pending friend requests between them
         const FriendRequest = require('../models/FriendRequest');
@@ -2698,8 +2849,8 @@ const blockUser = async (req, res) => {
 
         // Get updated user with blocked user details
         const updatedUser = await User.findById(userId)
-            .populate('blockedUsers', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email')
-            .select('blockedUsers');
+            .populate('social.blockedUsers', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email')
+            .select('social.blockedUsers');
 
         res.status(200).json({
             success: true,
@@ -2707,13 +2858,13 @@ const blockUser = async (req, res) => {
             data: {
                 blockedUser: {
                     _id: userToBlock._id,
-                    firstName: userToBlock.firstName,
-                    lastName: userToBlock.lastName,
-                    name: userToBlock.name,
-                    profileImage: userToBlock.profileImage,
-                    email: userToBlock.email
+                    firstName: userToBlock.profile?.name?.first,
+                    lastName: userToBlock.profile?.name?.last,
+                    name: userToBlock.profile?.name?.full,
+                    profileImage: userToBlock.profile?.profileImage,
+                    email: userToBlock.profile?.email
                 },
-                blockedUsers: updatedUser.blockedUsers
+                blockedUsers: updatedUser.social?.blockedUsers || []
             }
         });
     } catch (error) {
@@ -2758,7 +2909,7 @@ const unblockUser = async (req, res) => {
             });
         }
 
-        // Check if user is blocked (check both locations)
+        // Check if user is blocked
         const isBlocked = await isUserBlocked(userId, blockedUserId);
         if (!isBlocked) {
             return res.status(400).json({
@@ -2767,18 +2918,17 @@ const unblockUser = async (req, res) => {
             });
         }
 
-        // Remove from blocked users list (both locations)
+        // Remove from blocked users list
         await User.findByIdAndUpdate(userId, {
             $pull: { 
-                blockedUsers: blockedUserId,
                 'social.blockedUsers': blockedUserId
             }
-        });
+        }).lean(), { new: true };
 
-        // Get updated user
+        // Get updated user with blocked users
         const updatedUser = await User.findById(userId)
-            .populate('blockedUsers', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email')
-            .select('blockedUsers');
+            .populate('social.blockedUsers', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email')
+            .select('social.blockedUsers');
 
         res.status(200).json({
             success: true,
@@ -2786,13 +2936,13 @@ const unblockUser = async (req, res) => {
             data: {
                 unblockedUser: {
                     _id: userToUnblock._id,
-                    firstName: userToUnblock.firstName,
-                    lastName: userToUnblock.lastName,
-                    name: userToUnblock.name,
-                    profileImage: userToUnblock.profileImage,
-                    email: userToUnblock.email
+                    firstName: userToUnblock.profile?.name?.first,
+                    lastName: userToUnblock.profile?.name?.last,
+                    name: userToUnblock.profile?.name?.full,
+                    profileImage: userToUnblock.profile?.profileImage,
+                    email: userToUnblock.profile?.email
                 },
-                blockedUsers: updatedUser.blockedUsers
+                blockedUsers: updatedUser.social?.blockedUsers || []
             }
         });
     } catch (error) {
@@ -2810,11 +2960,10 @@ const listBlockedUsers = async (req, res) => {
     try {
         const userId = req.user._id;
 
-        // Get user with populated blocked users from both locations
+        // Get user with populated blocked users
         const user = await User.findById(userId)
-            .populate('blockedUsers', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email profile.bio location.currentCity location.hometown')
             .populate('social.blockedUsers', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email profile.bio location.currentCity location.hometown')
-            .select('blockedUsers social.blockedUsers');
+            .select('social.blockedUsers');
 
         if (!user) {
             return res.status(404).json({
@@ -2823,28 +2972,14 @@ const listBlockedUsers = async (req, res) => {
             });
         }
 
-        // Merge blocked users from both locations and deduplicate
-        const rootBlocked = user.blockedUsers || [];
-        const socialBlocked = user.social?.blockedUsers || [];
-        const allBlocked = [...rootBlocked, ...socialBlocked];
-        
-        // Deduplicate by _id
-        const uniqueBlocked = [];
-        const seenIds = new Set();
-        for (const blockedUser of allBlocked) {
-            const userId = blockedUser._id ? blockedUser._id.toString() : blockedUser.toString();
-            if (!seenIds.has(userId)) {
-                seenIds.add(userId);
-                uniqueBlocked.push(blockedUser);
-            }
-        }
+        const blockedUsers = user.social?.blockedUsers || [];
 
         res.status(200).json({
             success: true,
             message: 'Blocked users retrieved successfully',
             data: {
-                blockedUsers: uniqueBlocked,
-                count: uniqueBlocked.length
+                blockedUsers: blockedUsers,
+                count: blockedUsers.length
             }
         });
     } catch (error) {
@@ -2865,7 +3000,7 @@ const getUserProfileById = async (req, res) => {
 
         // Find the target user
         const user = await User.findById(userId)
-            .select('-password -refreshToken -auth -__v')
+            .select('-auth -__v')
             .populate('professional.workplace.company', 'name isCustom')
             .populate('professional.education.institution', 'name type city country logo verified isCustom');
 
@@ -3017,7 +3152,7 @@ const updateProfileVisibility = async (req, res) => {
             user._id,
             { 'profile.visibility': visibility },
             { new: true, runValidators: true }
-        ).select('-password -refreshToken -auth.password -auth.refreshToken');
+        ).lean().select('-auth');
 
         if (!updatedUser) {
             return res.status(404).json({

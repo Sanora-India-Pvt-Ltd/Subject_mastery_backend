@@ -10,44 +10,25 @@ const MAX_DEVICES = 5;
 
 // Helper function to manage device limit - removes oldest device if limit is reached
 const manageDeviceLimit = (user) => {
-    // Support both old and new structure
-    let refreshTokensArray = null;
-    
-    if (user.auth?.tokens?.refreshTokens && Array.isArray(user.auth.tokens.refreshTokens)) {
-        // New nested structure
-        refreshTokensArray = user.auth.tokens.refreshTokens;
-    } else if (Array.isArray(user.refreshTokens)) {
-        // Old flat structure - migrate to new structure
-        if (!user.auth) user.auth = {};
-        if (!user.auth.tokens) user.auth.tokens = {};
-        // Migrate old refreshTokens to new structure
-        user.auth.tokens.refreshTokens = user.refreshTokens.map(rt => ({
-            token: rt.token || rt,
-            expiresAt: rt.expiresAt || rt.expiryDate || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // Default 1 year if missing
-            device: rt.device || rt.deviceInfo || 'Unknown Device',
-            createdAt: rt.createdAt || new Date()
-        }));
-        refreshTokensArray = user.auth.tokens.refreshTokens;
-    } else {
-        // Initialize new structure
-        if (!user.auth) user.auth = {};
-        if (!user.auth.tokens) user.auth.tokens = {};
-        user.auth.tokens.refreshTokens = [];
-        refreshTokensArray = user.auth.tokens.refreshTokens;
-    }
+    if (!user.auth) user.auth = {};
+    if (!user.auth.tokens) user.auth.tokens = {};
+    if (!Array.isArray(user.auth.tokens.refreshTokens)) user.auth.tokens.refreshTokens = [];
     
     // If we've reached the limit, remove the oldest device (sorted by createdAt)
-    if (refreshTokensArray.length >= MAX_DEVICES) {
+    if (user.auth.tokens.refreshTokens.length >= MAX_DEVICES) {
         // Sort by createdAt (oldest first) and remove the first one
-        refreshTokensArray.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-        refreshTokensArray.shift(); // Remove the oldest device
+        user.auth.tokens.refreshTokens.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        user.auth.tokens.refreshTokens.shift(); // Remove the oldest device
     }
 };
 
 // User Signup (with OTP verification)
 const signup = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    
     try {
-        const { email, password, confirmPassword, firstName, lastName, phoneNumber, gender, name, verificationToken, otp } = req.body;
+        const { email, password, confirmPassword, firstName, lastName, phoneNumber, gender, name, verificationToken, otp, company, institution } = req.body;
 
         // Validate input
         if (!email || !password || !firstName || !lastName || !phoneNumber || !gender) {
@@ -100,13 +81,8 @@ const signup = async (req, res) => {
             });
         }
 
-        // Check if user already exists (check both new and old structure for migration)
-        const existingUser = await User.findOne({
-            $or: [
-                { 'profile.email': normalizedEmail },
-                { email: normalizedEmail } // Old structure for backward compatibility
-            ]
-        });
+        // Check if user already exists
+        const existingUser = await User.findOne({ 'profile.email': normalizedEmail });
         if (existingUser) {
             return res.status(400).json({
                 success: false,
@@ -209,7 +185,7 @@ const signup = async (req, res) => {
 
         // Create user (use normalized phone number and email)
         const fullName = name || `${firstName} ${lastName}`.trim();
-        const user = await User.create({
+        const user = await User.create([{
             profile: {
                 name: {
                     first: firstName.trim(),
@@ -246,7 +222,7 @@ const signup = async (req, res) => {
                 generalWeightage: 0,
                 professionalWeightage: 0
             }
-        });
+        }], { session }).then(users => users[0]);
 
         // Generate access token and refresh token
         const accessToken = generateAccessToken({ id: user._id, email: user.profile.email });
@@ -266,29 +242,53 @@ const signup = async (req, res) => {
             createdAt: new Date()
         });
 
-        // Keep backward compatibility - set single token fields
-        user.auth.refreshToken = refreshToken;
-        user.auth.refreshTokenExpiry = refreshTokenExpiry;
-
-        // Use findByIdAndUpdate to avoid pre-hook issues during signup
+        // Update user with refresh token in the transaction
         await User.findByIdAndUpdate(
             user._id,
             {
                 $set: {
-                    'auth.tokens.refreshTokens': user.auth.tokens.refreshTokens,
-                    'auth.refreshToken': refreshToken,
-                    'auth.refreshTokenExpiry': refreshTokenExpiry
+                    'auth.tokens.refreshTokens': user.auth.tokens.refreshTokens
                 }
-            }
-        );
+            },
+            { new: true, runValidators: true }
+        ).lean();
+        
+        // Handle company creation if provided
+        if (req.body.company) {
+            const company = new Company({
+                name: req.body.company.name || 'Unnamed Company',
+                normalizedName: (req.body.company.name || '').toLowerCase().trim(),
+                isCustom: true,
+                createdBy: user._id
+            });
+            await company.save({ session });
+        }
+        
+        // Handle institution creation if provided
+        if (req.body.institution) {
+            const institution = new Institution({
+                name: req.body.institution.name || 'Unnamed Institution',
+                normalizedName: (req.body.institution.name || '').toLowerCase().trim(),
+                type: req.body.institution.type || 'school',
+                isCustom: true,
+                createdBy: user._id
+            });
+            await institution.save({ session });
+        }
+        
+        // Commit the transaction if all operations succeed
+        await session.commitTransaction();
 
+        // End the session after successful transaction
+        session.endSession();
+        
         res.status(201).json({
             success: true,
             message: 'User registered successfully',
             data: {
                 accessToken,
                 refreshToken,
-                token: accessToken, // For backward compatibility
+                token: accessToken,
                 user: {
                     id: user._id,
                     email: user.profile.email,
@@ -302,6 +302,9 @@ const signup = async (req, res) => {
         });
 
     } catch (error) {
+        // Abort the transaction on error
+        await session.abortTransaction();
+        
         // Handle duplicate key errors with more specific messages
         if (error.code === 11000) {
             const field = Object.keys(error.keyPattern || {})[0] || 'field';
@@ -336,7 +339,8 @@ const signup = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Error in user signup',
-            error: error.message
+            error: error.message,
+            transactionAborted: true
         });
     }
 };
@@ -355,28 +359,15 @@ const login = async (req, res) => {
         }
 
         // Find user by email or phone number
-        // Support both old flat structure and new nested structure for backward compatibility
         let user;
         if (email) {
             const normalizedEmail = email.toLowerCase();
             console.log('🔍 Searching for user with email:', normalizedEmail);
-            // Use $or to check both structures simultaneously - more reliable
-            user = await User.findOne({
-                $or: [
-                    { 'profile.email': normalizedEmail },
-                    { email: normalizedEmail }
-                ]
-            });
+            user = await User.findOne({ 'profile.email': normalizedEmail });
             console.log('   Query result:', user ? `Found (ID: ${user._id})` : 'Not found');
         } else if (phoneNumber) {
             console.log('🔍 Searching for user with phone:', phoneNumber);
-            // Use $or to check both structures simultaneously - more reliable
-            user = await User.findOne({
-                $or: [
-                    { 'profile.phoneNumbers.primary': phoneNumber },
-                    { phoneNumber: phoneNumber }
-                ]
-            });
+            user = await User.findOne({ 'profile.phoneNumbers.primary': phoneNumber });
             console.log('   Query result:', user ? `Found (ID: ${user._id})` : 'Not found');
         }
 
@@ -388,30 +379,18 @@ const login = async (req, res) => {
             });
         }
 
-        // Convert to plain object for reliable password access, but keep original document for saving
-        // This ensures all nested fields are accessible even if Mongoose hasn't fully hydrated them
-        const userObj = user.toObject ? user.toObject() : user;
+        // Use the user document directly as we're now using .lean() in queries
+        const userObj = user;
         
-        // Access password from plain object - support both old and new structure
+        // Access password from nested auth structure
         let userPassword = null;
         
-        // Try new nested structure first
         if (userObj.auth && userObj.auth.password) {
             userPassword = userObj.auth.password;
-            console.log('✅ Using password from: auth.password (new structure)');
-        } 
-        // Try old flat structure
-        else if (userObj.password) {
-            userPassword = userObj.password;
-            console.log('✅ Using password from: password (old structure)');
-        }
-        // Fallback: try accessing directly from document (in case toObject() didn't include it)
-        else if (user.auth && user.auth.password) {
+            console.log('?o. Using password from: auth.password');
+        } else if (user.auth && user.auth.password) {
             userPassword = user.auth.password;
-            console.log('✅ Using password from: user.auth.password (direct access)');
-        } else if (user.password) {
-            userPassword = user.password;
-            console.log('✅ Using password from: user.password (direct access)');
+            console.log('?o. Using password from: user.auth.password (direct access)');
         }
         
         if (!userPassword) {
@@ -419,9 +398,7 @@ const login = async (req, res) => {
             console.log('   User ID:', user._id);
             console.log('   Has auth object:', !!userObj.auth);
             console.log('   Has auth.password (obj):', !!(userObj.auth && userObj.auth.password));
-            console.log('   Has password (obj):', !!userObj.password);
             console.log('   Has auth.password (doc):', !!(user.auth && user.auth.password));
-            console.log('   Has password (doc):', !!user.password);
             
             // Check if this is an OAuth user (should not have password)
             if ((userObj.auth && userObj.auth.isGoogleOAuth) || (user.auth && user.auth.isGoogleOAuth)) {
@@ -447,8 +424,8 @@ const login = async (req, res) => {
             });
         }
 
-        // Get user email - support both old and new structure (use userObj for reading)
-        const userEmail = userObj.profile?.email || userObj.email || user.profile?.email || user.email;
+        // Get user email - prioritize profile.email for consistency
+        const userEmail = userObj.profile?.email || user.profile?.email;
         
         // Generate access token and refresh token
         const accessToken = generateAccessToken({ id: (userObj._id || userObj.id).toString(), email: userEmail });
@@ -457,19 +434,11 @@ const login = async (req, res) => {
         // Get device info from request (optional)
         const deviceInfo = req.headers['user-agent'] || req.body.deviceInfo || 'Unknown Device';
 
-        // Ensure auth structure exists for old users
+        // Ensure auth structure exists
         if (!user.auth) user.auth = {};
         if (!user.auth.tokens) user.auth.tokens = {};
         
-        // Migrate old refreshTokens array to new structure if it exists
-        if (Array.isArray(user.refreshTokens) && user.refreshTokens.length > 0 && !user.auth.tokens.refreshTokens) {
-            user.auth.tokens.refreshTokens = user.refreshTokens.map(rt => ({
-                token: rt.token || rt,
-                expiresAt: rt.expiresAt || rt.expiryDate || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-                device: rt.device || rt.deviceInfo || 'Unknown Device',
-                createdAt: rt.createdAt || new Date()
-            }));
-        } else if (!user.auth.tokens.refreshTokens) {
+        if (!user.auth.tokens.refreshTokens) {
             user.auth.tokens.refreshTokens = [];
         }
 
@@ -484,39 +453,28 @@ const login = async (req, res) => {
             createdAt: new Date()
         });
 
-        // Keep backward compatibility - set single token fields in both old and new structures
-        user.auth.refreshToken = refreshToken;
-        user.auth.refreshTokenExpiry = refreshTokenExpiry;
-        // Also update old flat structure for backward compatibility
-        user.refreshToken = refreshToken;
-        user.refreshTokenExpiry = refreshTokenExpiry;
-
         // Update user with new tokens and last login using findByIdAndUpdate to avoid pre-hook issues
         await User.findByIdAndUpdate(
             user._id,
             {
                 $set: {
                     'auth.tokens.refreshTokens': user.auth.tokens.refreshTokens,
-                    'auth.refreshToken': refreshToken,
-                    'auth.refreshTokenExpiry': refreshTokenExpiry,
-                    'refreshToken': refreshToken,
-                    'refreshTokenExpiry': refreshTokenExpiry,
                     'account.lastLogin': new Date()
                 }
             },
-            { new: true }
-        );
+            { new: true, runValidators: true }
+        ).lean();
 
-        // Get user data - support both old and new structure
+        // Get user data
         const userData = {
             id: user._id,
-            email: user.profile?.email || user.email,
-            firstName: user.profile?.name?.first || user.firstName,
-            lastName: user.profile?.name?.last || user.lastName,
-            phoneNumber: user.profile?.phoneNumbers?.primary || user.phoneNumber,
-            gender: user.profile?.gender || user.gender,
-            name: user.profile?.name?.full || user.name || `${user.profile?.name?.first || user.firstName} ${user.profile?.name?.last || user.lastName}`.trim(),
-            profileImage: user.profile?.profileImage || user.profileImage
+            email: user.profile?.email || user.profile.email,
+            firstName: user.profile?.name?.first || user.profile.name.first,
+            lastName: user.profile?.name?.last || user.profile.name.last,
+            phoneNumber: user.profile?.phoneNumbers?.primary || user.profile.phoneNumbers.primary,
+            gender: user.profile?.gender || user.profile.gender,
+            name: user.profile?.name?.full || user.profile.name.full || `${user.profile?.name?.first || user.profile.name.first} ${user.profile?.name?.last || user.profile.name.last}`.trim(),
+            profileImage: user.profile?.profileImage || user.profile.profileImage
         };
 
         res.status(200).json({
@@ -525,7 +483,7 @@ const login = async (req, res) => {
             data: {
                 accessToken,
                 refreshToken,
-                token: accessToken, // For backward compatibility
+                token: accessToken,
                 user: userData
             }
         });
@@ -906,8 +864,8 @@ const resetPassword = async (req, res) => {
                     'auth.password': hashedPassword
                 }
             },
-            { new: true }
-        );
+            { new: true, runValidators: true }
+        ).lean();
 
         res.status(200).json({
             success: true,
@@ -1055,36 +1013,7 @@ const refreshToken = async (req, res) => {
             });
         }
 
-        // Find user by refresh token (check all possible structures)
-        // Support: auth.refreshToken, auth.tokens.refreshToken, auth.tokens.refreshTokens[], refreshToken (old), refreshTokens[] (old)
-        let user = await User.findOne({ 'auth.refreshToken': refreshToken });
-        
-        // If not found, check auth.tokens.refreshToken (singular in tokens object)
-        if (!user) {
-            user = await User.findOne({ 'auth.tokens.refreshToken': refreshToken });
-        }
-        
-        // If not found, check old flat structure
-        if (!user) {
-            user = await User.findOne({ refreshToken: refreshToken });
-        }
-        
-        // If not found, check refreshTokens array (new structure)
-        if (!user) {
-            user = await User.findOne({ 'auth.tokens.refreshTokens.token': refreshToken });
-        }
-        
-        // If not found, check old flat refreshTokens array
-        if (!user) {
-            // Try to find user by searching in old refreshTokens array
-            const users = await User.find({ refreshTokens: { $exists: true } });
-            user = users.find(u => {
-                if (Array.isArray(u.refreshTokens)) {
-                    return u.refreshTokens.some(rt => (rt.token || rt) === refreshToken);
-                }
-                return false;
-            });
-        }
+        const user = await User.findOne({ 'auth.tokens.refreshTokens.token': refreshToken });
 
         if (!user) {
             return res.status(401).json({
@@ -1093,36 +1022,16 @@ const refreshToken = async (req, res) => {
             });
         }
 
-        // Check if token exists - support all structures
-        let tokenRecord = null;
-        if (user.auth?.tokens?.refreshTokens && Array.isArray(user.auth.tokens.refreshTokens)) {
-            // New nested structure - array
-            tokenRecord = user.auth.tokens.refreshTokens.find(rt => rt.token === refreshToken);
-        } else if (Array.isArray(user.refreshTokens)) {
-            // Old flat structure - array
-            tokenRecord = user.refreshTokens.find(rt => (rt.token || rt) === refreshToken);
-        }
-
-        // Check all possible single token fields
-        const singleToken = user.auth?.refreshToken || 
-                           user.auth?.tokens?.refreshToken || 
-                           user.refreshToken;
-        
-        if (!tokenRecord && singleToken === refreshToken) {
-            // Token found in single field - it's valid (no expiry check)
-            // Note: We no longer check expiry date - tokens only expire on explicit logout
-        } else if (tokenRecord) {
-            // Token found in array - it's valid (no expiry check)
-            // Tokens only expire when user explicitly logs out
-        } else {
+        const tokenRecord = user.auth?.tokens?.refreshTokens?.find(rt => rt.token === refreshToken);
+        if (!tokenRecord) {
             return res.status(401).json({
                 success: false,
                 message: 'Invalid refresh token'
             });
         }
 
-        // Generate new access token - support both old and new structure
-        const userEmail = user.profile?.email || user.email;
+        // Generate new access token
+        const userEmail = user.profile?.email || user.profile.email;
         const accessToken = generateAccessToken({ id: user._id, email: userEmail });
 
         res.status(200).json({
@@ -1193,25 +1102,8 @@ const logout = async (req, res) => {
                 
                 remainingDevices = user.auth.tokens.refreshTokens.length;
             }
-            
-            // Also clear single token if it matches
-            if (user.auth.refreshToken === refreshToken) {
-                if (!loggedOutDevice) {
-                    loggedOutDevice = {
-                        deviceName: 'Legacy Device',
-                        deviceType: 'Unknown',
-                        browser: 'Unknown',
-                        os: 'Unknown'
-                    };
-                }
-                user.auth.refreshToken = null;
-                user.auth.refreshTokenExpiry = null;
-            }
         } else {
             // If no specific token provided, clear all tokens (logout from all devices)
-            const totalDevices = (user.auth.tokens.refreshTokens?.length || 0) + (user.auth.refreshToken ? 1 : 0);
-            user.auth.refreshToken = null;
-            user.auth.refreshTokenExpiry = null;
             user.auth.tokens.refreshTokens = [];
             remainingDevices = 0;
         }
@@ -1313,8 +1205,6 @@ const updateProfile = async (req, res) => {
         if (profileImage !== undefined) {
             const trimmedProfileImage = profileImage.trim();
             allowedUpdates['profile.profileImage'] = trimmedProfileImage;
-            // Also update root-level for backward compatibility
-            allowedUpdates.profileImage = trimmedProfileImage;
         }
         
         // Handle age field - convert to dob if provided
@@ -1335,8 +1225,6 @@ const updateProfile = async (req, res) => {
         if (bio !== undefined) {
             const trimmedBio = bio.trim();
             allowedUpdates['profile.bio'] = trimmedBio;
-            // Also update root-level for backward compatibility
-            allowedUpdates.bio = trimmedBio;
         }
 
         // Handle currentCity
@@ -1478,10 +1366,12 @@ const updateProfile = async (req, res) => {
             // Validate each education entry and ensure institutions exist (if provided)
             const processedEducation = [];
             for (const edu of education) {
-                // Skip validation if institution or startYear are not provided (education is optional)
+                // Validate required fields for education entry
                 if (!edu.institution || !edu.startYear) {
-                    // Allow partial education entries - skip this entry if institution or startYear missing
-                    continue;
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Institution and startYear are required for each education entry'
+                    });
                 }
                 
                 if (isNaN(parseInt(edu.startYear)) || parseInt(edu.startYear) < 1900 || parseInt(edu.startYear) > new Date().getFullYear() + 10) {
@@ -1642,11 +1532,12 @@ const updateProfile = async (req, res) => {
             });
         }
 
-        // Update user using MongoDB $set for nested paths
-        await User.findByIdAndUpdate(user._id, { $set: allowedUpdates }, { new: true, runValidators: true });
-        
-        // Reload user to get updated data
-        const updatedUser = await User.findById(user._id);
+        // Update user using MongoDB $set for nested paths and get updated data in one query
+        const updatedUser = await User.findByIdAndUpdate(
+            user._id, 
+            { $set: allowedUpdates }, 
+            { new: true, runValidators: true }
+        ).lean();
         await updatedUser.populate('professional.workplace.company', 'name isCustom');
         await updatedUser.populate('professional.education.institution', 'name type city country logo verified isCustom');
 
@@ -1841,27 +1732,6 @@ const getDevices = async (req, res) => {
             });
         }
         
-        // Also check single refreshToken field for backward compatibility
-        if (user.auth?.refreshToken) {
-            const tokenPreview = user.auth.refreshToken.substring(0, 16);
-            const alreadyIncluded = devices.some(d => d.tokenId === tokenPreview);
-            
-            if (!alreadyIncluded) {
-                devices.push({
-                    deviceInfo: {
-                        deviceName: 'Legacy Device',
-                        deviceType: 'Unknown',
-                        browser: 'Unknown',
-                        os: 'Unknown',
-                        raw: 'Legacy Device'
-                    },
-                    loggedInAt: user.auth.refreshTokenExpiry || new Date(),
-                    isCurrentDevice: currentRefreshToken ? user.auth.refreshToken === currentRefreshToken : false,
-                    tokenId: tokenPreview
-                });
-            }
-        }
-
         // Sort by most recent first
         devices.sort((a, b) => new Date(b.loggedInAt) - new Date(a.loggedInAt));
 
@@ -1899,6 +1769,8 @@ module.exports = {
     updateProfile,
     refreshToken,
     logout,
-    getDevices
+    getDevices,
+    manageDeviceLimit
 };
+
 

@@ -865,4 +865,3 @@ module.exports = {
     cancelSentRequest,
     getFriendSuggestions
 };
-

@@ -28,12 +28,9 @@ const sendOTPForSignup = async (req, res) => {
             });
         }
         
-        // Check if user already exists - support both old and new structure
+        // Check if user already exists
         // Check with normalized email (trimmed and lowercase)
-        let existingUser = await User.findOne({ 'profile.email': normalizedEmail });
-        if (!existingUser) {
-            existingUser = await User.findOne({ email: normalizedEmail });
-        }
+        const existingUser = await User.findOne({ 'profile.email': normalizedEmail });
         if (existingUser) {
             return res.status(400).json({
                 success: false,

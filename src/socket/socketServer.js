@@ -36,7 +36,7 @@ const initSocketServer = async (httpServer) => {
 
             try {
                 const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-                const user = await User.findById(decoded.id).select('-password');
+                const user = await User.findById(decoded.id).select('-auth');
                 
                 if (!user) {
                     return next(new Error('Authentication error: User not found'));
@@ -123,18 +123,18 @@ const initSocketServer = async (httpServer) => {
                 }
 
                 // Check if current user has blocked any participant or vice versa
-                const currentUser = await User.findById(userId).select('blockedUsers');
+                const currentUser = await User.findById(userId).select('social.blockedUsers');
                 const otherParticipants = conversation.participants.filter(
                     p => p.toString() !== userId
                 );
 
                 for (const participantId of otherParticipants) {
-                    if (currentUser.blockedUsers && currentUser.blockedUsers.includes(participantId)) {
+                    if (currentUser.social?.blockedUsers && currentUser.social.blockedUsers.includes(participantId)) {
                         return socket.emit('error', { message: 'You cannot send messages to a blocked user' });
                     }
 
-                    const otherUser = await User.findById(participantId).select('blockedUsers');
-                    if (otherUser.blockedUsers && otherUser.blockedUsers.includes(userId)) {
+                    const otherUser = await User.findById(participantId).select('social.blockedUsers');
+                    if (otherUser.social?.blockedUsers && otherUser.social.blockedUsers.includes(userId)) {
                         return socket.emit('error', { message: 'Action not available' });
                     }
                 }
@@ -157,13 +157,13 @@ const initSocketServer = async (httpServer) => {
                 if (replyTo) messageData.replyTo = replyTo;
 
                 const message = await Message.create(messageData);
-                await message.populate('senderId', 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage');
+                await message.populate('senderId', 'profile.name.first profile.name.last profile.name.full profile.profileImage');
                 if (message.replyTo) {
                     await message.populate({
                         path: 'replyTo',
                         populate: {
                             path: 'senderId',
-                            select: 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage'
+                            select: 'profile.name.first profile.name.last profile.name.full profile.profileImage'
                         }
                     });
                 }
@@ -172,18 +172,13 @@ const initSocketServer = async (httpServer) => {
                 const messageObj = message.toObject();
                 const senderObj = messageObj.senderId?.toObject ? messageObj.senderId.toObject() : messageObj.senderId;
                 
-                // Extract name from profile structure (new) or flat fields (old) with fallback
+                // Extract name from profile structure
                 const senderName = senderObj?.profile?.name?.full || 
                                   (senderObj?.profile?.name?.first && senderObj?.profile?.name?.last 
                                       ? `${senderObj.profile.name.first} ${senderObj.profile.name.last}`.trim()
-                                      : senderObj?.profile?.name?.first || senderObj?.profile?.name?.last || 
-                                        senderObj?.name || 
-                                        (senderObj?.firstName || senderObj?.lastName 
-                                          ? `${senderObj.firstName || ''} ${senderObj.lastName || ''}`.trim()
-                                          : ''));
+                                      : senderObj?.profile?.name?.first || senderObj?.profile?.name?.last || '');
                 
-                // Extract profileImage from profile structure (new) or flat field (old) with fallback
-                const senderProfileImage = senderObj?.profile?.profileImage || senderObj?.profileImage || '';
+                const senderProfileImage = senderObj?.profile?.profileImage || '';
                 
                 const transformedMessage = {
                     ...messageObj,
@@ -320,4 +315,3 @@ module.exports = {
     initSocketServer,
     getIO
 };
-

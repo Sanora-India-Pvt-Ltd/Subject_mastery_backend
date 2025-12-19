@@ -1,89 +1,192 @@
 const express = require('express');
 const { protect } = require('../middleware/auth');
 const {
+    // Profile updates
     updateProfile,
-    sendOTPForPhoneUpdate,
-    verifyOTPAndUpdatePhone,
-    sendOTPForAlternatePhone,
-    verifyOTPAndUpdateAlternatePhone,
-    removeAlternatePhone,
-    updateProfileMedia,
-    updatePersonalInfo,
-    updateLocationAndDetails,
+    updateProfileVisibility,
+
+    // User search
     searchUsers,
+
+    // Education & Workplace (ID-based, not index-based)
     removeEducationEntry,
     removeWorkplaceEntry,
+
+    // Blocking
     blockUser,
     unblockUser,
     listBlockedUsers,
-    updateProfileVisibility,
-    getUserProfileById
+
+    // Profile retrieval
+    getUserProfileById,
+
+    // Phone OTP
+    sendOTPForPhoneUpdate,
+    verifyOTPAndUpdatePhone
 } = require('../controllers/userController');
+
 const { limitOTPRequests, limitVerifyRequests } = require('../middleware/rateLimiter');
 
 const router = express.Router();
 
-// All routes require authentication
+// ============================================================================
+// ALL ROUTES REQUIRE AUTHENTICATION
+// ============================================================================
 router.use(protect);
 
-// Get user profile by ID
-router.get('/:userId/profile', getUserProfileById);
+// ============================================================================
+// PROFILE MANAGEMENT
+// ============================================================================
 
-// Search users by name
+/**
+ * GET /api/user/search
+ * Search users by name with privacy/blocking checks
+ */
 router.get('/search', searchUsers);
 
-// More specific routes first to avoid conflicts
-// API 1: Update Bio, Cover Photo, Profile Image, and Cover Image
-router.put('/profile/media', updateProfileMedia);
+/**
+ * GET /api/user/:userId/profile
+ * Get user profile by ID (with privacy checks)
+ */
+router.get('/:userId/profile', getUserProfileById);
 
-// API 2: Update firstName, lastName, Gender, Date of Birth, phone number, alternate phone number
-router.put('/profile/personal-info', updatePersonalInfo);
-
-// API 3: Update currentCity, workplace, pronouns, education, relationshipStatus, hometown
-router.put('/profile/location-details', updateLocationAndDetails);
-
-// Update profile (name, age, gender) - no verification needed (less specific, comes after)
+/**
+ * PUT /api/user/profile
+ * Update user profile (all profile data)
+ * Body: { firstName, lastName, name, dob, gender, bio, currentCity, 
+ *         hometown, relationshipStatus, workplace, education, coverPhoto, pronouns }
+ */
 router.put('/profile', updateProfile);
 
-// Phone number update flow (requires OTP verification)
-router.post('/phone/send-otp', limitOTPRequests, sendOTPForPhoneUpdate);
-router.post('/phone/verify-otp', limitVerifyRequests, verifyOTPAndUpdatePhone);
-
-// Alternate phone number flow (requires OTP verification)
-router.post('/alternate-phone/send-otp', limitOTPRequests, sendOTPForAlternatePhone);
-router.post('/alternate-phone/verify-otp', limitVerifyRequests, verifyOTPAndUpdateAlternatePhone);
-router.delete('/alternate-phone', removeAlternatePhone);
-
-// Remove education and workplace entries
-router.delete('/education/:index', removeEducationEntry);
-router.delete('/workplace/:index', removeWorkplaceEntry);
-
-// Blocking functionality
-router.post('/block/:blockedUserId', blockUser);
-router.delete('/block/:blockedUserId', unblockUser);
-router.get('/blocked', listBlockedUsers);
-
-// Profile visibility (public/private)
+/**
+ * PUT /api/user/profile/visibility
+ * Update profile visibility (public/private)
+ * Body: { visibility: 'public' | 'private' }
+ */
 router.put('/profile/visibility', updateProfileVisibility);
 
-// Debug: Log all registered routes
-console.log('📋 User routes registered:');
-console.log('  GET    /api/user/search (protected)');
-console.log('  PUT    /api/user/profile (protected)');
-console.log('  POST   /api/user/phone/send-otp (protected)');
-console.log('  POST   /api/user/phone/verify-otp (protected)');
-console.log('  POST   /api/user/alternate-phone/send-otp (protected)');
-console.log('  POST   /api/user/alternate-phone/verify-otp (protected)');
-console.log('  DELETE /api/user/alternate-phone (protected)');
-console.log('  PUT    /api/user/profile/media (protected)');
-console.log('  PUT    /api/user/profile/personal-info (protected)');
-console.log('  PUT    /api/user/profile/location-details (protected)');
-console.log('  DELETE /api/user/education/:index (protected)');
-console.log('  DELETE /api/user/workplace/:index (protected)');
-console.log('  POST   /api/user/block/:blockedUserId (protected)');
-console.log('  DELETE /api/user/block/:blockedUserId (protected)');
-console.log('  GET    /api/user/blocked (protected)');
-console.log('  PUT    /api/user/profile/visibility (protected)');
+// ============================================================================
+// PHONE MANAGEMENT
+// ============================================================================
+
+/**
+ * POST /api/user/phone/send-otp
+ * Send OTP for phone number update
+ * Body: { phoneNumber: '+1234567890' }
+ */
+router.post('/phone/send-otp', limitOTPRequests, sendOTPForPhoneUpdate);
+
+/**
+ * POST /api/user/phone/verify-otp
+ * Verify OTP and update phone number
+ * Body: { phoneNumber: '+1234567890', otp: '123456' }
+ */
+router.post('/phone/verify-otp', limitVerifyRequests, verifyOTPAndUpdatePhone);
+
+// ============================================================================
+// EDUCATION MANAGEMENT
+// ============================================================================
+
+/**
+ * DELETE /api/user/education/:educationId
+ * Remove education entry by ID (not index)
+ * 
+ * ⚠️ BREAKING CHANGE FROM PREVIOUS VERSION:
+ * Previously: DELETE /api/user/education/0  (index-based)
+ * Now: DELETE /api/user/education/507f1f77bcf86cd799439011  (ID-based)
+ * 
+ * Migration:
+ * - Get education._id from the education object
+ * - Pass that _id in the URL instead of array index
+ * 
+ * Example:
+ * const user = await fetchUserProfile();
+ * const educationId = user.professional.education[0]._id;  // Get _id
+ * await fetch(`/api/user/education/${educationId}`, { method: 'DELETE' });
+ */
+router.delete('/education/:educationId', removeEducationEntry);
+
+// ============================================================================
+// WORKPLACE MANAGEMENT
+// ============================================================================
+
+/**
+ * DELETE /api/user/workplace/:workplaceId
+ * Remove workplace entry by ID (not index)
+ * 
+ * ⚠️ BREAKING CHANGE FROM PREVIOUS VERSION:
+ * Previously: DELETE /api/user/workplace/1  (index-based)
+ * Now: DELETE /api/user/workplace/507f1f77bcf86cd799439011  (ID-based)
+ * 
+ * Migration:
+ * - Get workplace._id from the workplace object
+ * - Pass that _id in the URL instead of array index
+ * 
+ * Example:
+ * const user = await fetchUserProfile();
+ * const workplaceId = user.professional.workplace[0]._id;  // Get _id
+ * await fetch(`/api/user/workplace/${workplaceId}`, { method: 'DELETE' });
+ */
+router.delete('/workplace/:workplaceId', removeWorkplaceEntry);
+
+// ============================================================================
+// BLOCKING & PRIVACY
+// ============================================================================
+
+/**
+ * POST /api/user/block/:blockedUserId
+ * Block a user
+ * 
+ * Adds user to social.blockedUsers
+ * Removes user from social.friends (if they were friends)
+ * Cancels any pending friend requests
+ */
+router.post('/block/:blockedUserId', blockUser);
+
+/**
+ * DELETE /api/user/block/:blockedUserId
+ * Unblock a user
+ * 
+ * Removes user from social.blockedUsers
+ */
+router.delete('/block/:blockedUserId', unblockUser);
+
+/**
+ * GET /api/user/blocked
+ * Get list of all blocked users
+ */
+router.get('/blocked', listBlockedUsers);
+
+// ============================================================================
+// ROUTE SUMMARY & DEBUG
+// ============================================================================
+
+console.log('📋 User Routes Registered:');
+console.log('');
+console.log('📖 PROFILE MANAGEMENT');
+console.log('  GET    /api/user/search                       - Search users by name');
+console.log('  GET    /api/user/:userId/profile              - Get user profile');
+console.log('  PUT    /api/user/profile                      - Update all profile data');
+console.log('  PUT    /api/user/profile/visibility           - Update profile visibility');
+console.log('');
+console.log('📱 PHONE MANAGEMENT');
+console.log('  POST   /api/user/phone/send-otp               - Send OTP for phone update');
+console.log('  POST   /api/user/phone/verify-otp             - Verify OTP & update phone');
+console.log('');
+console.log('🎓 EDUCATION (ID-BASED)');
+console.log('  DELETE /api/user/education/:educationId       - Remove education by _id');
+console.log('  ⚠️  Changed from index-based to ID-based');
+console.log('  Example: DELETE /api/user/education/507f1f77bcf86cd799439011');
+console.log('');
+console.log('💼 WORKPLACE (ID-BASED)');
+console.log('  DELETE /api/user/workplace/:workplaceId       - Remove workplace by _id');
+console.log('  ⚠️  Changed from index-based to ID-based');
+console.log('  Example: DELETE /api/user/workplace/507f1f77bcf86cd799439011');
+console.log('');
+console.log('🚫 BLOCKING & PRIVACY');
+console.log('  POST   /api/user/block/:blockedUserId         - Block a user');
+console.log('  DELETE /api/user/block/:blockedUserId         - Unblock a user');
+console.log('  GET    /api/user/blocked                      - List blocked users');
+console.log('');
 
 module.exports = router;
-

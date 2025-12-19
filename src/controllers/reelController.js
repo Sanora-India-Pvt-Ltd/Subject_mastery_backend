@@ -7,19 +7,14 @@ const { transcodeVideo, isVideo, cleanupFile } = require('../services/videoTrans
 const fs = require('fs').promises;
 const { Report, REPORT_REASONS } = require('../models/Report');
 
-// Helper function to get all blocked user IDs (checks both root and social.blockedUsers)
+// Helper function to get all blocked user IDs
 const getBlockedUserIds = async (userId) => {
     try {
-        const user = await User.findById(userId).select('blockedUsers social.blockedUsers');
+        const user = await User.findById(userId).select('social.blockedUsers');
         if (!user) return [];
         
-        // Get blocked users from both locations
-        const rootBlocked = user.blockedUsers || [];
-        const socialBlocked = user.social?.blockedUsers || [];
-        
-        // Combine and deduplicate
-        const allBlocked = [...rootBlocked, ...socialBlocked];
-        const uniqueBlocked = [...new Set(allBlocked.map(id => id.toString()))];
+        const blockedUsers = user.social?.blockedUsers || [];
+        const uniqueBlocked = [...new Set(blockedUsers.map(id => id.toString()))];
         
         return uniqueBlocked.map(id => mongoose.Types.ObjectId(id));
     } catch (error) {
@@ -28,7 +23,7 @@ const getBlockedUserIds = async (userId) => {
     }
 };
 
-// Helper function to check if a user is blocked (checks both locations)
+// Helper function to check if a user is blocked
 const isUserBlocked = async (blockerId, blockedId) => {
     try {
         const blockedUserIds = await getBlockedUserIds(blockerId);
@@ -579,7 +574,7 @@ const getReels = async (req, res) => {
         let blockedUserIds = [];
         
         if (userId) {
-            // Get current user's blocked users (from both locations)
+            // Get current user's blocked users
             blockedUserIds = await getBlockedUserIds(userId);
 
             // Get all reel IDs that the user has reported
@@ -594,12 +589,9 @@ const getReels = async (req, res) => {
                 query._id = { $nin: excludeIds };
             }
 
-            // Get users who have blocked the current user (check both locations)
+            // Get users who have blocked the current user
             const usersWhoBlockedMe = await User.find({
-                $or: [
-                    { blockedUsers: userId },
-                    { 'social.blockedUsers': userId }
-                ]
+                'social.blockedUsers': userId
             }).select('_id').lean();
             const blockedByUserIds = usersWhoBlockedMe.map(u => u._id);
 
@@ -613,7 +605,7 @@ const getReels = async (req, res) => {
         // Get reels sorted by newest first
         // We need to populate profile.visibility to check privacy
         const reels = await Reel.find(query)
-            .populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage profile.visibility social.friends friends')
+            .populate('userId', 'profile.name.first profile.name.last profile.name.full profile.email profile.profileImage profile.visibility social.friends')
             .populate('comments.userId', 'profile.name.first profile.name.last profile.name.full profile.profileImage')
             .sort({ createdAt: -1 })
             .skip(skip)
@@ -633,13 +625,13 @@ const getReels = async (req, res) => {
                     continue;
                 }
 
-                // Check if viewing user has blocked the reel owner (check both locations)
+                // Check if viewing user has blocked the reel owner
                 const viewerBlocked = await isUserBlocked(userId, reelUserId);
                 if (viewerBlocked) {
                     continue; // Viewer has blocked the reel owner, skip
                 }
 
-                // Check if reel owner has blocked the viewing user (check both locations)
+                // Check if reel owner has blocked the viewing user
                 const ownerBlocked = await isUserBlocked(reelUserId, userId);
                 if (ownerBlocked) {
                     continue; // Reel owner has blocked the viewer, skip
@@ -647,7 +639,7 @@ const getReels = async (req, res) => {
             }
             
             // Check if profile is private
-            const postOwner = await User.findById(reelUserId).select('profile.visibility social.friends friends');
+            const postOwner = await User.findById(reelUserId).select('profile.visibility social.friends');
             if (!postOwner) continue;
 
             const isProfilePrivate = postOwner.profile?.visibility === 'private';
@@ -661,7 +653,7 @@ const getReels = async (req, res) => {
 
             // If profile is private, check if viewer is a friend
             if (userId) {
-                const friendsList = postOwner.social?.friends || postOwner.friends || [];
+                const friendsList = postOwner.social?.friends || [];
                 const isFriend = friendsList.some(friendId => 
                     friendId.toString() === userId.toString()
                 );
@@ -746,7 +738,7 @@ const getUserReels = async (req, res) => {
         }
 
         // Check if user exists
-        const user = await User.findById(id).select('profile.visibility social.friends friends blockedUsers');
+        const user = await User.findById(id).select('profile.visibility social.friends social.blockedUsers');
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -759,7 +751,7 @@ const getUserReels = async (req, res) => {
 
         // Check if viewing user is blocked by the reel owner or vice versa
         if (viewingUserId) {
-            // Check if viewing user has blocked the reel owner (check both locations)
+            // Check if viewing user has blocked the reel owner
             const viewingUserBlocked = await isUserBlocked(viewingUserId, id);
             if (viewingUserBlocked) {
                 return res.status(403).json({
@@ -768,7 +760,7 @@ const getUserReels = async (req, res) => {
                 });
             }
 
-            // Check if reel owner has blocked the viewing user (check both locations)
+            // Check if reel owner has blocked the viewing user
             const ownerBlocked = await isUserBlocked(id, viewingUserId);
             if (ownerBlocked) {
                 return res.status(403).json({
@@ -780,7 +772,7 @@ const getUserReels = async (req, res) => {
             // Check privacy settings: if profile is private and viewer is not a friend, deny access
             const isProfilePrivate = user.profile?.visibility === 'private';
             if (isProfilePrivate) {
-                const friendsList = user.social?.friends || user.friends || [];
+                const friendsList = user.social?.friends || [];
                 const isFriend = friendsList.some(friendId => 
                     friendId.toString() === viewingUserId.toString()
                 );
@@ -1493,4 +1485,3 @@ module.exports = {
     deleteReel,
     reportReel
 };
-

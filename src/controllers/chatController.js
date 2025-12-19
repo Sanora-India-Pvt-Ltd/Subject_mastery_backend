@@ -738,4 +738,3 @@ module.exports = {
     getUnreadCount
 };
 
-

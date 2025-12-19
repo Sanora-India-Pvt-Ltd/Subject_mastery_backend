@@ -376,7 +376,7 @@ Authorization: Bearer <access_token>
 ## Update User
 
 ### Update Profile
-**Endpoint:** `PUT /api/auth/profile`
+**Endpoint:** `PUT /api/user/profile`
 
 **Description:** Update user profile information.
 
@@ -390,12 +390,14 @@ Authorization: Bearer <access_token>
 {
   "firstName": "John",
   "lastName": "Doe",
+  "name": "John Doe",
   "gender": "Male",
   "dob": "1990-01-01",
   "bio": "Updated bio",
   "currentCity": "New York",
   "hometown": "Boston",
   "relationshipStatus": "Single",
+  "coverPhoto": "url_to_cover",
   "workplace": [
     {
       "company": "company_id_or_name",
@@ -424,6 +426,7 @@ Authorization: Bearer <access_token>
 - `workplace.company`: Can be company ID (ObjectId) or company name (string)
 - `education.institution`: Can be institution ID (ObjectId) or institution name (string)
 - `education.institutionType`: One of: `school`, `college`, `university`, `others`
+- `workplace` and `education` replace the full arrays; include existing entries if you want to keep them
 
 **Response:**
 ```json
@@ -444,136 +447,10 @@ Authorization: Bearer <access_token>
 
 ---
 
-### Update Profile Media
-**Endpoint:** `PUT /api/user/profile/media`
-
-**Description:** Update profile image, cover photo, and bio.
-
-**Headers:**
-```
-Authorization: Bearer <access_token>
-```
-
-**Request Body:**
-```json
-{
-  "profileImage": "url_to_image",
-  "coverPhoto": "url_to_cover",
-  "bio": "Updated bio text"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Profile media updated successfully",
-  "data": {
-    "user": {
-      // User object with updated media fields
-    }
-  }
-}
-```
-
----
-
-### Update Personal Info
-**Endpoint:** `PUT /api/user/profile/personal-info`
-
-**Description:** Update personal information (name, gender, DOB, phone numbers).
-
-**Headers:**
-```
-Authorization: Bearer <access_token>
-```
-
-**Request Body:**
-```json
-{
-  "firstName": "John",
-  "lastName": "Doe",
-  "gender": "Male",
-  "dob": "1990-01-01",
-  "phoneNumber": "+1234567890",
-  "alternatePhoneNumber": "+0987654321"
-}
-```
-
-**Note:** Phone number updates require OTP verification (see Phone Update section).
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Personal info updated successfully",
-  "data": {
-    "user": {
-      // User object with updated personal info
-    }
-  }
-}
-```
-
----
-
-### Update Location and Details
-**Endpoint:** `PUT /api/user/profile/location-details`
-
-**Description:** Update location, workplace, education, pronouns, and relationship status.
-
-**Headers:**
-```
-Authorization: Bearer <access_token>
-```
-
-**Request Body:**
-```json
-{
-  "currentCity": "New York",
-  "hometown": "Boston",
-  "pronouns": "He/Him",
-  "relationshipStatus": "Single",
-  "workplace": [
-    {
-      "company": "company_id_or_name",
-      "position": "Software Engineer",
-      "startDate": "2020-01-01",
-      "endDate": null,
-      "isCurrent": true
-    }
-  ],
-  "education": [
-    {
-      "institution": "institution_id_or_name",
-      "degree": "Bachelor's",
-      "field": "Computer Science",
-      "startYear": 2016,
-      "endYear": 2020
-    }
-  ]
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Location and details updated successfully",
-  "data": {
-    "user": {
-      // User object with updated fields
-    }
-  }
-}
-```
-
----
-
 ### Remove Education Entry
-**Endpoint:** `DELETE /api/user/education/:index`
+**Endpoint:** `DELETE /api/user/education/:educationId`
 
-**Description:** Remove an education entry by index (0-based).
+**Description:** Remove an education entry by ID.
 
 **Headers:**
 ```
@@ -591,9 +468,9 @@ Authorization: Bearer <access_token>
 ---
 
 ### Remove Workplace Entry
-**Endpoint:** `DELETE /api/user/workplace/:index`
+**Endpoint:** `DELETE /api/user/workplace/:workplaceId`
 
-**Description:** Remove a workplace entry by index (0-based).
+**Description:** Remove a workplace entry by ID.
 
 **Headers:**
 ```

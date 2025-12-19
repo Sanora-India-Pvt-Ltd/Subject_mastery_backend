@@ -36,6 +36,7 @@
     "mongodb": "^6.0.0",
     "mongoose": "^9.0.0",
     "multer": "^2.0.2",
+    "node-cache": "^5.1.2",
     "nodemailer": "^7.0.11",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
