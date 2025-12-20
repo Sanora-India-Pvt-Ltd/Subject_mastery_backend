@@ -458,7 +458,7 @@ const getAllPosts = async (req, res) => {
         console.error('Get all posts error:', error);
         return res.status(500).json({
             success: false,
-            message: 'Failed to retrieve posts',
+            message: 'Failed to retrieve postss',
             error: error.message
         });
     }
