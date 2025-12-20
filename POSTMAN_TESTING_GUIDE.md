@@ -46,43 +46,7 @@ Content-Type: application/json
 
 ## Step 2: Test Post Endpoints
 
-### 1. Upload Post Media (Optional - for posts with images/videos)
-
-**Method:** `POST`  
-**URL:** `http://localhost:3100/api/posts/upload-media`
-
-**Headers:**
-```
-Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
-```
-
-**Body:**
-- Select **form-data** (not raw)
-- Add a key named `media`
-- Change the type from "Text" to **"File"** (click the dropdown next to the key)
-- Click "Select Files" and choose an image or video file
-
-**Expected Response (200):**
-```json
-{
-  "success": true,
-  "message": "Media uploaded successfully",
-  "data": {
-    "url": "https://res.cloudinary.com/...",
-    "publicId": "user_uploads/user_id/posts/abc123",
-    "type": "image",
-    "format": "jpg",
-    "fileSize": 245678,
-    "mediaId": "media_record_id"
-  }
-}
-```
-
-**Save the `url`, `publicId`, and `type` for the next step!**
-
----
-
-### 2. Create Post
+### 1. Create Post
 
 #### Option A: Text-Only Post
 
@@ -92,15 +56,11 @@ Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
 **Headers:**
 ```
 Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
-Content-Type: application/json
 ```
 
-**Body (raw JSON):**
-```json
-{
-  "caption": "This is my first post! 🎉"
-}
-```
+**Body:**
+- Select **form-data** (not raw)
+- Add a key named `caption`
 
 #### Option B: Post with Media
 
@@ -110,23 +70,12 @@ Content-Type: application/json
 **Headers:**
 ```
 Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
-Content-Type: application/json
 ```
 
-**Body (raw JSON):**
-```json
-{
-  "caption": "Check out this amazing sunset! 🌅",
-  "mediaUrls": [
-    {
-      "url": "PASTE_URL_FROM_UPLOAD_STEP",
-      "publicId": "PASTE_PUBLIC_ID_FROM_UPLOAD_STEP",
-      "type": "PASTE_TYPE_FROM_UPLOAD_STEP",
-      "format": "jpg"
-    }
-  ]
-}
-```
+**Body:**
+- Select **form-data** (not raw)
+- Add a key named `caption` (optional)
+- Add a key named `media` and set type to **File**
 
 #### Option C: Multiple Media (Carousel Post)
 
@@ -136,29 +85,13 @@ Content-Type: application/json
 **Headers:**
 ```
 Authorization: Bearer YOUR_ACCESS_TOKEN_HERE
-Content-Type: application/json
 ```
 
-**Body (raw JSON):**
-```json
-{
-  "caption": "Multiple photos from my trip! 📸",
-  "mediaUrls": [
-    {
-      "url": "FIRST_IMAGE_URL",
-      "publicId": "FIRST_PUBLIC_ID",
-      "type": "image",
-      "format": "jpg"
-    },
-    {
-      "url": "SECOND_IMAGE_URL",
-      "publicId": "SECOND_PUBLIC_ID",
-      "type": "image",
-      "format": "jpg"
-    }
-  ]
-}
-```
+**Body:**
+- Select **form-data** (not raw)
+- Add a key named `caption` (optional)
+- Add multiple `media` keys (each set to **File**) to upload up to 10 files
+
 
 **Expected Response (201):**
 ```json
@@ -191,7 +124,7 @@ Content-Type: application/json
 
 ---
 
-### 3. Get All Posts (Feed)
+### 2. Get All Posts (Feed)
 
 **Method:** `GET`  
 **URL:** `http://localhost:3100/api/posts/all?page=1&limit=10`
@@ -235,7 +168,7 @@ Content-Type: application/json
 
 ---
 
-### 4. Get User Posts
+### 3. Get User Posts
 
 **Method:** `GET`  
 **URL:** `http://localhost:3100/api/posts/user/USER_ID_HERE?page=1&limit=10`
@@ -304,10 +237,10 @@ Instead of hardcoding, use:
 **Solution:** Make sure you're using a valid access token in the Authorization header
 
 ### Issue: "400 Bad Request - Post must have either caption or media"
-**Solution:** Ensure you provide at least a caption OR mediaUrls (or both)
+**Solution:** Ensure you provide at least a caption or media file(s) (or both)
 
 ### Issue: "400 Bad Request - Each media item must have url, publicId, and type"
-**Solution:** Make sure your mediaUrls array items have all required fields from the upload response
+**Solution:** Make sure you attach files under the `media` key with type set to "File"
 
 ### Issue: Media upload fails
 **Solution:** 
@@ -319,11 +252,10 @@ Instead of hardcoding, use:
 
 ## Quick Test Flow
 
-1. **Login** → Get access token
-2. **Upload Media** (optional) → Get media URL, publicId, type
-3. **Create Post** → Use media data from step 2 (or just caption)
-4. **Get All Posts** → Verify your post appears
-5. **Get User Posts** → Verify your post appears in your user's posts
+1. **Login** ?+' Get access token
+2. **Create Post** ?+' Use caption and/or media files in one request
+3. **Get All Posts** ?+' Verify your post appears
+4. **Get User Posts** ?+' Verify your post appears in your user's posts
 
 ---
 
@@ -334,22 +266,20 @@ Instead of hardcoding, use:
 - Should succeed ✅
 
 ### Test Case 2: Media-Only Post
-- Upload media first
-- Create post with only `mediaUrls` (no caption)
-- Should succeed ✅
+- Create post with only media files (no caption)
+- Should succeed ?o.
 
 ### Test Case 3: Post with Both Caption and Media
-- Upload media first
-- Create post with both `caption` and `mediaUrls`
-- Should succeed ✅
+- Create post with both `caption` and media files
+- Should succeed ?o.
 
 ### Test Case 4: Empty Post (Should Fail)
-- Try to create post with no caption and no mediaUrls
-- Should return 400 error ❌
+- Try to create post with no caption and no media files
+- Should return 400 error ??O
 
 ### Test Case 5: Invalid Media Structure (Should Fail)
-- Create post with mediaUrls missing required fields
-- Should return 400 error ❌
+- Try uploading an unsupported file type or missing media files
+- Should return 400 error ??O
 
 ---
 

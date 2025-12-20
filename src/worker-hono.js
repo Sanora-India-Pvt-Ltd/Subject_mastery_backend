@@ -70,12 +70,122 @@ authRoutes.post('/login', async (c) => {
 
 app.route('/api/auth', authRoutes);
 
+// Chat routes
+// Note: These routes require the Express backend with Mongoose support
+// If you're using Cloudflare Workers, you may need to proxy to your Express server
+// or refactor to use MongoDB native driver instead of Mongoose
+const chatRoutes = new Hono();
+
+// Authentication middleware for Hono (similar to Express protect middleware)
+const protectChat = async (c, next) => {
+  try {
+    const authHeader = c.req.header('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return c.json({
+        success: false,
+        message: 'Not authorized to access this route'
+      }, 401);
+    }
+    
+    const token = authHeader.split(' ')[1];
+    // TODO: Verify JWT token and set c.set('user', user)
+    // For now, we'll need to import JWT verification logic
+    // This is a placeholder - you'll need to implement full auth
+    
+    await next();
+  } catch (error) {
+    return c.json({
+      success: false,
+      message: 'Not authorized, token failed'
+    }, 401);
+  }
+};
+
+// Apply auth middleware to all chat routes
+chatRoutes.use('*', protectChat);
+
+// Get all conversations for the authenticated user
+chatRoutes.get('/conversations', async (c) => {
+  // TODO: Implement using MongoDB native driver or proxy to Express backend
+  // For now, return a helpful error
+  return c.json({
+    success: false,
+    message: 'Chat routes are not fully implemented in Cloudflare Workers yet',
+    hint: 'This endpoint requires Mongoose models. Consider proxying to your Express backend or refactoring to use MongoDB native driver.',
+    path: c.req.path
+  }, 501);
+});
+
+// Get or create a conversation with a specific user
+chatRoutes.get('/conversation/:participantId', async (c) => {
+  return c.json({
+    success: false,
+    message: 'Chat routes are not fully implemented in Cloudflare Workers yet',
+    hint: 'This endpoint requires Mongoose models. Consider proxying to your Express backend or refactoring to use MongoDB native driver.',
+    path: c.req.path
+  }, 501);
+});
+
+// Get messages for a conversation
+chatRoutes.get('/conversation/:conversationId/messages', async (c) => {
+  return c.json({
+    success: false,
+    message: 'Chat routes are not fully implemented in Cloudflare Workers yet',
+    hint: 'This endpoint requires Mongoose models. Consider proxying to your Express backend or refactoring to use MongoDB native driver.',
+    path: c.req.path
+  }, 501);
+});
+
+// Send a message
+chatRoutes.post('/message', async (c) => {
+  return c.json({
+    success: false,
+    message: 'Chat routes are not fully implemented in Cloudflare Workers yet',
+    hint: 'This endpoint requires Mongoose models. Consider proxying to your Express backend or refactoring to use MongoDB native driver.',
+    path: c.req.path
+  }, 501);
+});
+
+// Delete a message
+chatRoutes.delete('/message/:messageId', async (c) => {
+  return c.json({
+    success: false,
+    message: 'Chat routes are not fully implemented in Cloudflare Workers yet',
+    hint: 'This endpoint requires Mongoose models. Consider proxying to your Express backend or refactoring to use MongoDB native driver.',
+    path: c.req.path
+  }, 501);
+});
+
+// Mark messages as read
+chatRoutes.post('/messages/read', async (c) => {
+  return c.json({
+    success: false,
+    message: 'Chat routes are not fully implemented in Cloudflare Workers yet',
+    hint: 'This endpoint requires Mongoose models. Consider proxying to your Express backend or refactoring to use MongoDB native driver.',
+    path: c.req.path
+  }, 501);
+});
+
+// Get unread message count
+chatRoutes.get('/unread-count', async (c) => {
+  return c.json({
+    success: false,
+    message: 'Chat routes are not fully implemented in Cloudflare Workers yet',
+    hint: 'This endpoint requires Mongoose models. Consider proxying to your Express backend or refactoring to use MongoDB native driver.',
+    path: c.req.path
+  }, 501);
+});
+
+app.route('/api/chat', chatRoutes);
+
 // 404 handler
 app.notFound((c) => {
   return c.json({
     success: false,
     message: 'Route not found',
-    path: c.req.path
+    method: c.req.method,
+    path: c.req.path,
+    hint: 'Make sure you are using the correct HTTP method and path.'
   }, 404);
 });
 
