@@ -2,6 +2,21 @@
 
 This guide describes the current authentication and account APIs for frontend usage.
 
+## Table of Contents
+1. [Base URL](#base-url)
+2. [Authentication Header](#authentication-header)
+3. [Standard Response Shape](#standard-response-shape)
+4. [Signup Flow (Email + Phone OTP Required)](#signup-flow-email--phone-otp-required)
+5. [Login](#login)
+6. [Refresh Access Token](#refresh-access-token)
+7. [Logout](#logout)
+8. [Devices](#devices)
+9. [Password Reset Flow](#password-reset-flow)
+10. [Profile and Account](#profile-and-account)
+11. [Media Uploads (Profile and User Media)](#media-uploads-profile-and-user-media)
+12. [Institutions and Companies](#institutions-and-companies)
+13. [Notes for Frontend Integration](#notes-for-frontend-integration)
+
 ## Base URL
 Use your environment configuration for the API origin.
 

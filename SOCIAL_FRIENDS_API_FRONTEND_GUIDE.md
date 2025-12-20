@@ -2,6 +2,20 @@
 
 This guide covers posts, reels, reactions, comments, reporting, blocking, and friend features.
 
+## Table of Contents
+1. [Base URL](#base-url)
+2. [Authentication Header](#authentication-header)
+3. [Standard Response Shape](#standard-response-shape)
+4. [Reaction Types](#reaction-types)
+5. [Posts](#posts)
+6. [Reels](#reels)
+7. [Reactions API (Alternate Endpoints)](#reactions-api-alternate-endpoints)
+8. [User Search and Profiles](#user-search-and-profiles)
+9. [Blocking](#blocking)
+10. [Friend Requests and Friends](#friend-requests-and-friends)
+11. [Report a User](#report-a-user)
+12. [Notes for Frontend Integration](#notes-for-frontend-integration)
+
 ## Base URL
 Use your environment configuration for the API origin.
 
