@@ -614,6 +614,9 @@ const getReels = async (req, res) => {
         // Filter reels based on privacy settings and blocking
         const visibleReels = [];
         for (const reel of reels) {
+            if (!reel.userId) {
+                continue;
+            }
             const reelUserId = reel.userId._id ? reel.userId._id : reel.userId;
             
             // If viewing user is authenticated, check blocking in both directions
@@ -674,6 +677,9 @@ const getReels = async (req, res) => {
             message: 'Reels retrieved successfully',
             data: {
                 reels: visibleReels.map(reel => {
+                    if (!reel.userId) {
+                        return null;
+                    }
                     const userIdString = reel.userId._id ? reel.userId._id.toString() : reel.userId.toString();
                     const userInfo = reel.userId._id ? {
                         id: reel.userId._id.toString(),
@@ -700,7 +706,7 @@ const getReels = async (req, res) => {
                         createdAt: reel.createdAt,
                         updatedAt: reel.updatedAt
                     };
-                }),
+                }).filter(Boolean),
                 pagination: {
                     currentPage: page,
                     totalPages: Math.ceil(totalReels / limit),
