@@ -3,6 +3,7 @@ const User = require('../models/User');
 const cloudinary = require('../config/cloudinary');
 const Media = require('../models/Media');
 const mongoose = require('mongoose');
+const Like = require('../models/Like');
 const { transcodeVideo, isVideo, cleanupFile } = require('../services/videoTranscoder');
 const { Report, REPORT_REASONS } = require('../models/Report');
 
@@ -391,6 +392,9 @@ const getAllPosts = async (req, res) => {
         // Filter posts based on privacy settings and add like counts
         const visiblePosts = [];
         for (const post of posts) {
+            if (!post.userId) {
+                continue;
+            }
             const postUserId = post.userId._id ? post.userId._id : post.userId;
             const isVisible = await isPostVisible(postUserId, userId);
             
@@ -413,6 +417,9 @@ const getAllPosts = async (req, res) => {
             message: 'Posts retrieved successfully',
             data: {
                 posts: visiblePosts.map(post => {
+                    if (!post.userId) {
+                        return null;
+                    }
                     const userIdString = post.userId._id ? post.userId._id.toString() : post.userId.toString();
                     const userInfo = post.userId._id ? {
                         id: post.userId._id.toString(),
@@ -436,7 +443,7 @@ const getAllPosts = async (req, res) => {
                         createdAt: post.createdAt,
                         updatedAt: post.updatedAt
                     };
-                }),
+                }).filter(Boolean),
                 pagination: {
                     currentPage: page,
                     totalPages: Math.ceil(totalPosts / limit),
