@@ -9,7 +9,8 @@ const {
     sendMessage,
     deleteMessage,
     markMessagesAsRead,
-    getUnreadCount
+    getUnreadCount,
+    createGroup
 } = require('../controllers/chatController');
 
 // All routes require authentication
@@ -20,6 +21,9 @@ router.get('/conversations', getConversations);
 
 // Get or create a conversation with a specific user
 router.get('/conversation/:participantId', limitConversationRequests, getOrCreateConversation);
+
+// Create a group conversation
+router.post('/group', createGroup);
 
 // Get messages for a conversation
 router.get('/conversation/:conversationId/messages', getMessages);

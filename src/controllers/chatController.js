@@ -728,6 +728,160 @@ const getUnreadCount = async (req, res) => {
     }
 };
 
+// Create a group conversation
+const createGroup = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { groupName, participants, groupImage } = req.body;
+
+        // Validate group name
+        if (!groupName || typeof groupName !== 'string' || groupName.trim() === '') {
+            return res.status(400).json({
+                success: false,
+                message: 'Group name is required'
+            });
+        }
+
+        // Validate participants
+        if (!participants || !Array.isArray(participants) || participants.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'At least one participant is required'
+            });
+        }
+
+        // Remove duplicates and ensure creator is included
+        const uniqueParticipantIds = [...new Set(participants.map(id => id.toString()))];
+        
+        // Remove creator from participants array if present (will add them separately)
+        const participantIds = uniqueParticipantIds
+            .filter(id => id !== userId.toString())
+            .map(id => mongoose.Types.ObjectId(id));
+
+        // Validate all participants exist
+        const existingUsers = await User.find({
+            _id: { $in: participantIds }
+        }).select('_id');
+
+        const existingUserIds = existingUsers.map(u => u._id.toString());
+        const invalidParticipantIds = participantIds.filter(
+            id => !existingUserIds.includes(id.toString())
+        );
+
+        if (invalidParticipantIds.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'One or more participants not found',
+                invalidIds: invalidParticipantIds.map(id => id.toString())
+            });
+        }
+
+        // Check for blocked users (check both locations)
+        const blockedUserIds = await getBlockedUserIds(userId);
+        const blockedParticipants = participantIds.filter(
+            id => blockedUserIds.some(blockedId => blockedId.toString() === id.toString())
+        );
+
+        if (blockedParticipants.length > 0) {
+            return res.status(403).json({
+                success: false,
+                message: 'Cannot add blocked users to group',
+                blockedIds: blockedParticipants.map(id => id.toString())
+            });
+        }
+
+        // Check if any participant has blocked the creator
+        for (const participantId of participantIds) {
+            const participantBlocked = await isUserBlocked(participantId, userId);
+            if (participantBlocked) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Cannot create group with users who have blocked you'
+                });
+            }
+        }
+
+        // Create group conversation with creator as first participant
+        const allParticipants = [userId, ...participantIds];
+        
+        const groupConversation = await Conversation.create({
+            participants: allParticipants,
+            isGroup: true,
+            groupName: groupName.trim(),
+            groupImage: groupImage && groupImage.trim() !== '' ? groupImage.trim() : null,
+            createdBy: userId
+        });
+
+        // Populate participants and creator
+        await groupConversation.populate('participants', 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage');
+        await groupConversation.populate('createdBy', 'profile.name.first profile.name.last profile.name.full profile.profileImage');
+
+        // Add online status for participants
+        const participantsWithStatus = await Promise.all(
+            groupConversation.participants.map(async (participant) => {
+                const online = await isUserOnline(participant._id.toString());
+                const lastSeen = await getUserLastSeen(participant._id.toString());
+                
+                const participantObj = participant.toObject ? participant.toObject() : participant;
+                
+                // Extract name from profile structure (new) or flat fields (old) with fallback
+                const name = participantObj.profile?.name?.full || 
+                            (participantObj.profile?.name?.first && participantObj.profile?.name?.last 
+                                ? `${participantObj.profile.name.first} ${participantObj.profile.name.last}`.trim()
+                                : participantObj.profile?.name?.first || participantObj.profile?.name?.last || 
+                                  participantObj.name || 
+                                  (participantObj.firstName || participantObj.lastName 
+                                    ? `${participantObj.firstName || ''} ${participantObj.lastName || ''}`.trim()
+                                    : ''));
+                
+                // Extract profileImage from profile structure (new) or flat field (old) with fallback
+                const profileImage = participantObj.profile?.profileImage || participantObj.profileImage || '';
+                
+                return {
+                    _id: participantObj._id,
+                    name: name,
+                    profileImage: profileImage,
+                    isOnline: online,
+                    lastSeen: lastSeen
+                };
+            })
+        );
+
+        // Extract creator name and profileImage
+        const creatorObj = groupConversation.createdBy?.toObject ? groupConversation.createdBy.toObject() : groupConversation.createdBy;
+        const creatorName = creatorObj?.profile?.name?.full || 
+                          (creatorObj?.profile?.name?.first && creatorObj?.profile?.name?.last 
+                              ? `${creatorObj.profile.name.first} ${creatorObj.profile.name.last}`.trim()
+                              : creatorObj?.profile?.name?.first || creatorObj?.profile?.name?.last || 
+                                creatorObj?.name || 
+                                (creatorObj?.firstName || creatorObj?.lastName 
+                                  ? `${creatorObj.firstName || ''} ${creatorObj.lastName || ''}`.trim()
+                                  : ''));
+        const creatorProfileImage = creatorObj?.profile?.profileImage || creatorObj?.profileImage || '';
+
+        res.status(201).json({
+            success: true,
+            message: 'Group created successfully',
+            data: {
+                ...groupConversation.toObject(),
+                participants: participantsWithStatus,
+                createdBy: creatorObj ? {
+                    _id: creatorObj._id,
+                    name: creatorName,
+                    profileImage: creatorProfileImage
+                } : null
+            }
+        });
+    } catch (error) {
+        console.error('Create group error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to create group',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     getConversations,
     getOrCreateConversation,
@@ -735,6 +889,7 @@ module.exports = {
     sendMessage,
     deleteMessage,
     markMessagesAsRead,
-    getUnreadCount
+    getUnreadCount,
+    createGroup
 };
 

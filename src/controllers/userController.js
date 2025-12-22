@@ -2814,13 +2814,12 @@ const blockUser = async (req, res) => {
         }
 
         // Add to blocked users list
+        // MongoDB will automatically create the parent path if it doesn't exist
         await User.findByIdAndUpdate(userId, {
             $addToSet: { 
                 'social.blockedUsers': blockedUserId
-            },
-            // Ensure social object exists
-            $setOnInsert: { social: {} }
-        }).lean();
+            }
+        });
 
         // Remove from friends list if they are friends (both directions)
         await User.findByIdAndUpdate(userId, {
@@ -2915,7 +2914,7 @@ const unblockUser = async (req, res) => {
             $pull: { 
                 'social.blockedUsers': blockedUserId
             }
-        }).lean(), { new: true };
+        });
 
         // Get updated user with blocked users
         const updatedUser = await User.findById(userId)

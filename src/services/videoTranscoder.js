@@ -187,7 +187,6 @@ const transcodeVideo = (inputPath, outputDir = null) => {
         }
     });
 };
-
 /**
  * Check if file is a video based on mimetype
  * @param {string} mimetype - File mimetype

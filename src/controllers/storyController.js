@@ -319,11 +319,30 @@ const uploadStoryMedia = async (req, res) => {
         if (!req.file) {
             return res.status(400).json({
                 success: false,
-                message: 'No file uploaded'
+                message: 'No file uploaded',
+                error: 'Please provide a media file in the request'
+            });
+        }
+
+        // Validate file path exists
+        if (!originalPath) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid file upload',
+                error: 'File path is missing. Please ensure the file was uploaded correctly.'
             });
         }
 
         const user = req.user; // From protect middleware
+
+        // Validate user exists
+        if (!user || !user._id) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required',
+                error: 'User not authenticated'
+            });
+        }
 
         // User-specific folder path for story media
         const userFolder = `user_uploads/${user._id}/stories`;
@@ -335,32 +354,83 @@ const uploadStoryMedia = async (req, res) => {
         // Transcode video if it's a video file
         if (isVideoFile) {
             try {
-                console.log('Transcoding video for story...');
+                console.log('[StoryController] Transcoding video for story...');
                 const transcoded = await transcodeVideo(originalPath);
                 transcodedPath = transcoded.outputPath;
                 fileToUpload = transcodedPath;
-                console.log('Video transcoded successfully:', transcodedPath);
+                console.log('[StoryController] Video transcoded successfully:', transcodedPath);
             } catch (transcodeError) {
-                console.error('Video transcoding failed:', transcodeError);
+                console.error('[StoryController] Video transcoding failed:', transcodeError);
                 // Continue with original file if transcoding fails
-                console.warn('Uploading original video without transcoding');
+                console.warn('[StoryController] Uploading original video without transcoding');
             }
         }
 
-        // Upload to Cloudinary
-        const result = await cloudinary.uploader.upload(fileToUpload, {
+        // Validate Cloudinary configuration
+        if (!process.env.UPLOAD_PRESET) {
+            throw new Error('UPLOAD_PRESET environment variable is not configured');
+        }
+
+        // Upload to Cloudinary with retry logic for DNS/network errors
+        const uploadOptions = {
             folder: userFolder,
             upload_preset: process.env.UPLOAD_PRESET,
             resource_type: 'auto', // auto = images + videos
-            quality: '100'
-        });
+            quality: '100',
+            timeout: 60000 // 60 second timeout
+        };
+
+        let result;
+        const maxRetries = 3;
+        let lastError;
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                console.log(`[StoryController] Uploading to Cloudinary (attempt ${attempt}/${maxRetries})...`);
+                result = await cloudinary.uploader.upload(fileToUpload, uploadOptions);
+                console.log('[StoryController] Successfully uploaded to Cloudinary');
+                break; // Success, exit retry loop
+            } catch (uploadError) {
+                lastError = uploadError;
+                const actualError = uploadError?.error || uploadError;
+                const errorCode = actualError?.code || uploadError?.code;
+                const errorMessage = actualError?.message || uploadError?.message || 'Unknown error';
+                
+                // Only retry on DNS/network errors
+                const isRetryableError = errorCode === 'ENOTFOUND' || 
+                                       errorCode === 'ECONNREFUSED' || 
+                                       errorCode === 'ETIMEDOUT' ||
+                                       errorCode === 'EAI_AGAIN' ||
+                                       errorMessage?.includes('getaddrinfo');
+                
+                if (isRetryableError && attempt < maxRetries) {
+                    const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // Exponential backoff, max 5s
+                    console.warn(`[StoryController] Network error (${errorCode}), retrying in ${delay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue; // Retry
+                } else {
+                    // Not retryable or max retries reached, throw the error
+                    throw uploadError;
+                }
+            }
+        }
+        
+        // If we get here without result, all retries failed
+        if (!result) {
+            throw lastError || new Error('Upload failed after retries');
+        }
+
+        // Validate Cloudinary response
+        if (!result || !result.secure_url || !result.public_id) {
+            throw new Error('Invalid response from Cloudinary upload');
+        }
 
         // Determine media type
         const mediaType = result.resource_type === 'video' ? 'video' : 'image';
 
-        // Cleanup transcoded file after successful upload
+        // Cleanup transcoded file after successful upload (original file is managed by multer)
         if (transcodedPath) {
-            await cleanupFile(transcodedPath);
+            await cleanupFile(transcodedPath, 'success');
         }
 
         return res.status(200).json({
@@ -376,17 +446,56 @@ const uploadStoryMedia = async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Story media upload error:', error);
+        // Extract actual error from wrapped error objects (Cloudinary sometimes wraps errors)
+        const actualError = error?.error || error;
+        const errorMessage = actualError?.message || error?.message || 'Unknown error occurred';
+        const errorCode = actualError?.code || error?.code;
+        const errorName = actualError?.name || error?.name;
         
-        // Cleanup transcoded file on error
+        console.error('[StoryController] Story media upload error:', error);
+        console.error('[StoryController] Error details:', {
+            message: errorMessage,
+            code: errorCode,
+            name: errorName,
+            stack: actualError?.stack || error?.stack,
+            originalPath,
+            transcodedPath,
+            hasFile: !!req.file,
+            filePath: req.file?.path,
+            mimetype: req.file?.mimetype,
+            uploadPreset: process.env.UPLOAD_PRESET ? 'configured' : 'missing'
+        });
+        
+        // Cleanup transcoded file on error (original file is managed by multer)
         if (transcodedPath) {
-            await cleanupFile(transcodedPath);
+            await cleanupFile(transcodedPath, 'error');
         }
 
-        return res.status(500).json({
+        // Determine error status code and message based on error type
+        let statusCode = 500;
+        let userMessage = 'Failed to upload story media';
+        
+        // Handle DNS/network errors
+        if (errorCode === 'ENOTFOUND' || errorCode === 'ECONNREFUSED' || errorCode === 'ETIMEDOUT') {
+            statusCode = 503;
+            userMessage = 'Unable to connect to media upload service';
+        } else if (errorMessage?.includes('UPLOAD_PRESET') || errorMessage?.includes('Cloudinary')) {
+            statusCode = 500;
+            userMessage = 'Media upload service configuration error';
+        } else if (errorMessage?.includes('file') || errorMessage?.includes('path')) {
+            statusCode = 400;
+            userMessage = 'File upload error';
+        } else if (errorCode === 'LIMIT_FILE_SIZE') {
+            statusCode = 400;
+            userMessage = 'File size exceeds maximum limit';
+        }
+
+        // Return appropriate error response
+        return res.status(statusCode).json({
             success: false,
-            message: 'Failed to upload story media',
-            error: error.message
+            message: userMessage,
+            error: process.env.NODE_ENV === 'development' ? errorMessage : 'Internal server error',
+            ...(process.env.NODE_ENV === 'development' && errorCode ? { code: errorCode } : {})
         });
     }
 };
