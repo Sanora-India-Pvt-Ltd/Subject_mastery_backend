@@ -19,7 +19,7 @@ const getBlockedUserIds = async (userId) => {
         const allBlocked = [...rootBlocked, ...socialBlocked];
         const uniqueBlocked = [...new Set(allBlocked.map(id => id.toString()))];
         
-        return uniqueBlocked.map(id => mongoose.Types.ObjectId(id));
+        return uniqueBlocked.map(id => new mongoose.Types.ObjectId(id));
     } catch (error) {
         console.error('Error getting blocked users:', error);
         return [];
@@ -756,7 +756,7 @@ const createGroup = async (req, res) => {
         // Remove creator from participants array if present (will add them separately)
         const participantIds = uniqueParticipantIds
             .filter(id => id !== userId.toString())
-            .map(id => mongoose.Types.ObjectId(id));
+            .map(id => new mongoose.Types.ObjectId(id));
 
         // Validate all participants exist
         const existingUsers = await User.find({
