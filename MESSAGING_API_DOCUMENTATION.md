@@ -343,6 +343,189 @@ curl -X POST https://api.ulearnandearn.com/api/chat/group \
 
 ---
 
+### Update Group Info
+
+Update group information such as the group name. Only group admins or the creator can update group info.
+
+**Endpoint:** `PUT /api/chat/group/:groupId`
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `groupId` (required) - The group conversation ID
+
+**Request Body:**
+```json
+{
+  "groupName": "Updated Group Name"
+}
+```
+
+**Fields:**
+- `groupName` (required, string) - New name for the group (must be non-empty)
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "Group info updated successfully",
+  "data": {
+    "_id": "group_conversation_id",
+    "participants": [
+      {
+        "_id": "user_id_1",
+        "name": "John Doe",
+        "profileImage": "https://...",
+        "isOnline": true,
+        "lastSeen": null
+      },
+      {
+        "_id": "user_id_2",
+        "name": "Jane Smith",
+        "profileImage": "https://...",
+        "isOnline": false,
+        "lastSeen": "2024-01-15T10:25:00Z"
+      }
+    ],
+    "isGroup": true,
+    "groupName": "Updated Group Name",
+    "groupImage": "https://...",
+    "createdBy": {
+      "_id": "creator_user_id",
+      "name": "Group Creator",
+      "profileImage": "https://..."
+    },
+    "admins": ["admin_user_id_1", "admin_user_id_2"],
+    "lastMessage": null,
+    "lastMessageAt": "2024-01-15T10:30:00Z",
+    "createdAt": "2024-01-15T09:00:00Z",
+    "updatedAt": "2024-01-15T11:00:00Z"
+  }
+}
+```
+
+**Error Responses:**
+- `400` - Valid group ID is required / Group name cannot be empty / This is not a group conversation
+- `403` - You are not a participant of this group / Only group admins or creator can update group info
+- `404` - Group not found
+- `401` - Unauthorized
+- `500` - Server error
+
+**Notes:**
+- Only group admins or the creator can update group information
+- User must be a participant of the group
+- Group name is trimmed of whitespace
+- A WebSocket event `group:updated` is emitted to all group participants when the group is updated
+- The event includes `groupId`, `groupName`, and `updatedBy` fields
+
+**Example Request:**
+```bash
+curl -X PUT https://api.ulearnandearn.com/api/chat/group/group_id_123 \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "groupName": "New Group Name"
+  }'
+```
+
+---
+
+### Upload Group Photo
+
+Upload a group photo/avatar. Only group admins or the creator can upload group photos.
+
+**Endpoint:** `POST /api/chat/group/:groupId/photo`
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `groupId` (required) - The group conversation ID
+
+**Request Body:**
+- `photo` (required, file) - Image file to upload (multipart/form-data)
+  - Allowed formats: JPEG, PNG, GIF, WebP
+  - Maximum file size: 20MB
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "Group photo uploaded successfully",
+  "data": {
+    "id": "media_record_id",
+    "url": "https://res.cloudinary.com/.../group_uploads/group_id/photos/image.jpg",
+    "public_id": "group_uploads/group_id/photos/image",
+    "format": "jpg",
+    "fileSize": 1024000,
+    "group": {
+      "_id": "group_conversation_id",
+      "participants": [
+        {
+          "_id": "user_id_1",
+          "name": "John Doe",
+          "profileImage": "https://...",
+          "isOnline": true,
+          "lastSeen": null
+        }
+      ],
+      "isGroup": true,
+      "groupName": "Project Team",
+      "groupImage": "https://res.cloudinary.com/.../group_uploads/group_id/photos/image.jpg",
+      "createdBy": {
+        "_id": "creator_user_id",
+        "name": "Group Creator",
+        "profileImage": "https://..."
+      },
+      "lastMessage": null,
+      "lastMessageAt": "2024-01-15T10:30:00Z",
+      "createdAt": "2024-01-15T09:00:00Z",
+      "updatedAt": "2024-01-15T11:00:00Z"
+    },
+    "uploadedAt": "2024-01-15T11:00:00Z"
+  }
+}
+```
+
+**Error Responses:**
+- `400` - Valid group ID is required / No file uploaded / Only image files are allowed for group photos (JPEG, PNG, GIF, WebP) / This is not a group conversation
+- `403` - You are not a participant of this group / Only group admins or creator can upload group photo
+- `404` - Group not found
+- `401` - Unauthorized
+- `500` - Server error
+
+**Notes:**
+- Only group admins or the creator can upload group photos
+- User must be a participant of the group
+- Old group image is automatically deleted from Cloudinary when a new one is uploaded
+- Image is optimized to 500x500 pixels with automatic cropping
+- Image is stored in a group-specific folder: `group_uploads/{groupId}/photos/`
+- Upload is tracked in the Media collection
+- A WebSocket event `group:photo:updated` is emitted to all group participants when the photo is updated
+- The event includes `groupId`, `groupImage`, and `updatedBy` fields
+
+**Example Request:**
+```bash
+curl -X POST https://api.ulearnandearn.com/api/chat/group/group_id_123/photo \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -F "photo=@/path/to/group-photo.jpg"
+```
+
+**Using FormData (JavaScript):**
+```javascript
+const formData = new FormData();
+formData.append('photo', fileInput.files[0]);
+
+fetch('https://api.ulearnandearn.com/api/chat/group/group_id_123/photo', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`
+  },
+  body: formData
+});
+```
+
+---
+
 ## Messages
 
 ### Get Messages for a Conversation
@@ -767,6 +950,8 @@ The API automatically extracts and returns the correct format, so frontend can r
 | GET | `/api/chat/conversations` | Get all conversations | Yes |
 | GET | `/api/chat/conversation/:participantId` | Get or create one-on-one conversation | Yes |
 | POST | `/api/chat/group` | Create group conversation | Yes |
+| PUT | `/api/chat/group/:groupId` | Update group info | Yes |
+| POST | `/api/chat/group/:groupId/photo` | Upload group photo | Yes |
 | GET | `/api/chat/conversation/:conversationId/messages` | Get messages | Yes |
 | POST | `/api/chat/message` | Send message (REST) | Yes |
 | DELETE | `/api/chat/message/:messageId` | Delete message | Yes |
@@ -786,4 +971,8 @@ The API automatically extracts and returns the correct format, so frontend can r
 ---
 
 **Last Updated:** 2024-01-15
+
+**Recent Updates:**
+- Added `PUT /api/chat/group/:groupId` - Update group info endpoint
+- Added `POST /api/chat/group/:groupId/photo` - Upload group photo endpoint
 
