@@ -12,8 +12,8 @@
    - [Get All Posts](#2-get-all-posts)
    - [Get My Posts](#3-get-my-posts)
    - [Get User Posts](#4-get-user-posts)
-   - [Add Comment to Post](#6-add-comment-to-post)
-   - [Delete Comment from Post](#7-delete-comment-from-post)
+   - [Add Comment to Post](#6-add-comment-to-post) ⚠️ Deprecated
+   - [Delete Comment from Post](#7-delete-comment-from-post) ⚠️ Deprecated
    - [Report Post](#8-report-post)
    - [Delete Post](#9-delete-post)
 3. [Reels](#reels)
@@ -22,8 +22,8 @@
    - [Create Reel with Pre-uploaded Media](#12-create-reel-with-pre-uploaded-media) (Legacy)
    - [Get Reels by Content Type](#13-get-reels-by-content-type)
    - [Get User Reels](#14-get-user-reels)
-   - [Add Comment to Reel](#16-add-comment-to-reel)
-   - [Delete Comment from Reel](#17-delete-comment-from-reel)
+   - [Add Comment to Reel](#16-add-comment-to-reel) ⚠️ Deprecated
+   - [Delete Comment from Reel](#17-delete-comment-from-reel) ⚠️ Deprecated
    - [Report Reel](#18-report-reel)
    - [Delete Reel](#19-delete-reel)
 4. [Reactions](#reactions)
@@ -32,6 +32,13 @@
    - [Get Reactions](#get-reactions)
 4. [Reactions System](#reactions-system)
 5. [Comments System](#comments-system)
+   - [Add Comment](#1-add-comment-to-post-or-reel)
+   - [Add Reply](#2-add-reply-to-comment)
+   - [Get Comments](#3-get-comments-for-post-or-reel)
+   - [Get Replies](#4-get-replies-for-a-comment)
+   - [Delete Comment](#5-delete-comment)
+   - [Delete Reply](#6-delete-reply)
+   - [Legacy Endpoints](#legacy-comment-endpoints-deprecated)
 6. [Blocking System](#blocking-system)
    - [Block a User](#1-block-a-user)
    - [Unblock a User](#2-unblock-a-user)
@@ -51,7 +58,7 @@ The Social Features API provides endpoints for creating and managing posts, reel
 - **Posts**: Text and/or media content (images/videos) with reactions and comments
 - **Reels**: Video content categorized by type (education/fun) with reactions and comments
 - **Reactions**: 6 reaction types (happy, sad, angry, hug, wow, like)
-- **Comments**: Text-based comments on posts and reels
+- **Comments**: Highly scalable comment system with separate collection, supporting unlimited comments and replies
 - **Reporting**: Report inappropriate content with automatic moderation
 - **Blocking**: Block users to prevent seeing their content and prevent them from seeing yours
 - **Pagination**: All list endpoints support pagination
@@ -460,14 +467,16 @@ const data = await response.json();
 
 ---
 
-### 6. Add Comment to Post
+### 6. Add Comment to Post ⚠️ Deprecated
 
 **Method:** `POST`  
 **URL:** `/api/posts/:id/comment`  
 **Authentication:** Required
 
+**Status:** ⚠️ **DEPRECATED** - This endpoint is deprecated. Please use the new Comment API: `POST /api/comments`
+
 **Description:**  
-Add a text comment to a post. The response includes the newly added comment and the post with up to 15 most recent comments (sorted by newest first).
+Add a text comment to a post. This endpoint is deprecated and will be removed in a future version. Please use `POST /api/comments` instead.
 
 **Headers:**
 ```
@@ -651,14 +660,16 @@ Report a user for violating community guidelines. Each user can only report anot
   - Restricting certain account features
 
 
-### 7. Delete Comment from Post
+### 7. Delete Comment from Post ⚠️ Deprecated
 
 **Method:** `DELETE`  
 **URL:** `/api/posts/:id/comment/:commentId`  
 **Authentication:** Required
 
+**Status:** ⚠️ **DEPRECATED** - This endpoint is deprecated. Please use the new Comment API: `DELETE /api/comments/:commentId`
+
 **Description:**  
-Delete a comment from a post. Only the comment owner or post owner can delete comments.
+Delete a comment from a post. This endpoint is deprecated and will be removed in a future version. Please use `DELETE /api/comments/:commentId` instead.
 
 **Headers:**
 ```
@@ -1497,14 +1508,16 @@ Content-Type: application/json
 
 ---
 
-### 16. Add Comment to Reel
+### 16. Add Comment to Reel ⚠️ Deprecated
 
 **Method:** `POST`  
 **URL:** `/api/reels/:id/comment`  
 **Authentication:** Required
 
+**Status:** ⚠️ **DEPRECATED** - This endpoint is deprecated. Please use the new Comment API: `POST /api/comments`
+
 **Description:**  
-Add a text comment to a reel. The response includes the newly added comment and the reel with up to 15 most recent comments (sorted by newest first).
+Add a text comment to a reel. This endpoint is deprecated and will be removed in a future version. Please use `POST /api/comments` instead.
 
 **Headers:**
 ```
@@ -1536,14 +1549,16 @@ Same structure as post comments but for reels.
 
 ---
 
-### 17. Delete Comment from Reel
+### 17. Delete Comment from Reel ⚠️ Deprecated
 
 **Method:** `DELETE`  
 **URL:** `/api/reels/:id/comment/:commentId`  
 **Authentication:** Required
 
+**Status:** ⚠️ **DEPRECATED** - This endpoint is deprecated. Please use the new Comment API: `DELETE /api/comments/:commentId`
+
 **Description:**  
-Delete a comment from a reel. Only the comment owner or reel owner can delete comments.
+Delete a comment from a reel. This endpoint is deprecated and will be removed in a future version. Please use `DELETE /api/comments/:commentId` instead.
 
 **Headers:**
 ```
@@ -1836,40 +1851,710 @@ node scripts/migrateLikes.js
 
 ### Overview
 
-The comments system allows users to add text-based comments to posts and reels.
+The comments system uses a **separate, highly scalable Comment collection** with a unique architecture: **each post or reel has exactly ONE document** that contains all comments and replies in array-in-array format. This design provides excellent scalability while maintaining efficient querying.
 
-### Comment Data Structure
+### Key Features
 
-Each comment contains:
+- ✅ **One Document Per Post/Reel**: Each post/reel has a single Comment document identified by `contentId` + `contentType`
+- ✅ **Array-in-Array Format**: All comments stored in a `comments` array, with replies nested in each comment's `replies` array
+- ✅ **Efficient Queries**: Single document lookup per post/reel for fast retrieval
+- ✅ **Pagination Support**: In-memory pagination for comments and replies
+- ✅ **Unified API**: Single API for both posts and reels
+- ✅ **Unlimited Comments**: No document size limit issues (MongoDB handles large arrays efficiently)
+
+### How It Works
+
+**Each post or reel has ONE Comment document:**
+
 ```json
 {
-  "_id": "comment_id_123",
-  "userId": {
-    "_id": "user_id_456",
+  "_id": "comment_doc_id_123",
+  "contentId": "post_id_456",  // Unique - identifies which post/reel
+  "contentType": "post",        // "post" or "reel"
+  "comments": [
+    {
+      "_id": "comment_id_789",
+      "userId": "user_id_111",
+      "text": "Great post!",
+      "createdAt": "2024-01-15T11:30:00.000Z",
+      "replies": [
+        {
+          "_id": "reply_id_222",
+          "userId": "user_id_333",
+          "text": "I agree!",
+          "createdAt": "2024-01-15T12:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "_id": "comment_id_790",
+      "userId": "user_id_444",
+      "text": "Nice work!",
+      "createdAt": "2024-01-15T11:35:00.000Z",
+      "replies": []
+    }
+  ],
+  "createdAt": "2024-01-15T11:30:00.000Z",
+  "updatedAt": "2024-01-15T12:00:00.000Z"
+}
+```
+
+**Key Points:**
+- `contentId` is **unique** - ensures only one document per post/reel
+- All comments for that post/reel are in the `comments` array
+- Each comment can have replies in its `replies` array (array-in-array format)
+- The system automatically creates the document when the first comment is added
+
+### Comment Data Structure (API Response)
+
+When fetching comments, the API returns formatted comment objects:
+```json
+{
+  "id": "comment_id_123",
+  "userId": "user_id_456",
+  "user": {
+    "id": "user_id_456",
     "firstName": "John",
     "lastName": "Doe",
     "name": "John Doe",
     "profileImage": "https://..."
   },
   "text": "This is an amazing post! Great work! 👏",
+  "replies": [
+    {
+      "id": "reply_id_789",
+      "userId": "user_id_789",
+      "user": {
+        "id": "user_id_789",
+        "firstName": "Jane",
+        "lastName": "Smith",
+        "name": "Jane Smith",
+        "profileImage": "https://..."
+      },
+      "text": "I totally agree!",
+      "createdAt": "2024-01-15T12:00:00.000Z"
+    }
+  ],
+  "replyCount": 1,
   "createdAt": "2024-01-15T11:30:00.000Z"
 }
 ```
 
+### How the System Identifies Posts/Reels
+
+The system uses a **unique combination** of two fields to identify which post or reel a comment belongs to:
+
+1. **`contentId`**: The MongoDB ObjectId of the post or reel
+2. **`contentType`**: Either `"post"` or `"reel"`
+
+**Key Points:**
+- Each post/reel has **exactly ONE** Comment document
+- The `contentId` field is **unique** in the database (enforced by unique index)
+- When you add a comment, the system:
+  1. Checks if a Comment document exists for that `contentId` + `contentType`
+  2. If it exists, adds the comment to the `comments` array
+  3. If it doesn't exist, creates a new Comment document with an empty `comments` array, then adds the comment
+
+**Example:**
+```javascript
+// Post with ID "post_123" has ONE Comment document:
+{
+  _id: "comment_doc_abc",
+  contentId: "post_123",  // ← Links to the post
+  contentType: "post",     // ← Identifies it's a post
+  comments: [...]
+}
+
+// Reel with ID "reel_456" has ONE Comment document:
+{
+  _id: "comment_doc_xyz",
+  contentId: "reel_456",  // ← Links to the reel
+  contentType: "reel",    // ← Identifies it's a reel
+  comments: [...]
+}
+```
+
+**Why This Design?**
+- ✅ **Efficient**: Single document lookup per post/reel
+- ✅ **Scalable**: MongoDB handles large arrays efficiently
+- ✅ **Simple**: All comments for a post/reel in one place
+- ✅ **Fast Queries**: Direct access to all comments without joins
+
 ### Comment Limits
 
 - **Character Limits**:
-  - **Posts**: Maximum 1000 characters per comment
-  - **Reels**: Maximum 500 characters per comment
-- **Fetch Limit**: Only the **15 most recent comments** are returned in API responses. Comments are sorted by `createdAt` in descending order (newest first).
-- **Total Count**: The `commentCount` field always reflects the total number of comments, even if more than 15 exist.
-
-**Note:** When a post or reel has more than 15 comments, only the 15 most recent ones are included in the `comments` array. The `commentCount` field will show the actual total, allowing clients to display "View more comments" functionality if needed.
+  - **Posts**: Maximum 1000 characters per comment/reply
+  - **Reels**: Maximum 500 characters per comment/reply
+- **Pagination**: Comments support pagination with configurable page size (default: 15)
+- **Replies**: Each comment can have unlimited replies (stored in array-in-array format)
 
 ### Comment Permissions
 
 - **Add Comment**: Any authenticated user can add comments
+- **Add Reply**: Any authenticated user can reply to comments
 - **Delete Comment**: Only the comment owner or post/reel owner can delete comments
+- **Delete Reply**: Only the reply owner, comment owner, or post/reel owner can delete replies
+
+---
+
+## Comment API Endpoints
+
+### 1. Add Comment to Post or Reel
+
+**Method:** `POST`  
+**URL:** `/api/comments`  
+**Authentication:** Required
+
+**Description:**  
+Add a top-level comment to a post or reel. This is the recommended way to add comments.
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "contentId": "post_id_123",
+  "contentType": "post",
+  "text": "This is an amazing post! Great work! 👏"
+}
+```
+
+**Fields:**
+- `contentId` (string, required): ID of the post or reel
+- `contentType` (string, required): Either `"post"` or `"reel"`
+- `text` (string, required): Comment text
+  - Max 1000 characters for posts
+  - Max 500 characters for reels
+
+**Example using cURL:**
+```bash
+curl -X POST https://api.ulearnandearn.com/api/comments \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contentId": "post_id_123",
+    "contentType": "post",
+    "text": "This is an amazing post! Great work! 👏"
+  }'
+```
+
+**Example using JavaScript:**
+```javascript
+const response = await fetch('https://api.ulearnandearn.com/api/comments', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    contentId: 'post_id_123',
+    contentType: 'post',
+    text: 'This is an amazing post! Great work! 👏'
+  })
+});
+
+const data = await response.json();
+```
+
+**Success Response (201):**
+```json
+{
+  "success": true,
+  "message": "Comment added successfully",
+  "data": {
+    "comment": {
+      "id": "comment_id_789",
+      "userId": "user_id_789",
+      "user": {
+        "id": "user_id_789",
+        "firstName": "Jane",
+        "lastName": "Smith",
+        "name": "Jane Smith",
+        "profileImage": "https://..."
+      },
+      "text": "This is an amazing post! Great work! 👏",
+      "replies": [],
+      "replyCount": 0,
+      "createdAt": "2024-01-15T11:30:00.000Z"
+    }
+  }
+}
+```
+
+**Error Responses:**
+- `400`: Invalid content ID, invalid contentType, comment text is required, comment text too long
+- `401`: Not authenticated
+- `404`: Post/reel not found
+- `500`: Failed to add comment
+
+---
+
+### 2. Add Reply to Comment
+
+**Method:** `POST`  
+**URL:** `/api/comments/:commentId/reply`  
+**Authentication:** Required
+
+**Description:**  
+Add a reply to an existing comment. Replies are stored in array-in-array format within the comment's `replies` array. You must provide `contentId` and `contentType` to identify which post/reel the comment belongs to.
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+Content-Type: application/json
+```
+
+**URL Parameters:**
+- `commentId` (string, required): ID of the parent comment
+
+**Request Body:**
+```json
+{
+  "contentId": "post_id_123",
+  "contentType": "post",
+  "text": "I totally agree with you!"
+}
+```
+
+**Fields:**
+- `contentId` (string, required): ID of the post or reel that contains this comment
+- `contentType` (string, required): Either `"post"` or `"reel"`
+- `text` (string, required): Reply text (max 1000 characters)
+
+**Example using cURL:**
+```bash
+curl -X POST https://api.ulearnandearn.com/api/comments/comment_id_789/reply \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contentId": "post_id_123",
+    "contentType": "post",
+    "text": "I totally agree with you!"
+  }'
+```
+
+**Example using JavaScript:**
+```javascript
+const response = await fetch('https://api.ulearnandearn.com/api/comments/comment_id_789/reply', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    contentId: 'post_id_123',
+    contentType: 'post',
+    text: 'I totally agree with you!'
+  })
+});
+
+const data = await response.json();
+```
+
+**Success Response (201):**
+```json
+{
+  "success": true,
+  "message": "Reply added successfully",
+  "data": {
+    "reply": {
+      "id": "reply_id_456",
+      "userId": "user_id_456",
+      "user": {
+        "id": "user_id_456",
+        "firstName": "John",
+        "lastName": "Doe",
+        "name": "John Doe",
+        "profileImage": "https://..."
+      },
+      "text": "I totally agree with you!",
+      "createdAt": "2024-01-15T12:00:00.000Z"
+    },
+    "comment": {
+      "id": "comment_id_789",
+      "replyCount": 1
+    }
+  }
+}
+```
+
+**Error Responses:**
+- `400`: Invalid content ID, invalid contentType, invalid comment ID, reply text is required, reply text too long
+- `401`: Not authenticated
+- `404`: Comment not found
+- `500`: Failed to add reply
+
+---
+
+### 3. Get Comments for Post or Reel
+
+**Method:** `GET`  
+**URL:** `/api/comments/:contentType/:contentId`  
+**Authentication:** Optional (public access)
+
+**Description:**  
+Get all top-level comments for a post or reel with pagination support.
+
+**URL Parameters:**
+- `contentType` (string, required): Either `"post"` or `"reel"`
+- `contentId` (string, required): ID of the post or reel
+
+**Query Parameters:**
+- `page` (number, optional): Page number (default: 1)
+- `limit` (number, optional): Comments per page (default: 15)
+- `sortBy` (string, optional): Field to sort by (default: "createdAt")
+- `sortOrder` (number, optional): Sort order: `-1` for newest first, `1` for oldest first (default: -1)
+
+**Example using cURL:**
+```bash
+curl -X GET "https://api.ulearnandearn.com/api/comments/post/post_id_123?page=1&limit=15" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Comments retrieved successfully",
+  "data": {
+    "comments": [
+      {
+        "id": "comment_id_789",
+        "userId": "user_id_789",
+        "user": {
+          "id": "user_id_789",
+          "firstName": "Jane",
+          "lastName": "Smith",
+          "name": "Jane Smith",
+          "profileImage": "https://..."
+        },
+        "text": "This is an amazing post! Great work! 👏",
+        "replies": [
+          {
+            "id": "reply_id_456",
+            "userId": "user_id_456",
+            "user": {...},
+            "text": "I totally agree!",
+            "createdAt": "2024-01-15T12:00:00.000Z"
+          }
+        ],
+        "replyCount": 1,
+        "createdAt": "2024-01-15T11:30:00.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 15,
+      "total": 25,
+      "pages": 2
+    }
+  }
+}
+```
+
+**Error Responses:**
+- `400`: Invalid content ID, invalid contentType
+- `404`: Post/reel not found
+- `500`: Failed to retrieve comments
+
+---
+
+### 4. Get Replies for a Comment
+
+**Method:** `GET`  
+**URL:** `/api/comments/:commentId/replies`  
+**Authentication:** Optional (public access)
+
+**Description:**  
+Get all replies for a specific comment with pagination support. You must provide `contentId` and `contentType` as query parameters to identify which post/reel the comment belongs to.
+
+**URL Parameters:**
+- `commentId` (string, required): ID of the comment
+
+**Query Parameters:**
+- `contentId` (string, required): ID of the post or reel that contains this comment
+- `contentType` (string, required): Either `"post"` or `"reel"`
+- `page` (number, optional): Page number (default: 1)
+- `limit` (number, optional): Replies per page (default: 10)
+- `sortBy` (string, optional): Field to sort by (default: "createdAt")
+- `sortOrder` (number, optional): Sort order: `1` for oldest first, `-1` for newest first (default: 1)
+
+**Example using cURL:**
+```bash
+curl -X GET "https://api.ulearnandearn.com/api/comments/comment_id_789/replies?contentId=post_id_123&contentType=post&page=1&limit=10" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+**Example using JavaScript:**
+```javascript
+const commentId = 'comment_id_789';
+const contentId = 'post_id_123';
+const contentType = 'post';
+
+const response = await fetch(
+  `https://api.ulearnandearn.com/api/comments/${commentId}/replies?contentId=${contentId}&contentType=${contentType}&page=1&limit=10`,
+  {
+    headers: {
+      'Authorization': `Bearer ${accessToken}`
+    }
+  }
+);
+
+const data = await response.json();
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Replies retrieved successfully",
+  "data": {
+    "replies": [
+      {
+        "id": "reply_id_456",
+        "userId": "user_id_456",
+        "user": {
+          "id": "user_id_456",
+          "firstName": "John",
+          "lastName": "Doe",
+          "name": "John Doe",
+          "profileImage": "https://..."
+        },
+        "text": "I totally agree!",
+        "createdAt": "2024-01-15T12:00:00.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 10,
+      "total": 5,
+      "pages": 1
+    }
+  }
+}
+```
+
+**Error Responses:**
+- `400`: Invalid content ID, invalid contentType, invalid comment ID
+- `404`: Comment not found
+- `500`: Failed to retrieve replies
+
+---
+
+### 5. Delete Comment
+
+**Method:** `DELETE`  
+**URL:** `/api/comments/:commentId`  
+**Authentication:** Required
+
+**Description:**  
+Delete a top-level comment. Only the comment owner or the post/reel owner can delete comments. Deleting a comment will also delete all its replies. You must provide `contentId` and `contentType` as query parameters to identify which post/reel the comment belongs to.
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+```
+
+**URL Parameters:**
+- `commentId` (string, required): ID of the comment to delete
+
+**Query Parameters:**
+- `contentId` (string, required): ID of the post or reel that contains this comment
+- `contentType` (string, required): Either `"post"` or `"reel"`
+
+**Example using cURL:**
+```bash
+curl -X DELETE "https://api.ulearnandearn.com/api/comments/comment_id_789?contentId=post_id_123&contentType=post" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+**Example using JavaScript:**
+```javascript
+const commentId = 'comment_id_789';
+const contentId = 'post_id_123';
+const contentType = 'post';
+
+const response = await fetch(
+  `https://api.ulearnandearn.com/api/comments/${commentId}?contentId=${contentId}&contentType=${contentType}`,
+  {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`
+    }
+  }
+);
+
+const data = await response.json();
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Comment deleted successfully"
+}
+```
+
+**Error Responses:**
+- `400`: Invalid content ID, invalid contentType, invalid comment ID (provide as query parameters: ?contentId=xxx&contentType=post)
+- `401`: Not authenticated
+- `403`: You do not have permission to delete this comment
+- `404`: Comment document or comment not found
+- `500`: Failed to delete comment
+
+---
+
+### 6. Delete Reply
+
+**Method:** `DELETE`  
+**URL:** `/api/comments/:commentId/replies/:replyId`  
+**Authentication:** Required
+
+**Description:**  
+Delete a reply to a comment. Only the reply owner, comment owner, or post/reel owner can delete replies. You must provide `contentId` and `contentType` as query parameters to identify which post/reel the comment belongs to.
+
+**Headers:**
+```
+Authorization: Bearer your_access_token_here
+```
+
+**URL Parameters:**
+- `commentId` (string, required): ID of the parent comment
+- `replyId` (string, required): ID of the reply to delete
+
+**Query Parameters:**
+- `contentId` (string, required): ID of the post or reel that contains this comment
+- `contentType` (string, required): Either `"post"` or `"reel"`
+
+**Example using cURL:**
+```bash
+curl -X DELETE "https://api.ulearnandearn.com/api/comments/comment_id_789/replies/reply_id_456?contentId=post_id_123&contentType=post" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+**Example using JavaScript:**
+```javascript
+const commentId = 'comment_id_789';
+const replyId = 'reply_id_456';
+const contentId = 'post_id_123';
+const contentType = 'post';
+
+const response = await fetch(
+  `https://api.ulearnandearn.com/api/comments/${commentId}/replies/${replyId}?contentId=${contentId}&contentType=${contentType}`,
+  {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`
+    }
+  }
+);
+
+const data = await response.json();
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Reply deleted successfully"
+}
+```
+
+**Error Responses:**
+- `400`: Invalid content ID, invalid contentType, invalid comment ID, or invalid reply ID (provide contentId and contentType as query parameters: ?contentId=xxx&contentType=post)
+- `401`: Not authenticated
+- `403`: You do not have permission to delete this reply
+- `404`: Comment document, comment, or reply not found
+- `500`: Failed to delete reply
+
+---
+
+### Architecture Summary
+
+**One Document Per Post/Reel:**
+- Each post or reel has **exactly ONE** Comment document in the database
+- The document is identified by the unique combination of `contentId` + `contentType`
+- All comments for that post/reel are stored in the `comments` array within that single document
+- Each comment can have replies stored in its `replies` array (array-in-array format)
+
+**Benefits:**
+- ✅ **Efficient Queries**: Single document lookup per post/reel (no joins needed)
+- ✅ **Fast Retrieval**: All comments loaded in one database query
+- ✅ **Scalable**: MongoDB efficiently handles large arrays
+- ✅ **Simple Structure**: Easy to understand and maintain
+- ✅ **Atomic Operations**: All comments for a post/reel updated atomically
+
+**Example Flow:**
+```javascript
+// 1. User comments on post "post_123"
+POST /api/comments
+{
+  contentId: "post_123",
+  contentType: "post",
+  text: "Great post!"
+}
+
+// 2. System creates/finds the Comment document for post_123:
+{
+  _id: "comment_doc_abc",
+  contentId: "post_123",  // Unique identifier
+  contentType: "post",
+  comments: [
+    {
+      _id: "comment_1",
+      userId: "user_1",
+      text: "Great post!",
+      replies: []
+    }
+  ]
+}
+
+// 3. User replies to comment_1:
+POST /api/comments/comment_1/reply
+{
+  contentId: "post_123",  // Required to find the document
+  contentType: "post",
+  text: "I agree!"
+}
+
+// 4. System updates the same document:
+{
+  _id: "comment_doc_abc",
+  contentId: "post_123",
+  contentType: "post",
+  comments: [
+    {
+      _id: "comment_1",
+      userId: "user_1",
+      text: "Great post!",
+      replies: [
+        {
+          _id: "reply_1",
+          userId: "user_2",
+          text: "I agree!"
+        }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+## Legacy Comment Endpoints (Deprecated)
+
+The following endpoints are **deprecated** but still functional for backward compatibility. Please use the new `/api/comments` endpoints instead:
+
+- `POST /api/posts/:id/comment` - Use `POST /api/comments` instead
+- `DELETE /api/posts/:id/comment/:commentId` - Use `DELETE /api/comments/:commentId` instead
+- `POST /api/reels/:id/comment` - Use `POST /api/comments` instead
+- `DELETE /api/reels/:id/comment/:commentId` - Use `DELETE /api/comments/:commentId` instead
+
+**Note:** These legacy endpoints will be removed in a future version. Please migrate to the new Comment API.
 
 ---
 

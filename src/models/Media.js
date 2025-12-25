@@ -36,6 +36,19 @@ const mediaSchema = new mongoose.Schema({
     folder: {
         type: String,
         default: 'user_uploads'
+    },
+    transcodingJobId: {
+        type: String,
+        default: null,
+        index: true
+    },
+    isTranscoding: {
+        type: Boolean,
+        default: false
+    },
+    transcodingCompleted: {
+        type: Boolean,
+        default: false
     }
 }, {
     timestamps: true

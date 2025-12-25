@@ -90,7 +90,7 @@ require('./middleware/passport');
 
 // Add to your server.js after passport initialization
 const { OAuth2Client } = require('google-auth-library');
-const User = require('./models/User');
+const User = require('./models/authorization/User');
 const jwt = require('jsonwebtoken');
 
 // Connect to MongoDB
@@ -422,7 +422,7 @@ if (client && validClientIds.length > 0) {
 // Auth routes - wrapped in try-catch to ensure server starts even if routes fail to load
 try {
     console.log('🔄 Loading auth routes...');
-    app.use('/api/auth', require('./routes/authRoutes'));
+    app.use('/api/auth', require('./routes/authorization/authRoutes'));
     console.log('✅ Auth routes loaded successfully');
 } catch (error) {
     console.error('❌ Error loading auth routes:', error.message);
@@ -439,7 +439,7 @@ try {
 
 try {
     console.log('🔄 Loading Google auth routes...');
-    app.use('/api/auth', require('./routes/googleAuthRoutes'));
+    app.use('/api/auth', require('./routes/authorization/googleAuthRoutes'));
     console.log('✅ Google auth routes loaded successfully');
 } catch (error) {
     console.error('❌ Error loading Google auth routes:', error.message);
@@ -450,7 +450,7 @@ try {
 // User routes - for updating user profile
 try {
     console.log('🔄 Loading user routes...');
-    app.use('/api/user', require('./routes/userRoutes'));
+    app.use('/api/user', require('./routes/authorization/userRoutes'));
     console.log('✅ User routes loaded successfully');
 } catch (error) {
     console.error('❌ Error loading user routes:', error.message);
@@ -478,7 +478,7 @@ try {
 // Company routes - for searching and creating companies
 try {
     console.log('🔄 Loading company routes...');
-    app.use('/api/company', require('./routes/companyRoutes'));
+    app.use('/api/company', require('./routes/authorization/companyRoutes'));
     console.log('✅ Company routes loaded successfully');
 } catch (error) {
     console.error('❌ Error loading company routes:', error.message);
@@ -496,7 +496,7 @@ try {
 // Institution routes - for searching and creating institutions
 try {
     console.log('🔄 Loading institution routes...');
-    app.use('/api/institution', require('./routes/institutionRoutes'));
+    app.use('/api/institution', require('./routes/authorization/institutionRoutes'));
     console.log('✅ Institution routes loaded successfully');
 } catch (error) {
     console.error('❌ Error loading institution routes:', error.message);
@@ -514,7 +514,7 @@ try {
 // Post routes - for creating and fetching posts
 try {
     console.log('🔄 Loading post routes...');
-    app.use('/api/posts', require('./routes/postRoutes'));
+    app.use('/api/posts', require('./routes/social/postRoutes'));
     console.log('✅ Post routes loaded successfully');
 } catch (error) {
     console.error('❌ Error loading post routes:', error.message);
@@ -532,7 +532,7 @@ try {
 // Reel routes - logical clusters via contentType
 try {
     console.log('🔄 Loading reel routes...');
-    app.use('/api/reels', require('./routes/reelRoutes'));
+    app.use('/api/reels', require('./routes/social/reelRoutes'));
     console.log('✅ Reel routes loaded successfully');
 } catch (error) {
     console.error('❌ Error loading reel routes:', error.message);
@@ -546,10 +546,27 @@ try {
     });
 }
 
+// Comment routes - for comments on posts and reels
+try {
+    console.log('🔄 Loading comment routes...');
+    app.use('/api/comments', require('./routes/social/commentRoutes'));
+    console.log('✅ Comment routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading comment routes:', error.message);
+    console.error('Stack:', error.stack);
+    app.use('/api/comments', (req, res) => {
+        res.status(500).json({
+            success: false,
+            message: 'Comment routes failed to load. Check server logs.',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    });
+}
+
 // User report routes
 try {
     console.log('🔄 Loading user report routes...');
-    app.use('/api/reports', require('./routes/userReportRoutes'));
+    app.use('/api/reports', require('./routes/social/userReportRoutes'));
     console.log('✅ User report routes loaded successfully');
 } catch (error) {
     console.error('❌ Error loading user report routes:', error.message);
@@ -566,7 +583,7 @@ try {
 // Like routes - for post and reel reactions
 try {
     console.log('🔄 Loading like routes...');
-    app.use('/api/likes', require('./routes/likeRoutes'));
+    app.use('/api/likes', require('./routes/social/likeRoutes'));
     console.log('✅ Like routes loaded successfully');
 } catch (error) {
     console.error('❌ Error loading like routes:', error.message);
@@ -583,7 +600,7 @@ try {
 // Friend routes - for friend requests and friendships
 try {
     console.log('🔄 Loading friend routes...');
-    app.use('/api/friend', require('./routes/friendRoutes'));
+    app.use('/api/friend', require('./routes/social/friendRoutes'));
     console.log('✅ Friend routes loaded successfully');
 } catch (error) {
     console.error('❌ Error loading friend routes:', error.message);
@@ -601,7 +618,7 @@ try {
 // Story routes - for creating and fetching stories
 try {
     console.log('🔄 Loading story routes...');
-    app.use('/api/stories', require('./routes/storyRoutes'));
+    app.use('/api/stories', require('./routes/social/storyRoutes'));
     console.log('✅ Story routes loaded successfully');
 } catch (error) {
     console.error('❌ Error loading story routes:', error.message);
@@ -619,7 +636,7 @@ try {
 // Chat routes - for real-time messaging
 try {
     console.log('🔄 Loading chat routes...');
-    app.use('/api/chat', require('./routes/chatRoutes'));
+    app.use('/api/chat', require('./routes/social/chatRoutes'));
     console.log('✅ Chat routes loaded successfully');
 } catch (error) {
     console.error('❌ Error loading chat routes:', error.message);
@@ -637,7 +654,7 @@ try {
 // Bug Report routes - for reporting bugs
 try {
     console.log('🔄 Loading bug report routes...');
-    app.use('/api/bug-reports', require('./routes/bugReportRoutes'));
+    app.use('/api/bug-reports', require('./routes/social/bugReportRoutes'));
     console.log('✅ Bug report routes loaded successfully');
 } catch (error) {
     console.error('❌ Error loading bug report routes:', error.message);
@@ -652,6 +669,56 @@ try {
     });
 }
 
+// Host Auth routes
+try {
+    console.log('🔄 Loading host auth routes...');
+    app.use('/api/host/auth', require('./routes/conference/hostAuthRoutes'));
+    console.log('✅ Host auth routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading host auth routes:', error.message);
+    console.error('Stack:', error.stack);
+    app.use('/api/host/auth', (req, res) => {
+        res.status(500).json({
+            success: false,
+            message: 'Host auth routes failed to load. Check server logs.',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    });
+}
+
+// Speaker Auth routes
+try {
+    console.log('🔄 Loading speaker auth routes...');
+    app.use('/api/speaker/auth', require('./routes/conference/speakerAuthRoutes'));
+    console.log('✅ Speaker auth routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading speaker auth routes:', error.message);
+    console.error('Stack:', error.stack);
+    app.use('/api/speaker/auth', (req, res) => {
+        res.status(500).json({
+            success: false,
+            message: 'Speaker auth routes failed to load. Check server logs.',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    });
+}
+
+// Conference routes
+try {
+    console.log('🔄 Loading conference routes...');
+    app.use('/api/conference', require('./routes/conference/conferenceRoutes'));
+    console.log('✅ Conference routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading conference routes:', error.message);
+    console.error('Stack:', error.stack);
+    app.use('/api/conference', (req, res) => {
+        res.status(500).json({
+            success: false,
+            message: 'Conference routes failed to load. Check server logs.',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    });
+}
 
 // Marketplace seller routes
 try {
@@ -738,8 +805,22 @@ try {
     });
 }
 
-
-
+// Video transcoding routes
+try {
+    console.log('🔄 Loading video transcoding routes...');
+    app.use('/api/video-transcoding', require('./routes/videoTranscodingRoutes'));
+    console.log('✅ Video transcoding routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading video transcoding routes:', error.message);
+    console.error('Stack:', error.stack);
+    app.use('/api/video-transcoding', (req, res) => {
+        res.status(500).json({
+            success: false,
+            message: 'Video transcoding routes failed to load. Check server logs.',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    });
+}
 
 // Twilio OTP endpoints (phone verification)
 try {

@@ -1,5 +1,5 @@
 const SellerApplication = require('../../models/marketplace/SellerApplication');
-const User = require('../../models/User');
+const User = require('../../models/authorization/User');
 
 const applySeller = async (req, res) => {
     try {

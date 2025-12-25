@@ -1,8 +1,8 @@
-const User = require('../models/authorization/User');
-const Media = require('../models/Media');
-const Company = require('../models/Company');
-const Institution = require('../models/Institution');
-const { formatEducation, formatWorkplace, formatUserProfile } = require('../utils/formatters');
+const User = require('../../models/authorization/User');
+const Media = require('../../models/Media');
+const Company = require('../../models/authorization/Company');
+const Institution = require('../../models/authorization/Institution');
+const { formatEducation, formatWorkplace, formatUserProfile } = require('../../utils/formatters');
 const NodeCache = require('node-cache');
 
 // Initialize caches with 1-hour TTL (time-to-live)
@@ -174,8 +174,8 @@ async function getOrCreateInstitutions(institutionData, userId) {
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const twilio = require('twilio');
-const cloudinary = require('../config/cloudinary');
-const { transcodeVideo, isVideo, cleanupFile } = require('../services/videoTranscoder');
+const cloudinary = require('../../config/cloudinary');
+const { transcodeVideo, isVideo, cleanupFile } = require('../../services/videoTranscoder');
 
 // Helper function to check if two users are friends
 const areFriends = async (userId1, userId2) => {

@@ -9,7 +9,7 @@ const {
     getUserImages,
     getUserImagesPublic, 
     deleteUserMedia 
-} = require("../controllers/userController");
+} = require("../controllers/authorization/userController");
 
 const router = express.Router();
 

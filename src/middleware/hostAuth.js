@@ -1,31 +1,25 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/authorization/User');
+const Host = require('../models/conference/Host');
 const crypto = require('crypto');
 
-// Generate Access Token (short-lived - 1 hour for better UX, still secure)
+// Generate Access Token
 const generateAccessToken = (payload) => {
     return jwt.sign(
         payload,
         process.env.JWT_SECRET || 'your-secret-key',
-        { expiresIn: '1h' } // 1 hour - balances security and user experience
+        { expiresIn: '1h' }
     );
 };
 
-// Generate Refresh Token (never expires - only invalidated on explicit logout)
+// Generate Refresh Token
 const generateRefreshToken = () => {
-    const token = crypto.randomBytes(40).toString('hex'); // Secure random token
-    // Set expiry to 100 years from now (effectively never expires)
-    // Tokens are only invalidated when user explicitly logs out
+    const token = crypto.randomBytes(40).toString('hex');
     const expiryDate = new Date();
-    expiryDate.setFullYear(expiryDate.getFullYear() + 100); // 100 years from now (effectively never expires)
+    expiryDate.setFullYear(expiryDate.getFullYear() + 100);
     return { token, expiryDate };
 };
 
-// Legacy function for backward compatibility (now generates access token)
-const generateToken = (payload) => {
-    return generateAccessToken(payload);
-};
-
+// Protect route - verify Host token
 const protect = async (req, res, next) => {
     try {
         let token;
@@ -43,17 +37,23 @@ const protect = async (req, res, next) => {
 
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-            // Exclude auth section for security - never expose auth data in req.user
-            const user = await User.findById(decoded.id).select('-auth');
+            const host = await Host.findById(decoded.id).select('-password -tokens');
             
-            if (!user) {
+            if (!host) {
                 return res.status(404).json({
                     success: false,
-                    message: 'User not found'
+                    message: 'Host not found'
                 });
             }
 
-            req.user = user;
+            if (!host.isActive) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Host account is inactive'
+                });
+            }
+
+            req.host = host;
             next();
         } catch (error) {
             return res.status(401).json({
@@ -78,17 +78,16 @@ const verifyRefreshToken = async (req, res, next) => {
             });
         }
 
-        // Find user by refresh token (nested structure only)
-        const user = await User.findOne({ 'auth.tokens.refreshTokens.token': refreshToken });
+        const host = await Host.findOne({ 'tokens.refreshTokens.token': refreshToken });
 
-        if (!user) {
+        if (!host) {
             return res.status(401).json({
                 success: false,
                 message: 'Invalid refresh token'
             });
         }
 
-        const tokenRecord = user.auth?.tokens?.refreshTokens?.find(rt => rt.token === refreshToken);
+        const tokenRecord = host.tokens?.refreshTokens?.find(rt => rt.token === refreshToken);
         if (!tokenRecord) {
             return res.status(401).json({
                 success: false,
@@ -96,7 +95,7 @@ const verifyRefreshToken = async (req, res, next) => {
             });
         }
 
-        req.user = user;
+        req.host = host;
         next();
     } catch (error) {
         return res.status(401).json({
@@ -107,9 +106,9 @@ const verifyRefreshToken = async (req, res, next) => {
 };
 
 module.exports = {
-    generateToken,
     generateAccessToken,
     generateRefreshToken,
-    verifyRefreshToken,
-    protect
+    protect,
+    verifyRefreshToken
 };
+

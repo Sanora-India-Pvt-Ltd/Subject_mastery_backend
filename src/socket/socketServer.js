@@ -1,8 +1,8 @@
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
-const Message = require('../models/Message');
-const Conversation = require('../models/Conversation');
+const User = require('../models/authorization/User');
+const Message = require('../models/social/Message');
+const Conversation = require('../models/social/Conversation');
 const { setUserOnline, setUserOffline, isUserOnline, getRedisSubscriber, getRedisPublisher, waitForRedisReady } = require('../config/redisStub');
 
 let io = null;

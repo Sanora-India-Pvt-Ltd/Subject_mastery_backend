@@ -1,6 +1,6 @@
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const User = require('../models/User');
+const User = require('../models/authorization/User');
 
 console.log('=== Loading Passport Configuration ===');
 console.log('NODE_ENV:', process.env.NODE_ENV || 'not set (defaults to development)');

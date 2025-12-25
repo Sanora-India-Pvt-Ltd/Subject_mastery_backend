@@ -1,5 +1,5 @@
 const bcrypt = require('bcryptjs');
-const OTP = require('../src/models/OTP');
+const OTP = require('../src/models/authorization/OTP');
 
 // Generate random 6-digit OTP
 const generateOTP = () => {
