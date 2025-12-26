@@ -75,7 +75,7 @@ require('dotenv').config();
 // Debug: Check if MONGODB_URI is loaded (only show first part for security)
 if (process.env.MONGODB_URI) {
     const uriPreview = process.env.MONGODB_URI.substring(0, 30) + '...';
-    console.log('✅ MONGODB_URI loaded:', uriPreview);
+    console.log('✅ MONGODB_URI loaded:', uriPreview); // remove this line
 } else {
     console.warn('⚠️  MONGODB_URI not found in environment variables');
     console.warn('💡 Make sure you have a .env file in the project root with MONGODB_URI');
@@ -473,6 +473,17 @@ try {
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     });
+}
+
+// Upload routes
+try {
+    console.log('🔄 Loading upload routes...');
+    app.use('/api', require('./routes/upload'));
+    console.log('✅ Upload routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading upload routes:', error.message);
+    console.error('Stack:', error.stack);
+    // Don't crash - routes will just not be available
 }
 
 // Company routes - for searching and creating companies

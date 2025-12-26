@@ -1,14 +1,11 @@
 const { Reel, ALLOWED_CONTENT_TYPES } = require('../../models/social/Reel');
 const Comment = require('../../models/social/Comment');
 const User = require('../../models/authorization/User');
-const cloudinary = require('../../config/cloudinary');
+const StorageService = require('../../services/storage.service');
 const Media = require('../../models/Media');
 const mongoose = require('mongoose');
-const { transcodeVideo, isVideo, cleanupFile } = require('../../services/videoTranscoder');
-const fs = require('fs').promises;
+const { isVideo } = require('../../services/videoTranscoder');
 const { Report, REPORT_REASONS } = require('../../models/social/Report');
-const videoTranscodingQueue = require('../../services/videoTranscodingQueue');
-const VideoTranscodingJob = require('../../models/VideoTranscodingJob');
 
 // Helper function to get all blocked user IDs
 const getBlockedUserIds = async (userId) => {
@@ -98,10 +95,6 @@ const getFormattedComments = async (contentId, limit = 15) => {
 
 // Upload video for reels
 const uploadReelMedia = async (req, res) => {
-    let transcodedPath = null;
-    let originalPath = req.file?.path;
-    let cleanupFiles = []; // Track files for cleanup
-
     try {
         if (!req.file) {
             return res.status(400).json({
@@ -111,160 +104,42 @@ const uploadReelMedia = async (req, res) => {
         }
 
         const user = req.user; // From protect middleware
-        const userFolder = `user_uploads/${user._id}/reels`;
-        originalPath = req.file.path;
-        cleanupFiles.push(originalPath); // Track original for cleanup
 
         // Check if uploaded file is a video
         const isVideoFile = isVideo(req.file.mimetype);
-        let fileToUpload = originalPath;
-
-        // Transcode video if it's a video file
-        if (isVideoFile) {
-            try {
-                console.log('[ReelController] Starting video transcoding for reel...');
-                console.log('[ReelController] Input:', originalPath);
-                console.log('[ReelController] Target: H.264 Baseline Profile 3.1, yuv420p, faststart');
-                
-                const transcoded = await transcodeVideo(originalPath);
-                transcodedPath = transcoded.outputPath;
-                fileToUpload = transcodedPath;
-                cleanupFiles.push(transcodedPath); // Track transcoded for cleanup
-                
-                console.log('[ReelController] Video transcoded successfully');
-                console.log('[ReelController] Output:', transcodedPath);
-                console.log('[ReelController] Dimensions:', `${transcoded.width}x${transcoded.height}`);
-                console.log('[ReelController] File size:', (transcoded.fileSize / 1024 / 1024).toFixed(2), 'MB');
-            } catch (transcodeError) {
-                console.error('[ReelController] Video transcoding failed:', transcodeError);
-                console.error('[ReelController] Error details:', {
-                    message: transcodeError.message,
-                    stack: transcodeError.stack
-                });
-                // Continue with original file if transcoding fails
-                console.warn('[ReelController] Uploading original video without transcoding (may have compatibility issues)');
-                fileToUpload = originalPath;
-            }
-        }
-
-        // Upload to Cloudinary with transformations to ensure compatible format
-        // Note: Since we already transcoded with H.264 Baseline 3.1, yuv420p, and faststart,
-        // we only need to tell Cloudinary to preserve the codec format
-        const uploadOptions = {
-            folder: userFolder,
-            upload_preset: process.env.UPLOAD_PRESET,
-            resource_type: 'auto', // auto = images + videos
-            quality: 'auto',
-            format: 'mp4', // Force MP4 format
-            // Video-specific parameters to ensure Cloudinary preserves our transcoded format
-            ...(isVideoFile && {
-                // Cloudinary video codec parameters (faststart is already in the file from transcoding)
-                video_codec: 'h264',
-                video_profile: 'baseline',
-                video_level: '3.1'
-                // Note: pixel_format and faststart are already in the transcoded file, no need to specify
-            })
-        };
-
-        // Log upload details
-        if (isVideoFile && transcodedPath) {
-            console.log('[ReelController] Uploading transcoded video to Cloudinary');
-            console.log('[ReelController] Format: H.264 Baseline Profile 3.1, yuv420p, faststart');
-        }
-
-        let result;
-        try {
-            result = await cloudinary.uploader.upload(fileToUpload, uploadOptions);
-            console.log('[ReelController] Video uploaded successfully to Cloudinary');
-        } catch (uploadError) {
-            console.error('[ReelController] Cloudinary upload error:', uploadError);
-            throw new Error(`Failed to upload video to Cloudinary: ${uploadError.message}`);
-        }
-
-        // Determine media type
-        const mediaType = result.resource_type === 'video' ? 'video' : 'image';
-        if (mediaType !== 'video') {
-            // Cleanup files
-            for (const file of cleanupFiles) {
-                await cleanupFile(file, 'invalid_media_type');
-            }
+        if (!isVideoFile) {
             return res.status(400).json({
                 success: false,
-                message: 'Reels require video uploads (resource_type must be video)'
+                message: 'Reels require video uploads'
             });
         }
+
+        // Use StorageService to get upload info (multer-s3 already uploaded the file)
+        const uploadResult = await StorageService.uploadFromRequest(req.file);
+
+        // Determine media type
+        const mediaType = 'video';
+        const format = req.file.mimetype.split('/')[1] || 'mp4';
 
         // Save upload record to database
         let mediaRecord;
         try {
             mediaRecord = await Media.create({
                 userId: user._id,
-                url: result.secure_url,
-                public_id: result.public_id,
-                format: result.format,
-                resource_type: result.resource_type,
-                fileSize: result.bytes || req.file.size,
+                url: uploadResult.url,
+                public_id: uploadResult.key, // Store S3 key in public_id field for backward compatibility
+                format: format,
+                resource_type: mediaType,
+                fileSize: req.file.size,
                 originalFilename: req.file.originalname,
-                folder: result.folder || userFolder,
-                transcodingJobId: transcodingJobId || null,
-                isTranscoding: isVideoFile && transcodingJobId ? true : false
+                folder: 'user_uploads',
+                provider: uploadResult.provider
             });
             console.log('[ReelController] Media record created:', mediaRecord._id);
-
-            // Set up callback to update media when transcoding completes (if video)
-            if (isVideoFile && transcodingJobId) {
-                const onJobComplete = async ({ jobId, result: transcodedResult }) => {
-                    if (jobId === transcodingJobId) {
-                        try {
-                            console.log(`[ReelController] Transcoding completed for job ${jobId}, updating media ${mediaRecord._id}`);
-                            
-                            // Upload transcoded video to Cloudinary
-                            const transcodedResult_cloudinary = await cloudinary.uploader.upload(transcodedResult.outputPath, {
-                                folder: userFolder,
-                                upload_preset: process.env.UPLOAD_PRESET,
-                                resource_type: 'video',
-                                quality: 'auto',
-                                format: 'mp4',
-                                video_codec: 'h264',
-                                video_profile: 'baseline',
-                                video_level: '3.1'
-                            });
-
-                            // Update media record with transcoded version
-                            await Media.findByIdAndUpdate(mediaRecord._id, {
-                                url: transcodedResult_cloudinary.secure_url,
-                                public_id: transcodedResult_cloudinary.public_id,
-                                fileSize: transcodedResult.fileSize,
-                                isTranscoding: false,
-                                transcodingCompleted: true
-                            });
-
-                            // Cleanup transcoded file
-                            await cleanupFile(transcodedResult.outputPath);
-                            
-                            console.log(`[ReelController] Media ${mediaRecord._id} updated with transcoded video`);
-                            
-                            // Remove listener to prevent memory leaks
-                            videoTranscodingQueue.removeListener('job:completed', onJobComplete);
-                        } catch (updateError) {
-                            console.error(`[ReelController] Error updating media after transcoding:`, updateError);
-                        }
-                    }
-                };
-
-                videoTranscodingQueue.once('job:completed', onJobComplete);
-            }
         } catch (dbError) {
             console.error('[ReelController] Database error:', dbError);
-            // Cleanup files on database error
-            for (const file of cleanupFiles) {
-                await cleanupFile(file, 'database_error');
-            }
             throw new Error(`Failed to save media record: ${dbError.message}`);
         }
-
-        // Cleanup temporary files after successful upload (original file only, transcoded will be cleaned up later)
-        await cleanupFile(originalPath, 'success');
 
         console.log('[ReelController] Reel media upload completed successfully');
 
@@ -272,32 +147,16 @@ const uploadReelMedia = async (req, res) => {
             success: true,
             message: 'Reel media uploaded successfully',
             data: {
-                url: result.secure_url,
-                publicId: result.public_id,
+                url: uploadResult.url,
+                publicId: uploadResult.key, // Use key as publicId
                 type: mediaType,
-                format: result.format,
-                duration: result.duration,
-                width: result.width,
-                height: result.height,
-                fileSize: result.bytes || req.file.size,
-                mediaId: mediaRecord._id,
-                transcodingJobId: transcodingJobId || null,
-                isTranscoding: isVideoFile && transcodingJobId ? true : false
+                format: format,
+                fileSize: req.file.size,
+                mediaId: mediaRecord._id
             }
         });
     } catch (error) {
         console.error('[ReelController] Reel media upload error:', error);
-        console.error('[ReelController] Error details:', {
-            message: error.message,
-            stack: error.stack,
-            originalPath,
-            transcodedPath
-        });
-        
-        // Cleanup all temporary files on error
-        for (const file of cleanupFiles) {
-            await cleanupFile(file, 'error');
-        }
 
         return res.status(500).json({
             success: false,
@@ -309,10 +168,6 @@ const uploadReelMedia = async (req, res) => {
 
 // Create a new reel with video upload and creation in one API call (combined)
 const createReelWithUpload = async (req, res) => {
-    let transcodedPath = null;
-    let originalPath = req.file?.path;
-    let cleanupFiles = []; // Track files for cleanup
-
     try {
         const user = req.user;
         const { caption, contentType, visibility } = req.body;
@@ -333,126 +188,40 @@ const createReelWithUpload = async (req, res) => {
             });
         }
 
-        const userFolder = `user_uploads/${user._id}/reels`;
-        originalPath = req.file.path;
-        cleanupFiles.push(originalPath); // Track original for cleanup
-
         // Check if uploaded file is a video
         const isVideoFile = isVideo(req.file.mimetype);
-        let fileToUpload = originalPath;
-
         if (!isVideoFile) {
-            // Cleanup files
-            for (const file of cleanupFiles) {
-                await cleanupFile(file, 'invalid_media_type');
-            }
             return res.status(400).json({
                 success: false,
                 message: 'Reels require video uploads'
             });
         }
 
-        // Transcode video if it's a video file
-        if (isVideoFile) {
-            try {
-                console.log('[ReelController] Starting video transcoding for reel...');
-                console.log('[ReelController] Input:', originalPath);
-                console.log('[ReelController] Target: H.264 Baseline Profile 3.1, yuv420p, faststart');
-                
-                const transcoded = await transcodeVideo(originalPath);
-                transcodedPath = transcoded.outputPath;
-                fileToUpload = transcodedPath;
-                cleanupFiles.push(transcodedPath); // Track transcoded for cleanup
-                
-                console.log('[ReelController] Video transcoded successfully');
-                console.log('[ReelController] Output:', transcodedPath);
-                console.log('[ReelController] Dimensions:', `${transcoded.width}x${transcoded.height}`);
-                console.log('[ReelController] File size:', (transcoded.fileSize / 1024 / 1024).toFixed(2), 'MB');
-            } catch (transcodeError) {
-                console.error('[ReelController] Video transcoding failed:', transcodeError);
-                console.error('[ReelController] Error details:', {
-                    message: transcodeError.message,
-                    stack: transcodeError.stack
-                });
-                // Continue with original file if transcoding fails
-                console.warn('[ReelController] Uploading original video without transcoding (may have compatibility issues)');
-                fileToUpload = originalPath;
-            }
-        }
-
-        // Upload to Cloudinary with transformations to ensure compatible format
-        const uploadOptions = {
-            folder: userFolder,
-            upload_preset: process.env.UPLOAD_PRESET,
-            resource_type: 'auto', // auto = images + videos
-            quality: 'auto',
-            format: 'mp4', // Force MP4 format
-            // Video-specific parameters to ensure Cloudinary preserves our transcoded format
-            ...(isVideoFile && {
-                video_codec: 'h264',
-                video_profile: 'baseline',
-                video_level: '3.1'
-            })
-        };
-
-        // Log upload details
-        if (isVideoFile && transcodedPath) {
-            console.log('[ReelController] Uploading transcoded video to Cloudinary');
-            console.log('[ReelController] Format: H.264 Baseline Profile 3.1, yuv420p, faststart');
-        }
-
-        let result;
-        try {
-            result = await cloudinary.uploader.upload(fileToUpload, uploadOptions);
-            console.log('[ReelController] Video uploaded successfully to Cloudinary');
-        } catch (uploadError) {
-            console.error('[ReelController] Cloudinary upload error:', uploadError);
-            // Cleanup files on upload error
-            for (const file of cleanupFiles) {
-                await cleanupFile(file, 'upload_error');
-            }
-            throw new Error(`Failed to upload video to Cloudinary: ${uploadError.message}`);
-        }
+        // Use StorageService to get upload info (multer-s3 already uploaded the file)
+        const uploadResult = await StorageService.uploadFromRequest(req.file);
 
         // Determine media type
-        const mediaType = result.resource_type === 'video' ? 'video' : 'image';
-        if (mediaType !== 'video') {
-            // Cleanup files
-            for (const file of cleanupFiles) {
-                await cleanupFile(file, 'invalid_media_type');
-            }
-            return res.status(400).json({
-                success: false,
-                message: 'Reels require video uploads (resource_type must be video)'
-            });
-        }
+        const mediaType = 'video';
+        const format = req.file.mimetype.split('/')[1] || 'mp4';
 
         // Save upload record to database
         let mediaRecord;
         try {
             mediaRecord = await Media.create({
                 userId: user._id,
-                url: result.secure_url,
-                public_id: result.public_id,
-                format: result.format,
-                resource_type: result.resource_type,
-                fileSize: result.bytes || req.file.size,
+                url: uploadResult.url,
+                public_id: uploadResult.key, // Store S3 key in public_id field for backward compatibility
+                format: format,
+                resource_type: mediaType,
+                fileSize: req.file.size,
                 originalFilename: req.file.originalname,
-                folder: result.folder || userFolder
+                folder: 'user_uploads',
+                provider: uploadResult.provider
             });
             console.log('[ReelController] Media record created:', mediaRecord._id);
         } catch (dbError) {
             console.error('[ReelController] Database error:', dbError);
-            // Cleanup files on database error
-            for (const file of cleanupFiles) {
-                await cleanupFile(file, 'database_error');
-            }
             throw new Error(`Failed to save media record: ${dbError.message}`);
-        }
-
-        // Cleanup temporary files after successful upload
-        for (const file of cleanupFiles) {
-            await cleanupFile(file, 'success');
         }
 
         // Create the reel
@@ -460,17 +229,12 @@ const createReelWithUpload = async (req, res) => {
             userId: user._id,
             caption: caption || '',
             media: {
-                url: result.secure_url,
-                publicId: result.public_id,
-                thumbnailUrl: result.secure_url, // Use video URL as thumbnail for now
+                url: uploadResult.url,
+                publicId: uploadResult.key, // Use key as publicId
+                thumbnailUrl: uploadResult.url, // Use video URL as thumbnail for now
                 type: mediaType,
-                format: result.format || '',
-                duration: result.duration,
-                dimensions: result.width && result.height ? {
-                    width: result.width,
-                    height: result.height
-                } : undefined,
-                size: result.bytes || req.file.size
+                format: format || '',
+                size: req.file.size
             },
             contentType,
             visibility: visibility || 'public'
@@ -521,17 +285,6 @@ const createReelWithUpload = async (req, res) => {
 
     } catch (error) {
         console.error('[ReelController] Create reel with upload error:', error);
-        console.error('[ReelController] Error details:', {
-            message: error.message,
-            stack: error.stack,
-            originalPath,
-            transcodedPath
-        });
-        
-        // Cleanup all temporary files on error
-        for (const file of cleanupFiles) {
-            await cleanupFile(file, 'error');
-        }
 
         return res.status(500).json({
             success: false,
@@ -1380,37 +1133,15 @@ const deleteReel = async (req, res) => {
             });
         }
 
-        // Delete media from Cloudinary if any
+        // Delete media from S3 if any
         if (reel.media && reel.media.publicId) {
             try {
-                // Delete the main video
-                await cloudinary.uploader.destroy(reel.media.publicId, { 
-                    resource_type: 'video',
-                    invalidate: true 
-                });
-                console.log(`[ReelController] Deleted video ${reel.media.publicId} from Cloudinary`);
-            } catch (cloudinaryError) {
-                console.warn(`[ReelController] Failed to delete video ${reel.media.publicId} from Cloudinary:`, cloudinaryError.message);
-                // Continue with deletion even if Cloudinary deletion fails
-            }
-
-            // Delete thumbnail if it exists and has a different publicId
-            if (reel.media.thumbnailUrl && reel.media.thumbnailUrl !== reel.media.url) {
-                try {
-                    // Extract publicId from thumbnail URL if it's different
-                    // Thumbnails are usually generated, so we might need to extract the publicId
-                    const thumbnailPublicId = reel.media.thumbnailUrl.split('/').slice(-2).join('/').split('.')[0];
-                    if (thumbnailPublicId && thumbnailPublicId !== reel.media.publicId) {
-                        await cloudinary.uploader.destroy(thumbnailPublicId, { 
-                            resource_type: 'image',
-                            invalidate: true 
-                        });
-                        console.log(`[ReelController] Deleted thumbnail ${thumbnailPublicId} from Cloudinary`);
-                    }
-                } catch (thumbnailError) {
-                    console.warn(`[ReelController] Failed to delete thumbnail from Cloudinary:`, thumbnailError.message);
-                    // Continue with deletion even if thumbnail deletion fails
-                }
+                // publicId contains the S3 key
+                await StorageService.delete(reel.media.publicId);
+                console.log(`[ReelController] Deleted video ${reel.media.publicId} from S3`);
+            } catch (deleteError) {
+                console.warn(`[ReelController] Failed to delete video ${reel.media.publicId} from S3:`, deleteError.message);
+                // Continue with deletion even if S3 deletion fails
             }
         }
 
@@ -1513,33 +1244,14 @@ const reportReel = async (req, res) => {
         let reelDeleted = false;
 
         if (reportsWithSameReason >= 2) {
-            // Delete media from Cloudinary if any
+            // Delete media from S3 if any
             if (reel.media && reel.media.publicId) {
                 try {
-                    // Delete the main video
-                    await cloudinary.uploader.destroy(reel.media.publicId, { 
-                        resource_type: 'video',
-                        invalidate: true 
-                    });
-                    console.log(`[ReelController] Deleted video ${reel.media.publicId} from Cloudinary due to reports`);
-                } catch (cloudinaryError) {
-                    console.warn(`[ReelController] Failed to delete video ${reel.media.publicId} from Cloudinary:`, cloudinaryError.message);
-                }
-
-                // Delete thumbnail if it exists and has a different publicId
-                if (reel.media.thumbnailUrl && reel.media.thumbnailUrl !== reel.media.url) {
-                    try {
-                        const thumbnailPublicId = reel.media.thumbnailUrl.split('/').slice(-2).join('/').split('.')[0];
-                        if (thumbnailPublicId && thumbnailPublicId !== reel.media.publicId) {
-                            await cloudinary.uploader.destroy(thumbnailPublicId, { 
-                                resource_type: 'image',
-                                invalidate: true 
-                            });
-                            console.log(`[ReelController] Deleted thumbnail ${thumbnailPublicId} from Cloudinary due to reports`);
-                        }
-                    } catch (thumbnailError) {
-                        console.warn(`[ReelController] Failed to delete thumbnail from Cloudinary:`, thumbnailError.message);
-                    }
+                    // publicId contains the S3 key
+                    await StorageService.delete(reel.media.publicId);
+                    console.log(`[ReelController] Deleted video ${reel.media.publicId} from S3 due to reports`);
+                } catch (deleteError) {
+                    console.warn(`[ReelController] Failed to delete video ${reel.media.publicId} from S3:`, deleteError.message);
                 }
             }
 

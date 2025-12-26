@@ -174,8 +174,8 @@ async function getOrCreateInstitutions(institutionData, userId) {
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const twilio = require('twilio');
-const cloudinary = require('../../config/cloudinary');
-const { transcodeVideo, isVideo, cleanupFile } = require('../../services/videoTranscoder');
+const StorageService = require('../../services/storage.service');
+const { isVideo } = require('../../services/videoTranscoder');
 
 // Helper function to check if two users are friends
 const areFriends = async (userId1, userId2) => {
@@ -1158,11 +1158,8 @@ const removeAlternatePhone = async (req, res) => {
     }
 };
 
-// Upload media to Cloudinary - ensures it's only associated with the authenticated user
+// Upload media to S3 - ensures it's only associated with the authenticated user
 const uploadMedia = async (req, res) => {
-    let transcodedPath = null;
-    let originalPath = req.file?.path;
-
     try {
         if (!req.file) {
             return res.status(400).json({
@@ -1173,63 +1170,49 @@ const uploadMedia = async (req, res) => {
 
         const user = req.user; // From protect middleware - ensures only authenticated user can upload
 
-        // User-specific folder path to ensure files are organized per user
-        const userFolder = `user_uploads/${user._id}`;
-
         // Check if uploaded file is a video
         const isVideoFile = isVideo(req.file.mimetype);
-        let fileToUpload = originalPath;
 
-        // Transcode video if it's a video file
-        if (isVideoFile) {
-            try {
-                console.log('Transcoding video for media upload...');
-                const transcoded = await transcodeVideo(originalPath);
-                transcodedPath = transcoded.outputPath;
-                fileToUpload = transcodedPath;
-                console.log('Video transcoded successfully:', transcodedPath);
-            } catch (transcodeError) {
-                console.error('Video transcoding failed:', transcodeError);
-                // Continue with original file if transcoding fails
-                console.warn('Uploading original video without transcoding');
-            }
+        // Handle file upload based on storage type
+        // diskUpload provides file.path, multer-s3 provides file.location and file.key
+        let uploadResult;
+        if (req.file.path) {
+            // File was saved to disk (diskStorage) - upload to S3
+            uploadResult = await StorageService.uploadFromPath(req.file.path);
+        } else if (req.file.location && req.file.key) {
+            // File was already uploaded via multer-s3
+            uploadResult = await StorageService.uploadFromRequest(req.file);
+        } else {
+            throw new Error('Invalid file object: missing path (diskStorage) or location/key (multer-s3)');
         }
 
-        // Upload to Cloudinary in user-specific folder
-        const result = await cloudinary.uploader.upload(fileToUpload, {
-            folder: userFolder,
-            upload_preset: process.env.UPLOAD_PRESET,
-            resource_type: "auto", // auto = images + videos
-            quality: "100"
-        });
+        // Determine media type from mimetype
+        const mediaType = isVideoFile ? 'video' : 'image';
+        const format = req.file.mimetype.split('/')[1] || 'unknown';
 
         // Save upload record to database - associated with this specific user
         const mediaRecord = await Media.create({
             userId: user._id, // Ensures it's only associated with this user
-            url: result.secure_url,
-            public_id: result.public_id,
-            format: result.format,
-            resource_type: result.resource_type,
-            fileSize: result.bytes || req.file.size,
+            url: uploadResult.url,
+            public_id: uploadResult.key, // Store S3 key in public_id field for backward compatibility
+            format: format,
+            resource_type: mediaType,
+            fileSize: req.file.size,
             originalFilename: req.file.originalname,
-            folder: result.folder || userFolder
+            folder: 'user_uploads',
+            provider: uploadResult.provider
         });
-
-        // Cleanup transcoded file after successful upload
-        if (transcodedPath) {
-            await cleanupFile(transcodedPath);
-        }
 
         return res.status(200).json({
             success: true,
             message: "Uploaded successfully",
             data: {
                 id: mediaRecord._id,
-                url: result.secure_url,
-                public_id: result.public_id,
-                format: result.format,
-                type: result.resource_type,
-                fileSize: result.bytes || req.file.size,
+                url: uploadResult.url,
+                public_id: uploadResult.key, // Use key as public_id
+                format: format,
+                type: mediaType,
+                fileSize: req.file.size,
                 uploadedBy: {
                     userId: user._id,
                     email: user.profile?.email,
@@ -1240,16 +1223,11 @@ const uploadMedia = async (req, res) => {
         });
 
     } catch (err) {
-        console.error('Cloudinary upload error:', err);
-        
-        // Cleanup transcoded file on error
-        if (transcodedPath) {
-            await cleanupFile(transcodedPath);
-        }
+        console.error('S3 upload error:', err);
 
         return res.status(500).json({
             success: false,
-            message: "Cloudinary upload failed",
+            message: "Upload failed",
             error: err.message
         });
     }
@@ -1279,15 +1257,19 @@ const uploadProfileImage = async (req, res) => {
         // User-specific folder path
         const userFolder = `user_uploads/${user._id}/profile`;
 
-        // Delete old profile image from Cloudinary if it exists
+        // Delete old profile image from S3 if it exists
         if (user.profile?.profileImage) {
             try {
-                // Extract public_id from the old profile image URL
-                const oldPublicId = user.profile.profileImage.split('/').slice(-2).join('/').split('.')[0];
-                // Try to delete the old image
-                await cloudinary.uploader.destroy(oldPublicId, { invalidate: true });
-                
-                // Also delete from Media collection
+                // Find the media record to get the S3 key
+                const oldMedia = await Media.findOne({ 
+                    userId: user._id, 
+                    url: user.profile.profileImage 
+                });
+                if (oldMedia && oldMedia.public_id) {
+                    // public_id contains the S3 key
+                    await StorageService.delete(oldMedia.public_id);
+                }
+                // Delete from Media collection
                 await Media.findOneAndDelete({ 
                     userId: user._id, 
                     url: user.profile.profileImage 
@@ -1298,34 +1280,39 @@ const uploadProfileImage = async (req, res) => {
             }
         }
 
-        // Upload new profile image to user-specific folder
-        const result = await cloudinary.uploader.upload(req.file.path, {
-            folder: userFolder,
-            upload_preset: process.env.UPLOAD_PRESET,
-            resource_type: "image",
-            transformation: [
-                { width: 400, height: 400, crop: "fill", gravity: "face" }, // Optimize for profile images
-                { quality: "100" }
-            ]
-        });
+        // Handle file upload based on storage type
+        // diskUpload provides file.path, multer-s3 provides file.location and file.key
+        let uploadResult;
+        if (req.file.path) {
+            // File was saved to disk (diskStorage) - upload to S3
+            uploadResult = await StorageService.uploadFromPath(req.file.path);
+        } else if (req.file.location && req.file.key) {
+            // File was already uploaded via multer-s3
+            uploadResult = await StorageService.uploadFromRequest(req.file);
+        } else {
+            throw new Error('Invalid file object: missing path (diskStorage) or location/key (multer-s3)');
+        }
 
         // Update user's profileImage field
         const updatedUser = await User.findByIdAndUpdate(
             user._id,
-            { 'profile.profileImage': result.secure_url },
+            { 'profile.profileImage': uploadResult.url },
             { new: true, runValidators: true }
         ).lean().select('-auth');
+
+        const format = req.file.mimetype.split('/')[1] || 'unknown';
 
         // Save upload record to database - associated with this specific user
         const mediaRecord = await Media.create({
             userId: user._id, // Ensures it's only associated with this user
-            url: result.secure_url,
-            public_id: result.public_id,
-            format: result.format,
-            resource_type: result.resource_type,
-            fileSize: result.bytes || req.file.size,
+            url: uploadResult.url,
+            public_id: uploadResult.key, // Store S3 key in public_id field for backward compatibility
+            format: format,
+            resource_type: 'image',
+            fileSize: req.file.size,
             originalFilename: req.file.originalname,
-            folder: userFolder
+            folder: 'user_uploads',
+            provider: uploadResult.provider
         });
 
         return res.status(200).json({
@@ -1333,10 +1320,10 @@ const uploadProfileImage = async (req, res) => {
             message: "Profile image uploaded successfully",
             data: {
                 id: mediaRecord._id,
-                url: result.secure_url,
-                public_id: result.public_id,
-                format: result.format,
-                fileSize: result.bytes || req.file.size,
+                url: uploadResult.url,
+                public_id: uploadResult.key, // Use key as public_id
+                format: format,
+                fileSize: req.file.size,
                 user: {
                     id: updatedUser._id,
                     email: updatedUser.profile?.email,
@@ -1381,15 +1368,19 @@ const uploadCoverPhoto = async (req, res) => {
         // User-specific folder path
         const userFolder = `user_uploads/${user._id}/cover`;
 
-        // Delete old cover photo from Cloudinary if it exists
+        // Delete old cover photo from S3 if it exists
         if (user.profile?.coverPhoto) {
             try {
-                // Extract public_id from the old cover photo URL
-                const oldPublicId = user.profile.coverPhoto.split('/').slice(-2).join('/').split('.')[0];
-                // Try to delete the old image
-                await cloudinary.uploader.destroy(oldPublicId, { invalidate: true });
-                
-                // Also delete from Media collection
+                // Find the media record to get the S3 key
+                const oldMedia = await Media.findOne({ 
+                    userId: user._id, 
+                    url: user.profile.coverPhoto 
+                });
+                if (oldMedia && oldMedia.public_id) {
+                    // public_id contains the S3 key
+                    await StorageService.delete(oldMedia.public_id);
+                }
+                // Delete from Media collection
                 await Media.findOneAndDelete({ 
                     userId: user._id, 
                     url: user.profile.coverPhoto 
@@ -1400,34 +1391,39 @@ const uploadCoverPhoto = async (req, res) => {
             }
         }
 
-        // Upload new cover photo to user-specific folder
-        const result = await cloudinary.uploader.upload(req.file.path, {
-            folder: userFolder,
-            upload_preset: process.env.UPLOAD_PRESET,
-            resource_type: "image",
-            transformation: [
-                { width: 1200, height: 400, crop: "fill", gravity: "auto" }, // Optimize for cover photos (wider aspect ratio)
-                { quality: "100" }
-            ]
-        });
+        // Handle file upload based on storage type
+        // diskUpload provides file.path, multer-s3 provides file.location and file.key
+        let uploadResult;
+        if (req.file.path) {
+            // File was saved to disk (diskStorage) - upload to S3
+            uploadResult = await StorageService.uploadFromPath(req.file.path);
+        } else if (req.file.location && req.file.key) {
+            // File was already uploaded via multer-s3
+            uploadResult = await StorageService.uploadFromRequest(req.file);
+        } else {
+            throw new Error('Invalid file object: missing path (diskStorage) or location/key (multer-s3)');
+        }
 
         // Update user's coverPhoto field
         const updatedUser = await User.findByIdAndUpdate(
             user._id,
-            { 'profile.coverPhoto': result.secure_url },
+            { 'profile.coverPhoto': uploadResult.url },
             { new: true, runValidators: true }
         ).lean().select('-auth');
+
+        const format = req.file.mimetype.split('/')[1] || 'unknown';
 
         // Save upload record to database - associated with this specific user
         const mediaRecord = await Media.create({
             userId: user._id, // Ensures it's only associated with this user
-            url: result.secure_url,
-            public_id: result.public_id,
-            format: result.format,
-            resource_type: result.resource_type,
-            fileSize: result.bytes || req.file.size,
+            url: uploadResult.url,
+            public_id: uploadResult.key, // Store S3 key in public_id field for backward compatibility
+            format: format,
+            resource_type: 'image',
+            fileSize: req.file.size,
             originalFilename: req.file.originalname,
-            folder: userFolder
+            folder: 'user_uploads',
+            provider: uploadResult.provider
         });
 
         return res.status(200).json({
@@ -1435,10 +1431,10 @@ const uploadCoverPhoto = async (req, res) => {
             message: "Cover photo uploaded successfully",
             data: {
                 id: mediaRecord._id,
-                url: result.secure_url,
-                public_id: result.public_id,
-                format: result.format,
-                fileSize: result.bytes || req.file.size,
+                url: uploadResult.url,
+                public_id: uploadResult.key, // Use key as public_id
+                format: format,
+                fileSize: req.file.size,
                 user: {
                     id: updatedUser._id,
                     email: updatedUser.profile?.email,
@@ -1669,12 +1665,13 @@ const deleteUserMedia = async (req, res) => {
             });
         }
 
-        // Delete from Cloudinary
+        // Delete from S3
         try {
-            await cloudinary.uploader.destroy(media.public_id, { invalidate: true });
-        } catch (cloudinaryError) {
-            console.warn('Failed to delete from Cloudinary:', cloudinaryError.message);
-            // Continue with database deletion even if Cloudinary deletion fails
+            // public_id contains the S3 key
+            await StorageService.delete(media.public_id);
+        } catch (deleteError) {
+            console.warn('Failed to delete from S3:', deleteError.message);
+            // Continue with database deletion even if S3 deletion fails
         }
 
         // Delete from database

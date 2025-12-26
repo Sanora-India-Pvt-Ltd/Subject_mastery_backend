@@ -1,8 +1,8 @@
 const Story = require('../../models/social/Story');
 const User = require('../../models/authorization/User');
-const cloudinary = require('../../config/cloudinary');
+const StorageService = require('../../services/storage.service');
 const mongoose = require('mongoose');
-const { transcodeVideo, isVideo, cleanupFile } = require('../../services/videoTranscoder');
+const { isVideo } = require('../../services/videoTranscoder');
 
 // Helper function to get all blocked user IDs
 const getBlockedUserIds = async (userId) => {
@@ -312,24 +312,12 @@ const getAllFriendsStories = async (req, res) => {
 
 // Upload media for stories (similar to posts)
 const uploadStoryMedia = async (req, res) => {
-    let transcodedPath = null;
-    let originalPath = req.file?.path;
-
     try {
         if (!req.file) {
             return res.status(400).json({
                 success: false,
                 message: 'No file uploaded',
                 error: 'Please provide a media file in the request'
-            });
-        }
-
-        // Validate file path exists
-        if (!originalPath) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid file upload',
-                error: 'File path is missing. Please ensure the file was uploaded correctly.'
             });
         }
 
@@ -344,133 +332,44 @@ const uploadStoryMedia = async (req, res) => {
             });
         }
 
-        // User-specific folder path for story media
-        const userFolder = `user_uploads/${user._id}/stories`;
-
         // Check if uploaded file is a video
         const isVideoFile = isVideo(req.file.mimetype);
-        let fileToUpload = originalPath;
 
-        // Transcode video if it's a video file
-        if (isVideoFile) {
-            try {
-                console.log('[StoryController] Transcoding video for story...');
-                const transcoded = await transcodeVideo(originalPath);
-                transcodedPath = transcoded.outputPath;
-                fileToUpload = transcodedPath;
-                console.log('[StoryController] Video transcoded successfully:', transcodedPath);
-            } catch (transcodeError) {
-                console.error('[StoryController] Video transcoding failed:', transcodeError);
-                // Continue with original file if transcoding fails
-                console.warn('[StoryController] Uploading original video without transcoding');
-            }
+        // Handle file upload based on storage type
+        // diskUpload provides file.path, multer-s3 provides file.location and file.key
+        let uploadResult;
+        if (req.file.path) {
+            // File was saved to disk (diskStorage) - upload to S3
+            uploadResult = await StorageService.uploadFromPath(req.file.path);
+        } else if (req.file.location && req.file.key) {
+            // File was already uploaded via multer-s3
+            uploadResult = await StorageService.uploadFromRequest(req.file);
+        } else {
+            throw new Error('Invalid file object: missing path (diskStorage) or location/key (multer-s3)');
         }
 
-        // Validate Cloudinary configuration
-        if (!process.env.UPLOAD_PRESET) {
-            throw new Error('UPLOAD_PRESET environment variable is not configured');
-        }
-
-        // Upload to Cloudinary with retry logic for DNS/network errors
-        const uploadOptions = {
-            folder: userFolder,
-            upload_preset: process.env.UPLOAD_PRESET,
-            resource_type: 'auto', // auto = images + videos
-            quality: '100',
-            timeout: 60000 // 60 second timeout
-        };
-
-        let result;
-        const maxRetries = 3;
-        let lastError;
-        
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                console.log(`[StoryController] Uploading to Cloudinary (attempt ${attempt}/${maxRetries})...`);
-                result = await cloudinary.uploader.upload(fileToUpload, uploadOptions);
-                console.log('[StoryController] Successfully uploaded to Cloudinary');
-                break; // Success, exit retry loop
-            } catch (uploadError) {
-                lastError = uploadError;
-                const actualError = uploadError?.error || uploadError;
-                const errorCode = actualError?.code || uploadError?.code;
-                const errorMessage = actualError?.message || uploadError?.message || 'Unknown error';
-                
-                // Only retry on DNS/network errors
-                const isRetryableError = errorCode === 'ENOTFOUND' || 
-                                       errorCode === 'ECONNREFUSED' || 
-                                       errorCode === 'ETIMEDOUT' ||
-                                       errorCode === 'EAI_AGAIN' ||
-                                       errorMessage?.includes('getaddrinfo');
-                
-                if (isRetryableError && attempt < maxRetries) {
-                    const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000); // Exponential backoff, max 5s
-                    console.warn(`[StoryController] Network error (${errorCode}), retrying in ${delay}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    continue; // Retry
-                } else {
-                    // Not retryable or max retries reached, throw the error
-                    throw uploadError;
-                }
-            }
-        }
-        
-        // If we get here without result, all retries failed
-        if (!result) {
-            throw lastError || new Error('Upload failed after retries');
-        }
-
-        // Validate Cloudinary response
-        if (!result || !result.secure_url || !result.public_id) {
-            throw new Error('Invalid response from Cloudinary upload');
-        }
-
-        // Determine media type
-        const mediaType = result.resource_type === 'video' ? 'video' : 'image';
-
-        // Cleanup transcoded file after successful upload (original file is managed by multer)
-        if (transcodedPath) {
-            await cleanupFile(transcodedPath, 'success');
-        }
+        // Determine media type from mimetype
+        const mediaType = isVideoFile ? 'video' : 'image';
+        const format = req.file.mimetype.split('/')[1] || 'unknown';
 
         return res.status(200).json({
             success: true,
             message: 'Story media uploaded successfully',
             data: {
-                url: result.secure_url,
-                publicId: result.public_id,
+                url: uploadResult.url,
+                publicId: uploadResult.key, // Use key as publicId
                 type: mediaType,
-                format: result.format,
-                fileSize: result.bytes || req.file.size
+                format: format,
+                fileSize: req.file.size
             }
         });
 
     } catch (error) {
-        // Extract actual error from wrapped error objects (Cloudinary sometimes wraps errors)
-        const actualError = error?.error || error;
-        const errorMessage = actualError?.message || error?.message || 'Unknown error occurred';
-        const errorCode = actualError?.code || error?.code;
-        const errorName = actualError?.name || error?.name;
+        const errorMessage = error?.message || 'Unknown error occurred';
+        const errorCode = error?.code;
         
         console.error('[StoryController] Story media upload error:', error);
-        console.error('[StoryController] Error details:', {
-            message: errorMessage,
-            code: errorCode,
-            name: errorName,
-            stack: actualError?.stack || error?.stack,
-            originalPath,
-            transcodedPath,
-            hasFile: !!req.file,
-            filePath: req.file?.path,
-            mimetype: req.file?.mimetype,
-            uploadPreset: process.env.UPLOAD_PRESET ? 'configured' : 'missing'
-        });
         
-        // Cleanup transcoded file on error (original file is managed by multer)
-        if (transcodedPath) {
-            await cleanupFile(transcodedPath, 'error');
-        }
-
         // Determine error status code and message based on error type
         let statusCode = 500;
         let userMessage = 'Failed to upload story media';
@@ -479,9 +378,6 @@ const uploadStoryMedia = async (req, res) => {
         if (errorCode === 'ENOTFOUND' || errorCode === 'ECONNREFUSED' || errorCode === 'ETIMEDOUT') {
             statusCode = 503;
             userMessage = 'Unable to connect to media upload service';
-        } else if (errorMessage?.includes('UPLOAD_PRESET') || errorMessage?.includes('Cloudinary')) {
-            statusCode = 500;
-            userMessage = 'Media upload service configuration error';
         } else if (errorMessage?.includes('file') || errorMessage?.includes('path')) {
             statusCode = 400;
             userMessage = 'File upload error';

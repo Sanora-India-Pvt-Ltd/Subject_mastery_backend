@@ -1,6 +1,6 @@
 const express = require('express');
 const { protect } = require('../../middleware/auth');
-const upload = require('../../middleware/upload');
+const upload = require('../../middleware/s3Upload');
 const {
     createStory,
     getUserStories,

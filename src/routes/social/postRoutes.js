@@ -1,6 +1,7 @@
 const express = require('express');
 const { protect } = require('../../middleware/auth');
-const upload = require('../../middleware/upload');
+const s3Upload = require('../../middleware/s3Upload');
+const diskUpload = require('../../middleware/upload'); // For videos (needs local file for transcoding)
 const {
     createPost,
     getAllPosts,
@@ -17,9 +18,11 @@ const router = express.Router();
 
 // Create a new post with optional file uploads (combined upload + create)
 // POST /api/posts/create
-// Supports: single file (upload.single('media')) or multiple files (upload.array('media', 10))
+// Uses diskStorage for videos (needed for transcoding), s3Upload for images
+// Supports: single file or multiple files (upload.array('media', 10))
 // Body: { caption: string (optional), media: file(s) }
-router.post('/create', protect, upload.array('media', 10), createPost);
+// Note: Videos use diskStorage so they can be transcoded, then uploaded to S3
+router.post('/create', protect, diskUpload.array('media', 10), createPost);
 
 // Get all posts (for feed) - pagination supported
 // GET /api/posts/all?page=1&limit=10

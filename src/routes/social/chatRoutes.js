@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../../middleware/auth');
 const { limitMessageRequests, limitConversationRequests } = require('../../middleware/chatRateLimiter');
-const upload = require('../../middleware/upload');
+const upload = require('../../middleware/s3Upload');
 const {
     getConversations,
     getOrCreateConversation,

@@ -1,5 +1,5 @@
 const express = require("express");
-const upload = require("../middleware/upload");
+const upload = require("../middleware/s3Upload");
 const { protect } = require("../middleware/auth");
 const { 
     uploadMedia, 

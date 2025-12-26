@@ -3,7 +3,7 @@ const Message = require('../../models/social/Message');
 const User = require('../../models/authorization/User');
 const Media = require('../../models/Media');
 const mongoose = require('mongoose');
-const cloudinary = require('../../config/cloudinary');
+const StorageService = require('../../services/storage.service');
 const { getIO } = require('../../socket/socketServer');
 const { isUserOnline, getUserLastSeen } = require('../../config/redisStub');
 
@@ -1121,17 +1121,18 @@ const uploadGroupPhoto = async (req, res) => {
         // Group-specific folder path
         const groupFolder = `group_uploads/${groupId}/photos`;
 
-        // Delete old group image from Cloudinary if it exists
+        // Delete old group image from S3 if it exists
         if (group.groupImage) {
             try {
-                // Extract public_id from the old group image URL
-                // Format: https://res.cloudinary.com/.../group_uploads/groupId/photos/filename
-                const oldPublicId = group.groupImage.split('/').slice(-2).join('/').split('.')[0];
-                
-                // Try to delete the old image
-                await cloudinary.uploader.destroy(oldPublicId, { invalidate: true });
-                
-                // Also delete from Media collection if it exists
+                // Find the media record to get the S3 key
+                const oldMedia = await Media.findOne({ 
+                    url: group.groupImage 
+                });
+                if (oldMedia && oldMedia.public_id) {
+                    // public_id contains the S3 key
+                    await StorageService.delete(oldMedia.public_id);
+                }
+                // Delete from Media collection
                 await Media.findOneAndDelete({ 
                     url: group.groupImage 
                 });
@@ -1141,31 +1142,36 @@ const uploadGroupPhoto = async (req, res) => {
             }
         }
 
-        // Upload new group image to group-specific folder
-        const result = await cloudinary.uploader.upload(req.file.path, {
-            folder: groupFolder,
-            upload_preset: process.env.UPLOAD_PRESET,
-            resource_type: 'image',
-            transformation: [
-                { width: 500, height: 500, crop: 'fill', gravity: 'auto' },
-                { quality: '100' }
-            ]
-        });
+        // Handle file upload based on storage type
+        // diskUpload provides file.path, multer-s3 provides file.location and file.key
+        let uploadResult;
+        if (req.file.path) {
+            // File was saved to disk (diskStorage) - upload to S3
+            uploadResult = await StorageService.uploadFromPath(req.file.path);
+        } else if (req.file.location && req.file.key) {
+            // File was already uploaded via multer-s3
+            uploadResult = await StorageService.uploadFromRequest(req.file);
+        } else {
+            throw new Error('Invalid file object: missing path (diskStorage) or location/key (multer-s3)');
+        }
+
+        const format = req.file.mimetype.split('/')[1] || 'unknown';
 
         // Update group's groupImage field
-        group.groupImage = result.secure_url;
+        group.groupImage = uploadResult.url;
         await group.save();
 
         // Save upload record to database
         const mediaRecord = await Media.create({
             userId: userId, // Track who uploaded it
-            url: result.secure_url,
-            public_id: result.public_id,
-            format: result.format,
-            resource_type: result.resource_type,
-            fileSize: result.bytes || req.file.size,
+            url: uploadResult.url,
+            public_id: uploadResult.key, // Store S3 key in public_id field for backward compatibility
+            format: format,
+            resource_type: 'image',
+            fileSize: req.file.size,
             originalFilename: req.file.originalname,
-            folder: groupFolder
+            folder: 'group_uploads',
+            provider: uploadResult.provider
         });
 
         // Populate for response
@@ -1217,7 +1223,7 @@ const uploadGroupPhoto = async (req, res) => {
         const io = getIO();
         io.to(`conversation:${groupId}`).emit('group:photo:updated', {
             groupId: groupId,
-            groupImage: result.secure_url,
+            groupImage: uploadResult.url,
             updatedBy: userId.toString()
         });
 
@@ -1226,10 +1232,10 @@ const uploadGroupPhoto = async (req, res) => {
             message: 'Group photo uploaded successfully',
             data: {
                 id: mediaRecord._id,
-                url: result.secure_url,
-                public_id: result.public_id,
-                format: result.format,
-                fileSize: result.bytes || req.file.size,
+                url: uploadResult.url,
+                public_id: uploadResult.key,
+                format: format,
+                fileSize: req.file.size,
                 group: {
                     ...group.toObject(),
                     participants: participantsWithStatus,
