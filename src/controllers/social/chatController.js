@@ -1258,6 +1258,610 @@ const uploadGroupPhoto = async (req, res) => {
     }
 };
 
+// Remove group photo
+const removeGroupPhoto = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { groupId } = req.params;
+
+        // Validate group ID
+        if (!groupId || !mongoose.Types.ObjectId.isValid(groupId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid group ID is required'
+            });
+        }
+
+        // Find the group
+        const group = await Conversation.findById(groupId);
+        if (!group) {
+            return res.status(404).json({
+                success: false,
+                message: 'Group not found'
+            });
+        }
+
+        // Check if it's a group
+        if (!group.isGroup) {
+            return res.status(400).json({
+                success: false,
+                message: 'This is not a group conversation'
+            });
+        }
+
+        // Check if user is a participant
+        const isParticipant = group.participants.some(
+            p => p.toString() === userId.toString()
+        );
+        if (!isParticipant) {
+            return res.status(403).json({
+                success: false,
+                message: 'You are not a participant of this group'
+            });
+        }
+
+        // Check if user is an admin or creator
+        const isAdmin = group.admins && group.admins.some(
+            adminId => adminId.toString() === userId.toString()
+        );
+        const isCreator = group.createdBy && group.createdBy.toString() === userId.toString();
+
+        if (!isAdmin && !isCreator) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only group admins or creator can remove group photo'
+            });
+        }
+
+        // Check if group has a photo
+        if (!group.groupImage) {
+            return res.status(404).json({
+                success: false,
+                message: 'No group photo found to remove'
+            });
+        }
+
+        const groupImageUrl = group.groupImage;
+
+        // Find the media record to get the S3 key
+        const media = await Media.findOne({ 
+            url: groupImageUrl 
+        });
+
+        // Delete from S3 if media record exists
+        if (media && media.public_id) {
+            try {
+                await StorageService.delete(media.public_id);
+            } catch (deleteError) {
+                console.warn('Failed to delete group photo from S3:', deleteError.message);
+                // Continue with database deletion even if S3 deletion fails
+            }
+        }
+
+        // Delete from Media collection if it exists
+        if (media) {
+            await Media.findByIdAndDelete(media._id);
+        }
+
+        // Clear group image from group record
+        group.groupImage = null;
+        await group.save();
+
+        // Populate for response
+        await group.populate('participants', 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage');
+        await group.populate('createdBy', 'profile.name.first profile.name.last profile.name.full profile.profileImage');
+
+        // Add online status for participants
+        const participantsWithStatus = await Promise.all(
+            group.participants.map(async (participant) => {
+                const online = await isUserOnline(participant._id.toString());
+                const lastSeen = await getUserLastSeen(participant._id.toString());
+                
+                const participantObj = participant.toObject ? participant.toObject() : participant;
+                
+                const name = participantObj.profile?.name?.full || 
+                            (participantObj.profile?.name?.first && participantObj.profile?.name?.last 
+                                ? `${participantObj.profile.name.first} ${participantObj.profile.name.last}`.trim()
+                                : participantObj.profile?.name?.first || participantObj.profile?.name?.last || 
+                                  participantObj.name || 
+                                  (participantObj.firstName || participantObj.lastName 
+                                    ? `${participantObj.firstName || ''} ${participantObj.lastName || ''}`.trim()
+                                    : ''));
+                
+                const profileImage = participantObj.profile?.profileImage || participantObj.profileImage || '';
+                
+                return {
+                    _id: participantObj._id,
+                    name: name,
+                    profileImage: profileImage,
+                    isOnline: online,
+                    lastSeen: lastSeen
+                };
+            })
+        );
+
+        // Extract creator info
+        const creatorObj = group.createdBy?.toObject ? group.createdBy.toObject() : group.createdBy;
+        const creatorName = creatorObj?.profile?.name?.full || 
+                          (creatorObj?.profile?.name?.first && creatorObj?.profile?.name?.last 
+                              ? `${creatorObj.profile.name.first} ${creatorObj.profile.name.last}`.trim()
+                              : creatorObj?.profile?.name?.first || creatorObj?.profile?.name?.last || 
+                                creatorObj?.name || 
+                                (creatorObj?.firstName || creatorObj?.lastName 
+                                  ? `${creatorObj.firstName || ''} ${creatorObj.lastName || ''}`.trim()
+                                  : ''));
+        const creatorProfileImage = creatorObj?.profile?.profileImage || creatorObj?.profileImage || '';
+
+        // Emit via WebSocket to notify all participants
+        const io = getIO();
+        io.to(`conversation:${groupId}`).emit('group:photo:removed', {
+            groupId: groupId,
+            groupImage: null,
+            removedBy: userId.toString()
+        });
+
+        res.status(200).json({
+            success: true,
+            message: 'Group photo removed successfully',
+            data: {
+                group: {
+                    ...group.toObject(),
+                    participants: participantsWithStatus,
+                    createdBy: creatorObj ? {
+                        _id: creatorObj._id,
+                        name: creatorName,
+                        profileImage: creatorProfileImage
+                    } : null
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Remove group photo error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to remove group photo',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Remove a member from a group (admins/creator only)
+const removeGroupMember = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { groupId } = req.params;
+        const { memberId } = req.body;
+
+        // Validate group ID
+        if (!groupId || !mongoose.Types.ObjectId.isValid(groupId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid group ID is required'
+            });
+        }
+
+        // Validate member ID
+        if (!memberId || !mongoose.Types.ObjectId.isValid(memberId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid member ID is required'
+            });
+        }
+
+        // Find the group
+        const group = await Conversation.findById(groupId);
+        if (!group) {
+            return res.status(404).json({
+                success: false,
+                message: 'Group not found'
+            });
+        }
+
+        // Check if it's a group
+        if (!group.isGroup) {
+            return res.status(400).json({
+                success: false,
+                message: 'This is not a group conversation'
+            });
+        }
+
+        // Check if user is a participant
+        const isParticipant = group.participants.some(
+            p => p.toString() === userId.toString()
+        );
+        if (!isParticipant) {
+            return res.status(403).json({
+                success: false,
+                message: 'You are not a participant of this group'
+            });
+        }
+
+        // Check if user is an admin or creator
+        const isAdmin = group.admins && group.admins.some(
+            adminId => adminId.toString() === userId.toString()
+        );
+        const isCreator = group.createdBy && group.createdBy.toString() === userId.toString();
+
+        if (!isAdmin && !isCreator) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only group admins or creator can remove members'
+            });
+        }
+
+        // Check if member to be removed exists in participants
+        const memberObjectId = new mongoose.Types.ObjectId(memberId);
+        const memberIndex = group.participants.findIndex(
+            p => p.toString() === memberId.toString()
+        );
+
+        if (memberIndex === -1) {
+            return res.status(404).json({
+                success: false,
+                message: 'Member not found in group'
+            });
+        }
+
+        // Prevent removing the creator
+        if (group.createdBy && group.createdBy.toString() === memberId.toString()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Cannot remove the group creator'
+            });
+        }
+
+        // Prevent removing yourself if you're an admin (optional - you might want to allow this)
+        // For now, we'll allow admins to remove themselves, but not the creator
+        if (memberId.toString() === userId.toString() && isCreator) {
+            return res.status(400).json({
+                success: false,
+                message: 'Group creator cannot remove themselves from the group'
+            });
+        }
+
+        // Remove member from participants
+        group.participants = group.participants.filter(
+            p => p.toString() !== memberId.toString()
+        );
+
+        // Remove from admins if they were an admin
+        if (group.admins && group.admins.length > 0) {
+            group.admins = group.admins.filter(
+                adminId => adminId.toString() !== memberId.toString()
+            );
+        }
+
+        await group.save();
+
+        // Populate for response
+        await group.populate('participants', 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage');
+        await group.populate('createdBy', 'profile.name.first profile.name.last profile.name.full profile.profileImage');
+        await group.populate('admins', 'profile.name.first profile.name.last profile.name.full profile.profileImage');
+
+        // Add online status for participants
+        const participantsWithStatus = await Promise.all(
+            group.participants.map(async (participant) => {
+                const online = await isUserOnline(participant._id.toString());
+                const lastSeen = await getUserLastSeen(participant._id.toString());
+                
+                const participantObj = participant.toObject ? participant.toObject() : participant;
+                
+                const name = participantObj.profile?.name?.full || 
+                            (participantObj.profile?.name?.first && participantObj.profile?.name?.last 
+                                ? `${participantObj.profile.name.first} ${participantObj.profile.name.last}`.trim()
+                                : participantObj.profile?.name?.first || participantObj.profile?.name?.last || 
+                                  participantObj.name || 
+                                  (participantObj.firstName || participantObj.lastName 
+                                    ? `${participantObj.firstName || ''} ${participantObj.lastName || ''}`.trim()
+                                    : ''));
+                
+                const profileImage = participantObj.profile?.profileImage || participantObj.profileImage || '';
+                
+                return {
+                    _id: participantObj._id,
+                    name: name,
+                    profileImage: profileImage,
+                    isOnline: online,
+                    lastSeen: lastSeen
+                };
+            })
+        );
+
+        // Extract creator info
+        const creatorObj = group.createdBy?.toObject ? group.createdBy.toObject() : group.createdBy;
+        const creatorName = creatorObj?.profile?.name?.full || 
+                          (creatorObj?.profile?.name?.first && creatorObj?.profile?.name?.last 
+                              ? `${creatorObj.profile.name.first} ${creatorObj.profile.name.last}`.trim()
+                              : creatorObj?.profile?.name?.first || creatorObj?.profile?.name?.last || 
+                                creatorObj?.name || 
+                                (creatorObj?.firstName || creatorObj?.lastName 
+                                  ? `${creatorObj.firstName || ''} ${creatorObj.lastName || ''}`.trim()
+                                  : ''));
+        const creatorProfileImage = creatorObj?.profile?.profileImage || creatorObj?.profileImage || '';
+
+        // Get removed member info for WebSocket event
+        const removedMember = await User.findById(memberId).select('profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage');
+        const removedMemberObj = removedMember?.toObject ? removedMember.toObject() : removedMember;
+        const removedMemberName = removedMemberObj?.profile?.name?.full || 
+                                 (removedMemberObj?.profile?.name?.first && removedMemberObj?.profile?.name?.last 
+                                     ? `${removedMemberObj.profile.name.first} ${removedMemberObj.profile.name.last}`.trim()
+                                     : removedMemberObj?.profile?.name?.first || removedMemberObj?.profile?.name?.last || 
+                                       removedMemberObj?.name || 
+                                       (removedMemberObj?.firstName || removedMemberObj?.lastName 
+                                         ? `${removedMemberObj.firstName || ''} ${removedMemberObj.lastName || ''}`.trim()
+                                         : ''));
+        const removedMemberProfileImage = removedMemberObj?.profile?.profileImage || removedMemberObj?.profileImage || '';
+
+        // Emit via WebSocket to notify all participants
+        const io = getIO();
+        io.to(`conversation:${groupId}`).emit('group:member:removed', {
+            groupId: groupId,
+            removedMemberId: memberId,
+            removedMember: removedMemberObj ? {
+                _id: removedMemberObj._id,
+                name: removedMemberName,
+                profileImage: removedMemberProfileImage
+            } : null,
+            removedBy: userId.toString(),
+            participants: participantsWithStatus
+        });
+
+        // Also notify the removed member
+        io.to(`user:${memberId}`).emit('group:removed', {
+            groupId: groupId,
+            groupName: group.groupName
+        });
+
+        res.json({
+            success: true,
+            message: 'Member removed from group successfully',
+            data: {
+                ...group.toObject(),
+                participants: participantsWithStatus,
+                createdBy: creatorObj ? {
+                    _id: creatorObj._id,
+                    name: creatorName,
+                    profileImage: creatorProfileImage
+                } : null,
+                removedMember: removedMemberObj ? {
+                    _id: removedMemberObj._id,
+                    name: removedMemberName,
+                    profileImage: removedMemberProfileImage
+                } : null
+            }
+        });
+    } catch (error) {
+        console.error('Remove group member error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to remove member from group',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Make a member an admin (admins/creator only)
+const addGroupAdmin = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { groupId } = req.params;
+        const { memberId } = req.body;
+
+        // Validate group ID
+        if (!groupId || !mongoose.Types.ObjectId.isValid(groupId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid group ID is required'
+            });
+        }
+
+        // Validate member ID
+        if (!memberId || !mongoose.Types.ObjectId.isValid(memberId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid member ID is required'
+            });
+        }
+
+        // Find the group
+        const group = await Conversation.findById(groupId);
+        if (!group) {
+            return res.status(404).json({
+                success: false,
+                message: 'Group not found'
+            });
+        }
+
+        // Check if it's a group
+        if (!group.isGroup) {
+            return res.status(400).json({
+                success: false,
+                message: 'This is not a group conversation'
+            });
+        }
+
+        // Check if user is a participant
+        const isParticipant = group.participants.some(
+            p => p.toString() === userId.toString()
+        );
+        if (!isParticipant) {
+            return res.status(403).json({
+                success: false,
+                message: 'You are not a participant of this group'
+            });
+        }
+
+        // Check if user is an admin or creator
+        const isAdmin = group.admins && group.admins.some(
+            adminId => adminId.toString() === userId.toString()
+        );
+        const isCreator = group.createdBy && group.createdBy.toString() === userId.toString();
+
+        if (!isAdmin && !isCreator) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only group admins or creator can make members admin'
+            });
+        }
+
+        // Check if member to be made admin exists in participants
+        const memberObjectId = new mongoose.Types.ObjectId(memberId);
+        const isMemberParticipant = group.participants.some(
+            p => p.toString() === memberId.toString()
+        );
+
+        if (!isMemberParticipant) {
+            return res.status(404).json({
+                success: false,
+                message: 'User is not a member of this group'
+            });
+        }
+
+        // Check if user is already an admin
+        const isAlreadyAdmin = group.admins && group.admins.some(
+            adminId => adminId.toString() === memberId.toString()
+        );
+
+        if (isAlreadyAdmin) {
+            return res.status(400).json({
+                success: false,
+                message: 'User is already an admin'
+            });
+        }
+
+        // Initialize admins array if it doesn't exist
+        if (!group.admins) {
+            group.admins = [];
+        }
+
+        // Add member to admins array
+        group.admins.push(memberObjectId);
+        await group.save();
+
+        // Populate for response
+        await group.populate('participants', 'profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage');
+        await group.populate('createdBy', 'profile.name.first profile.name.last profile.name.full profile.profileImage');
+        await group.populate('admins', 'profile.name.first profile.name.last profile.name.full profile.profileImage');
+
+        // Add online status for participants
+        const participantsWithStatus = await Promise.all(
+            group.participants.map(async (participant) => {
+                const online = await isUserOnline(participant._id.toString());
+                const lastSeen = await getUserLastSeen(participant._id.toString());
+                
+                const participantObj = participant.toObject ? participant.toObject() : participant;
+                
+                const name = participantObj.profile?.name?.full || 
+                            (participantObj.profile?.name?.first && participantObj.profile?.name?.last 
+                                ? `${participantObj.profile.name.first} ${participantObj.profile.name.last}`.trim()
+                                : participantObj.profile?.name?.first || participantObj.profile?.name?.last || 
+                                  participantObj.name || 
+                                  (participantObj.firstName || participantObj.lastName 
+                                    ? `${participantObj.firstName || ''} ${participantObj.lastName || ''}`.trim()
+                                    : ''));
+                
+                const profileImage = participantObj.profile?.profileImage || participantObj.profileImage || '';
+                
+                return {
+                    _id: participantObj._id,
+                    name: name,
+                    profileImage: profileImage,
+                    isOnline: online,
+                    lastSeen: lastSeen
+                };
+            })
+        );
+
+        // Extract creator info
+        const creatorObj = group.createdBy?.toObject ? group.createdBy.toObject() : group.createdBy;
+        const creatorName = creatorObj?.profile?.name?.full || 
+                          (creatorObj?.profile?.name?.first && creatorObj?.profile?.name?.last 
+                              ? `${creatorObj.profile.name.first} ${creatorObj.profile.name.last}`.trim()
+                              : creatorObj?.profile?.name?.first || creatorObj?.profile?.name?.last || 
+                                creatorObj?.name || 
+                                (creatorObj?.firstName || creatorObj?.lastName 
+                                  ? `${creatorObj.firstName || ''} ${creatorObj.lastName || ''}`.trim()
+                                  : ''));
+        const creatorProfileImage = creatorObj?.profile?.profileImage || creatorObj?.profileImage || '';
+
+        // Get new admin info for WebSocket event
+        const newAdmin = await User.findById(memberId).select('profile.name.first profile.name.last profile.name.full profile.profileImage firstName lastName name profileImage');
+        const newAdminObj = newAdmin?.toObject ? newAdmin.toObject() : newAdmin;
+        const newAdminName = newAdminObj?.profile?.name?.full || 
+                           (newAdminObj?.profile?.name?.first && newAdminObj?.profile?.name?.last 
+                               ? `${newAdminObj.profile.name.first} ${newAdminObj.profile.name.last}`.trim()
+                               : newAdminObj?.profile?.name?.first || newAdminObj?.profile?.name?.last || 
+                                 newAdminObj?.name || 
+                                 (newAdminObj?.firstName || newAdminObj?.lastName 
+                                   ? `${newAdminObj.firstName || ''} ${newAdminObj.lastName || ''}`.trim()
+                                   : ''));
+        const newAdminProfileImage = newAdminObj?.profile?.profileImage || newAdminObj?.profileImage || '';
+
+        // Extract admins info
+        const adminsWithStatus = await Promise.all(
+            group.admins.map(async (admin) => {
+                const adminObj = admin.toObject ? admin.toObject() : admin;
+                const adminName = adminObj?.profile?.name?.full || 
+                                  (adminObj?.profile?.name?.first && adminObj?.profile?.name?.last 
+                                      ? `${adminObj.profile.name.first} ${adminObj.profile.name.last}`.trim()
+                                      : adminObj?.profile?.name?.first || adminObj?.profile?.name?.last || 
+                                        adminObj?.name || 
+                                        (adminObj?.firstName || adminObj?.lastName 
+                                          ? `${adminObj.firstName || ''} ${adminObj.lastName || ''}`.trim()
+                                          : ''));
+                const adminProfileImage = adminObj?.profile?.profileImage || adminObj?.profileImage || '';
+                
+                return {
+                    _id: adminObj._id,
+                    name: adminName,
+                    profileImage: adminProfileImage
+                };
+            })
+        );
+
+        // Emit via WebSocket to notify all participants
+        const io = getIO();
+        io.to(`conversation:${groupId}`).emit('group:admin:added', {
+            groupId: groupId,
+            newAdminId: memberId,
+            newAdmin: newAdminObj ? {
+                _id: newAdminObj._id,
+                name: newAdminName,
+                profileImage: newAdminProfileImage
+            } : null,
+            addedBy: userId.toString(),
+            admins: adminsWithStatus
+        });
+
+        res.json({
+            success: true,
+            message: 'Member promoted to admin successfully',
+            data: {
+                ...group.toObject(),
+                participants: participantsWithStatus,
+                admins: adminsWithStatus,
+                createdBy: creatorObj ? {
+                    _id: creatorObj._id,
+                    name: creatorName,
+                    profileImage: creatorProfileImage
+                } : null,
+                newAdmin: newAdminObj ? {
+                    _id: newAdminObj._id,
+                    name: newAdminName,
+                    profileImage: newAdminProfileImage
+                } : null
+            }
+        });
+    } catch (error) {
+        console.error('Add group admin error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to make member admin',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     getConversations,
     getOrCreateConversation,
@@ -1268,6 +1872,9 @@ module.exports = {
     getUnreadCount,
     createGroup,
     updateGroupInfo,
-    uploadGroupPhoto
+    uploadGroupPhoto,
+    removeGroupPhoto,
+    removeGroupMember,
+    addGroupAdmin
 };
 

@@ -13,7 +13,10 @@ const {
     getUnreadCount,
     createGroup,
     updateGroupInfo,
-    uploadGroupPhoto
+    uploadGroupPhoto,
+    removeGroupPhoto,
+    removeGroupMember,
+    addGroupAdmin
 } = require('../../controllers/social/chatController');
 
 // All routes require authentication
@@ -33,6 +36,15 @@ router.put('/group/:groupId', updateGroupInfo);
 
 // Upload group photo (admins/creator only)
 router.post('/group/:groupId/photo', upload.single('photo'), uploadGroupPhoto);
+
+// Remove group photo (admins/creator only)
+router.delete('/group/:groupId/photo', removeGroupPhoto);
+
+// Remove member from group (admins/creator only)
+router.delete('/group/:groupId/member', removeGroupMember);
+
+// Make a member an admin (admins/creator only)
+router.post('/group/:groupId/admin', addGroupAdmin);
 
 // Get messages for a conversation
 router.get('/conversation/:conversationId/messages', getMessages);

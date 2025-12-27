@@ -256,8 +256,7 @@ const createReelWithUpload = async (req, res) => {
 
         console.log('[ReelController] Reel created successfully with upload');
 
-        // Fetch comments and comment count
-        const comments = await getFormattedComments(reel._id, 15);
+        // Get comment count
         const commentCount = await reel.getCommentCount();
 
         return res.status(201).json({
@@ -274,7 +273,6 @@ const createReelWithUpload = async (req, res) => {
                     visibility: reel.visibility,
                     views: reel.views || 0,
                     likes: reel.likes || [[], [], [], [], [], []],
-                    comments: comments,
                     likeCount: reel.likeCount,
                     commentCount: commentCount,
                     createdAt: reel.createdAt,
@@ -356,8 +354,7 @@ const createReel = async (req, res) => {
             profileImage: reel.userId.profile?.profileImage
         } : null;
 
-        // Fetch comments and comment count
-        const comments = await getFormattedComments(reel._id, 15);
+        // Get comment count
         const commentCount = await reel.getCommentCount();
 
         return res.status(201).json({
@@ -374,7 +371,6 @@ const createReel = async (req, res) => {
                     visibility: reel.visibility,
                     views: reel.views || 0,
                     likes: reel.likes || [[], [], [], [], [], []],
-                    comments: comments,
                     likeCount: reel.likeCount,
                     commentCount: commentCount,
                     createdAt: reel.createdAt,
@@ -531,7 +527,6 @@ const getReels = async (req, res) => {
                         profileImage: reel.userId.profile?.profileImage
                     } : null;
 
-                    const comments = await getFormattedComments(reel._id, 15);
                     const commentCount = await reel.getCommentCount();
 
                     return {
@@ -544,7 +539,6 @@ const getReels = async (req, res) => {
                         visibility: reel.visibility,
                         views: reel.views || 0,
                         likes: reel.likes || [[], [], [], [], [], []],
-                        comments: comments,
                         likeCount: reel.likeCount,
                         commentCount: commentCount,
                         createdAt: reel.createdAt,
@@ -692,7 +686,6 @@ const getUserReels = async (req, res) => {
                         profileImage: reel.userId.profile?.profileImage
                     } : null;
 
-                    const comments = await getFormattedComments(reel._id, 15);
                     const commentCount = await reel.getCommentCount();
 
                     return {
@@ -705,7 +698,6 @@ const getUserReels = async (req, res) => {
                         visibility: reel.visibility,
                         views: reel.views || 0,
                         likes: reel.likes || [[], [], [], [], [], []],
-                        comments: comments,
                         likeCount: reel.likeCount,
                         commentCount: commentCount,
                         createdAt: reel.createdAt,
@@ -846,8 +838,7 @@ const toggleLikeReel = async (req, res) => {
             profileImage: reel.userId.profile?.profileImage
         } : null;
 
-        // Fetch comments and comment count
-        const comments = await getFormattedComments(reel._id, 15);
+        // Get comment count
         const commentCount = await reel.getCommentCount();
 
         return res.status(200).json({
@@ -864,7 +855,6 @@ const toggleLikeReel = async (req, res) => {
                     visibility: reel.visibility,
                     views: reel.views || 0,
                     likes: reel.likes || [[], [], [], [], [], []],
-                    comments: comments,
                     likeCount: reel.likeCount,
                     commentCount: commentCount,
                     createdAt: reel.createdAt,
@@ -950,8 +940,7 @@ const addComment = async (req, res) => {
             profileImage: reel.userId.profile?.profileImage
         } : null;
 
-        // Fetch comments and comment count
-        const comments = await getFormattedComments(reel._id, 15);
+        // Get comment count
         const commentCount = await reel.getCommentCount();
 
         return res.status(201).json({
@@ -968,7 +957,6 @@ const addComment = async (req, res) => {
                     visibility: reel.visibility,
                     views: reel.views || 0,
                     likes: reel.likes || [[], [], [], [], [], []],
-                    comments: comments,
                     likeCount: reel.likeCount,
                     commentCount: commentCount,
                     createdAt: reel.createdAt,
@@ -1064,8 +1052,7 @@ const deleteComment = async (req, res) => {
             profileImage: reel.userId.profile?.profileImage
         } : null;
 
-        // Fetch comments and comment count
-        const comments = await getFormattedComments(reel._id, 15);
+        // Get comment count
         const commentCount = await reel.getCommentCount();
 
         return res.status(200).json({
@@ -1082,7 +1069,6 @@ const deleteComment = async (req, res) => {
                     visibility: reel.visibility,
                     views: reel.views || 0,
                     likes: reel.likes || [[], [], [], [], [], []],
-                    comments: comments,
                     likeCount: reel.likeCount,
                     commentCount: commentCount,
                     createdAt: reel.createdAt,

@@ -463,26 +463,131 @@ Success response:
 
 ## Media Uploads (Profile and User Media)
 
+### Upload Profile Image
 POST `/api/media/profile-image` (protected, multipart/form-data)
 - Field: `profileImage`
+- Allowed formats: JPEG, PNG, GIF, WebP
 
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "Profile image uploaded successfully",
+  "data": {
+    "id": "media_record_id",
+    "url": "https://...",
+    "public_id": "s3_key",
+    "format": "jpg",
+    "fileSize": 1024000,
+    "user": {
+      "id": "user_id",
+      "email": "user@example.com",
+      "name": "John Doe",
+      "profileImage": "https://..."
+    },
+    "uploadedAt": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+### Remove Profile Image
+DELETE `/api/media/profile-image` (protected)
+
+Removes the user's profile image. Deletes the image from storage and clears the profile image field.
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "Profile image removed successfully",
+  "data": {
+    "user": {
+      "id": "user_id",
+      "email": "user@example.com",
+      "name": "John Doe",
+      "profileImage": ""
+    }
+  }
+}
+```
+
+**Error Responses:**
+- `404` - No profile image found to remove
+- `401` - Unauthorized
+- `500` - Server error
+
+### Upload Cover Photo
 POST `/api/media/cover-photo` (protected, multipart/form-data)
 - Field: `coverPhoto`
+- Allowed formats: JPEG, PNG, GIF, WebP
 
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "Cover photo uploaded successfully",
+  "data": {
+    "id": "media_record_id",
+    "url": "https://...",
+    "public_id": "s3_key",
+    "format": "jpg",
+    "fileSize": 1024000,
+    "user": {
+      "id": "user_id",
+      "email": "user@example.com",
+      "name": "John Doe",
+      "coverPhoto": "https://..."
+    },
+    "uploadedAt": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+### Remove Cover Photo
+DELETE `/api/media/cover-photo` (protected)
+
+Removes the user's cover photo. Deletes the image from storage and clears the cover photo field.
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "Cover photo removed successfully",
+  "data": {
+    "user": {
+      "id": "user_id",
+      "email": "user@example.com",
+      "name": "John Doe",
+      "coverPhoto": ""
+    }
+  }
+}
+```
+
+**Error Responses:**
+- `404` - No cover photo found to remove
+- `401` - Unauthorized
+- `500` - Server error
+
+### General Media Upload
 POST `/api/media/upload` (protected, multipart/form-data)
 - Field: `media`
 
+### Get User Media
 GET `/api/media/my-media` (protected)
 
 GET `/api/media/my-images` (protected)
 
 GET `/api/media/user/:id` (public)
 
+### Delete User Media
 DELETE `/api/media/:mediaId` (protected)
 
-Notes:
+**Notes:**
 - Use `multipart/form-data` for all uploads.
-- Return payloads include a `url` and `publicId` (Cloudinary).
+- Return payloads include a `url` and `public_id` (S3 key).
+- Old images are automatically deleted from storage when new ones are uploaded.
+- Removing profile image or cover photo also deletes the associated Media record.
 
 ## Institutions and Companies
 

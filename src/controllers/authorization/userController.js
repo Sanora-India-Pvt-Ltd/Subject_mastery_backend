@@ -1455,6 +1455,138 @@ const uploadCoverPhoto = async (req, res) => {
     }
 };
 
+// Remove profile image
+const removeProfileImage = async (req, res) => {
+    try {
+        const user = req.user; // From protect middleware
+
+        // Check if user has a profile image
+        if (!user.profile?.profileImage) {
+            return res.status(404).json({
+                success: false,
+                message: "No profile image found to remove"
+            });
+        }
+
+        const profileImageUrl = user.profile.profileImage;
+
+        // Find the media record to get the S3 key
+        const media = await Media.findOne({ 
+            userId: user._id, 
+            url: profileImageUrl 
+        });
+
+        // Delete from S3 if media record exists
+        if (media && media.public_id) {
+            try {
+                await StorageService.delete(media.public_id);
+            } catch (deleteError) {
+                console.warn('Failed to delete profile image from S3:', deleteError.message);
+                // Continue with database deletion even if S3 deletion fails
+            }
+        }
+
+        // Delete from Media collection if it exists
+        if (media) {
+            await Media.findByIdAndDelete(media._id);
+        }
+
+        // Clear profile image from user record
+        const updatedUser = await User.findByIdAndUpdate(
+            user._id,
+            { 'profile.profileImage': '' },
+            { new: true, runValidators: true }
+        ).lean().select('-auth');
+
+        return res.status(200).json({
+            success: true,
+            message: "Profile image removed successfully",
+            data: {
+                user: {
+                    id: updatedUser._id,
+                    email: updatedUser.profile?.email,
+                    name: updatedUser.profile?.name?.full,
+                    profileImage: updatedUser.profile?.profileImage
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Remove profile image error:', err);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to remove profile image",
+            error: err.message
+        });
+    }
+};
+
+// Remove cover photo
+const removeCoverPhoto = async (req, res) => {
+    try {
+        const user = req.user; // From protect middleware
+
+        // Check if user has a cover photo
+        if (!user.profile?.coverPhoto) {
+            return res.status(404).json({
+                success: false,
+                message: "No cover photo found to remove"
+            });
+        }
+
+        const coverPhotoUrl = user.profile.coverPhoto;
+
+        // Find the media record to get the S3 key
+        const media = await Media.findOne({ 
+            userId: user._id, 
+            url: coverPhotoUrl 
+        });
+
+        // Delete from S3 if media record exists
+        if (media && media.public_id) {
+            try {
+                await StorageService.delete(media.public_id);
+            } catch (deleteError) {
+                console.warn('Failed to delete cover photo from S3:', deleteError.message);
+                // Continue with database deletion even if S3 deletion fails
+            }
+        }
+
+        // Delete from Media collection if it exists
+        if (media) {
+            await Media.findByIdAndDelete(media._id);
+        }
+
+        // Clear cover photo from user record
+        const updatedUser = await User.findByIdAndUpdate(
+            user._id,
+            { 'profile.coverPhoto': '' },
+            { new: true, runValidators: true }
+        ).lean().select('-auth');
+
+        return res.status(200).json({
+            success: true,
+            message: "Cover photo removed successfully",
+            data: {
+                user: {
+                    id: updatedUser._id,
+                    email: updatedUser.profile?.email,
+                    name: updatedUser.profile?.name?.full,
+                    coverPhoto: updatedUser.profile?.coverPhoto
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Remove cover photo error:', err);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to remove cover photo",
+            error: err.message
+        });
+    }
+};
+
 // Get user's media - ensures users can only see their own uploads
 const getUserMedia = async (req, res) => {
     try {
@@ -3181,6 +3313,8 @@ module.exports = {
     uploadMedia,
     uploadProfileImage,
     uploadCoverPhoto,
+    removeProfileImage,
+    removeCoverPhoto,
     getUserMedia,
     getUserImages,
     getUserImagesPublic,

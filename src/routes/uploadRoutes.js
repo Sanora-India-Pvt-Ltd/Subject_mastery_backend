@@ -8,7 +8,9 @@ const {
     getUserMedia,
     getUserImages,
     getUserImagesPublic, 
-    deleteUserMedia 
+    deleteUserMedia,
+    removeProfileImage,
+    removeCoverPhoto
 } = require("../controllers/authorization/userController");
 
 const router = express.Router();
@@ -21,6 +23,12 @@ router.post("/profile-image", protect, upload.single("profileImage"), uploadProf
 
 // Cover photo upload route - ensures image is only associated with the authenticated user
 router.post("/cover-photo", protect, upload.single("coverPhoto"), uploadCoverPhoto);
+
+// Remove profile image route
+router.delete("/profile-image", protect, removeProfileImage);
+
+// Remove cover photo route
+router.delete("/cover-photo", protect, removeCoverPhoto);
 
 // Get user's media - ensures users can only see their own uploads
 router.get("/my-media", protect, getUserMedia);

@@ -526,6 +526,309 @@ fetch('https://api.ulearnandearn.com/api/chat/group/group_id_123/photo', {
 
 ---
 
+### Remove Group Photo
+
+Remove a group photo/avatar. Only group admins or the creator can remove group photos.
+
+**Endpoint:** `DELETE /api/chat/group/:groupId/photo`
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `groupId` (required) - The group conversation ID
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "Group photo removed successfully",
+  "data": {
+    "group": {
+      "_id": "group_conversation_id",
+      "participants": [
+        {
+          "_id": "user_id_1",
+          "name": "John Doe",
+          "profileImage": "https://...",
+          "isOnline": true,
+          "lastSeen": null
+        }
+      ],
+      "isGroup": true,
+      "groupName": "Project Team",
+      "groupImage": null,
+      "createdBy": {
+        "_id": "creator_user_id",
+        "name": "Group Creator",
+        "profileImage": "https://..."
+      },
+      "lastMessage": null,
+      "lastMessageAt": "2024-01-15T10:30:00Z",
+      "createdAt": "2024-01-15T09:00:00Z",
+      "updatedAt": "2024-01-15T11:00:00Z"
+    }
+  }
+}
+```
+
+**Error Responses:**
+- `400` - Valid group ID is required / This is not a group conversation
+- `403` - You are not a participant of this group / Only group admins or creator can remove group photo
+- `404` - Group not found / No group photo found to remove
+- `401` - Unauthorized
+- `500` - Server error
+
+**Notes:**
+- Only group admins or the creator can remove group photos
+- User must be a participant of the group
+- Image is deleted from S3 storage and Media collection
+- A WebSocket event `group:photo:removed` is emitted to all group participants when the photo is removed
+- The event includes `groupId`, `groupImage: null`, and `removedBy` fields
+
+**Example Request:**
+```bash
+curl -X DELETE https://api.ulearnandearn.com/api/chat/group/group_id_123/photo \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+**Using fetch (JavaScript):**
+```javascript
+fetch('https://api.ulearnandearn.com/api/chat/group/group_id_123/photo', {
+  method: 'DELETE',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`
+  }
+})
+  .then(response => response.json())
+  .then(data => console.log(data));
+```
+
+---
+
+### Remove Group Member
+
+Remove a member from a group. Only group admins or the creator can remove members.
+
+**Endpoint:** `DELETE /api/chat/group/:groupId/member`
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `groupId` (required) - The group conversation ID
+
+**Request Body:**
+```json
+{
+  "memberId": "user_id_to_remove"
+}
+```
+
+**Fields:**
+- `memberId` (required, string) - The user ID of the member to remove from the group
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "Member removed from group successfully",
+  "data": {
+    "_id": "group_conversation_id",
+    "participants": [
+      {
+        "_id": "user_id_1",
+        "name": "John Doe",
+        "profileImage": "https://...",
+        "isOnline": true,
+        "lastSeen": null
+      }
+    ],
+    "isGroup": true,
+    "groupName": "Project Team",
+    "groupImage": "https://...",
+    "createdBy": {
+      "_id": "creator_user_id",
+      "name": "Group Creator",
+      "profileImage": "https://..."
+    },
+    "admins": ["admin_user_id_1"],
+    "removedMember": {
+      "_id": "removed_user_id",
+      "name": "Removed User",
+      "profileImage": "https://..."
+    },
+    "lastMessage": null,
+    "lastMessageAt": "2024-01-15T10:30:00Z",
+    "createdAt": "2024-01-15T09:00:00Z",
+    "updatedAt": "2024-01-15T11:00:00Z"
+  }
+}
+```
+
+**Error Responses:**
+- `400` - Valid group ID is required / Valid member ID is required / Cannot remove creator / Group creator cannot remove themselves from the group
+- `403` - You are not a participant of this group / Only group admins or creator can remove members
+- `404` - Group not found / Member not found in group
+- `401` - Unauthorized
+- `500` - Server error
+
+**Notes:**
+- Only group admins or the creator can remove members
+- User must be a participant of the group
+- The group creator cannot be removed from the group
+- If the removed member was an admin, they are also removed from the admins array
+- A WebSocket event `group:member:removed` is emitted to all group participants when a member is removed
+- A WebSocket event `group:removed` is emitted to the removed member to notify them
+- The event includes `groupId`, `removedMemberId`, `removedMember`, `removedBy`, and updated `participants` list
+
+**Example Request:**
+```bash
+curl -X DELETE https://api.ulearnandearn.com/api/chat/group/group_id_123/member \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "memberId": "user_id_to_remove"
+  }'
+```
+
+**Using fetch (JavaScript):**
+```javascript
+fetch('https://api.ulearnandearn.com/api/chat/group/group_id_123/member', {
+  method: 'DELETE',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    memberId: 'user_id_to_remove'
+  })
+})
+  .then(response => response.json())
+  .then(data => console.log(data));
+```
+
+---
+
+### Make Member Admin
+
+Promote a group member to admin. Only existing admins or the creator can make members admin.
+
+**Endpoint:** `POST /api/chat/group/:groupId/admin`
+
+**Authentication:** Required
+
+**URL Parameters:**
+- `groupId` (required) - The group conversation ID
+
+**Request Body:**
+```json
+{
+  "memberId": "user_id_to_make_admin"
+}
+```
+
+**Fields:**
+- `memberId` (required, string) - The user ID of the member to promote to admin
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "Member promoted to admin successfully",
+  "data": {
+    "_id": "group_conversation_id",
+    "participants": [
+      {
+        "_id": "user_id_1",
+        "name": "John Doe",
+        "profileImage": "https://...",
+        "isOnline": true,
+        "lastSeen": null
+      },
+      {
+        "_id": "user_id_2",
+        "name": "Jane Smith",
+        "profileImage": "https://...",
+        "isOnline": false,
+        "lastSeen": "2024-01-15T10:25:00Z"
+      }
+    ],
+    "isGroup": true,
+    "groupName": "Project Team",
+    "groupImage": "https://...",
+    "createdBy": {
+      "_id": "creator_user_id",
+      "name": "Group Creator",
+      "profileImage": "https://..."
+    },
+    "admins": [
+      {
+        "_id": "admin_user_id_1",
+        "name": "Admin One",
+        "profileImage": "https://..."
+      },
+      {
+        "_id": "new_admin_id",
+        "name": "New Admin",
+        "profileImage": "https://..."
+      }
+    ],
+    "newAdmin": {
+      "_id": "new_admin_id",
+      "name": "New Admin",
+      "profileImage": "https://..."
+    },
+    "lastMessage": null,
+    "lastMessageAt": "2024-01-15T10:30:00Z",
+    "createdAt": "2024-01-15T09:00:00Z",
+    "updatedAt": "2024-01-15T11:00:00Z"
+  }
+}
+```
+
+**Error Responses:**
+- `400` - Valid group ID is required / Valid member ID is required / User is already an admin
+- `403` - You are not a participant of this group / Only group admins or creator can make members admin
+- `404` - Group not found / User is not a member of this group
+- `401` - Unauthorized
+- `500` - Server error
+
+**Notes:**
+- Only group admins or the creator can promote members to admin
+- User must be a participant of the group
+- The target user must already be a member of the group
+- If the user is already an admin, the request will fail
+- A WebSocket event `group:admin:added` is emitted to all group participants when a new admin is added
+- The event includes `groupId`, `newAdminId`, `newAdmin`, `addedBy`, and updated `admins` list
+- New admins have the same permissions as other admins and the creator (can update group info, upload photos, remove members, etc.)
+
+**Example Request:**
+```bash
+curl -X POST https://api.ulearnandearn.com/api/chat/group/group_id_123/admin \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "memberId": "user_id_to_make_admin"
+  }'
+```
+
+**Using fetch (JavaScript):**
+```javascript
+fetch('https://api.ulearnandearn.com/api/chat/group/group_id_123/admin', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${accessToken}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    memberId: 'user_id_to_make_admin'
+  })
+})
+  .then(response => response.json())
+  .then(data => console.log(data));
+```
+
+---
+
 ## Messages
 
 ### Get Messages for a Conversation
@@ -952,6 +1255,9 @@ The API automatically extracts and returns the correct format, so frontend can r
 | POST | `/api/chat/group` | Create group conversation | Yes |
 | PUT | `/api/chat/group/:groupId` | Update group info | Yes |
 | POST | `/api/chat/group/:groupId/photo` | Upload group photo | Yes |
+| DELETE | `/api/chat/group/:groupId/photo` | Remove group photo | Yes |
+| DELETE | `/api/chat/group/:groupId/member` | Remove group member | Yes |
+| POST | `/api/chat/group/:groupId/admin` | Make member admin | Yes |
 | GET | `/api/chat/conversation/:conversationId/messages` | Get messages | Yes |
 | POST | `/api/chat/message` | Send message (REST) | Yes |
 | DELETE | `/api/chat/message/:messageId` | Delete message | Yes |
@@ -975,4 +1281,7 @@ The API automatically extracts and returns the correct format, so frontend can r
 **Recent Updates:**
 - Added `PUT /api/chat/group/:groupId` - Update group info endpoint
 - Added `POST /api/chat/group/:groupId/photo` - Upload group photo endpoint
+- Added `DELETE /api/chat/group/:groupId/photo` - Remove group photo endpoint
+- Added `DELETE /api/chat/group/:groupId/member` - Remove group member endpoint
+- Added `POST /api/chat/group/:groupId/admin` - Make member admin endpoint
 

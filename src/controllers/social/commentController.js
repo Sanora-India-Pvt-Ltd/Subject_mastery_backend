@@ -203,7 +203,7 @@ const addReply = async (req, res) => {
     }
 };
 
-// Get comments for a post or reel
+// Get comments for a post or reel (using path parameters)
 const getComments = async (req, res) => {
     try {
         const { contentId, contentType } = req.params;
@@ -308,6 +308,120 @@ const getComments = async (req, res) => {
 
     } catch (error) {
         console.error('Get comments error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve comments',
+            error: error.message
+        });
+    }
+};
+
+// Get comments for a post or reel (using query parameters - separate API endpoint)
+const getCommentsByQuery = async (req, res) => {
+    try {
+        const { contentId, contentType, page = 1, limit = 15, sortBy = 'createdAt', sortOrder = -1 } = req.query;
+
+        // Validate contentId
+        if (!contentId || !mongoose.Types.ObjectId.isValid(contentId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid content ID. Please provide contentId as query parameter.'
+            });
+        }
+
+        // Validate contentType
+        if (!contentType || !['post', 'reel'].includes(contentType)) {
+            return res.status(400).json({
+                success: false,
+                message: 'contentType must be either "post" or "reel". Please provide contentType as query parameter.'
+            });
+        }
+
+        // Verify that the post/reel exists
+        let content;
+        if (contentType === 'post') {
+            content = await Post.findById(contentId);
+        } else {
+            content = await Reel.findById(contentId);
+        }
+
+        if (!content) {
+            return res.status(404).json({
+                success: false,
+                message: `${contentType.charAt(0).toUpperCase() + contentType.slice(1)} not found`
+            });
+        }
+
+        // Get comments using the static method
+        const comments = await Comment.getCommentsByContent(contentId, contentType, {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            sortBy: sortBy,
+            sortOrder: parseInt(sortOrder)
+        });
+
+        // Format comments for response
+        const formattedComments = comments.map(comment => {
+            const commentUserInfo = comment.userId._id ? {
+                id: comment.userId._id.toString(),
+                firstName: comment.userId.profile?.name?.first || '',
+                lastName: comment.userId.profile?.name?.last || '',
+                name: comment.userId.profile?.name?.full || '',
+                profileImage: comment.userId.profile?.profileImage
+            } : null;
+
+            // Format replies
+            const formattedReplies = (comment.replies || []).map(reply => {
+                const replyUserInfo = reply.userId._id ? {
+                    id: reply.userId._id.toString(),
+                    firstName: reply.userId.profile?.name?.first || '',
+                    lastName: reply.userId.profile?.name?.last || '',
+                    name: reply.userId.profile?.name?.full || '',
+                    profileImage: reply.userId.profile?.profileImage
+                } : null;
+
+                return {
+                    id: reply._id.toString(),
+                    userId: reply.userId._id ? reply.userId._id.toString() : reply.userId.toString(),
+                    user: replyUserInfo,
+                    text: reply.text,
+                    createdAt: reply.createdAt
+                };
+            });
+
+            return {
+                id: comment._id.toString(),
+                userId: comment.userId._id ? comment.userId._id.toString() : comment.userId.toString(),
+                user: commentUserInfo,
+                text: comment.text,
+                replies: formattedReplies,
+                replyCount: comment.replyCount || formattedReplies.length,
+                createdAt: comment.createdAt
+            };
+        });
+
+        // Get total count for pagination
+        const commentDoc = await Comment.findOne({ contentId, contentType }).lean();
+        const totalComments = commentDoc && commentDoc.comments ? commentDoc.comments.length : 0;
+
+        return res.status(200).json({
+            success: true,
+            message: 'Comments retrieved successfully',
+            data: {
+                contentId: contentId,
+                contentType: contentType,
+                comments: formattedComments,
+                pagination: {
+                    page: parseInt(page),
+                    limit: parseInt(limit),
+                    total: totalComments,
+                    pages: Math.ceil(totalComments / parseInt(limit))
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get comments by query error:', error);
         return res.status(500).json({
             success: false,
             message: 'Failed to retrieve comments',
@@ -599,6 +713,7 @@ module.exports = {
     addComment,
     addReply,
     getComments,
+    getCommentsByQuery,
     getReplies,
     deleteComment,
     deleteReply

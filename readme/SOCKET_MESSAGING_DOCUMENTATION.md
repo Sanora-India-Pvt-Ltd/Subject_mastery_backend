@@ -612,7 +612,63 @@ socket.on('message:deleted', ({ messageId, conversationId }) => {
 
 ---
 
-#### 10. Error
+#### 10. Group Photo Updated
+
+Emitted when a group photo is uploaded or updated. All group participants receive this event.
+
+**Event**: `group:photo:updated`
+
+**Payload**:
+```javascript
+{
+  groupId: 'string',        // Group conversation ID
+  groupImage: 'string',      // New group photo URL
+  updatedBy: 'string'        // User ID who updated the photo
+}
+```
+
+**Example Handler**:
+```javascript
+socket.on('group:photo:updated', ({ groupId, groupImage, updatedBy }) => {
+  console.log('Group photo updated:', groupId, groupImage);
+  // Update group photo in UI
+  updateGroupPhoto(groupId, groupImage);
+});
+```
+
+**Note**: This event is emitted to all participants in the group conversation room (`conversation:{groupId}`).
+
+---
+
+#### 11. Group Photo Removed
+
+Emitted when a group photo is removed. All group participants receive this event.
+
+**Event**: `group:photo:removed`
+
+**Payload**:
+```javascript
+{
+  groupId: 'string',        // Group conversation ID
+  groupImage: null,         // Always null when removed
+  removedBy: 'string'       // User ID who removed the photo
+}
+```
+
+**Example Handler**:
+```javascript
+socket.on('group:photo:removed', ({ groupId, groupImage, removedBy }) => {
+  console.log('Group photo removed:', groupId);
+  // Remove group photo from UI (show default avatar)
+  updateGroupPhoto(groupId, null);
+});
+```
+
+**Note**: This event is emitted to all participants in the group conversation room (`conversation:{groupId}`).
+
+---
+
+#### 12. Error
 
 Emitted when an error occurs.
 
