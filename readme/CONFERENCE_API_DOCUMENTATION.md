@@ -118,7 +118,38 @@ Host signup **requires email and phone OTP verification first** using the main a
 }
 ```
 
-#### 5. Refresh Token
+#### 5. Upload Host Profile Image
+**POST** `/api/host/auth/profile-image`
+
+**Headers:** `Authorization: Bearer <accessToken>`
+
+**Request Body:** Form-data with field name `profileImage` containing the image file
+
+**Supported Image Formats:** JPEG, JPG, PNG, GIF, WebP
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Profile image uploaded successfully",
+  "data": {
+    "url": "https://bucket.s3.region.amazonaws.com/uploads/1234567890-987654321.jpg",
+    "host": {
+      "_id": "host_id",
+      "email": "host@example.com",
+      "name": "John Host",
+      "profileImage": "https://bucket.s3.region.amazonaws.com/uploads/1234567890-987654321.jpg"
+    }
+  }
+}
+```
+
+**Note:** 
+- The old profile image (if exists) will be automatically deleted from S3
+- Only the authenticated host can upload their own profile image
+- Maximum file size depends on your server configuration
+
+#### 6. Refresh Token
 **POST** `/api/host/auth/refresh-token`
 
 **Request Body:**
@@ -128,7 +159,7 @@ Host signup **requires email and phone OTP verification first** using the main a
 }
 ```
 
-#### 6. Logout
+#### 7. Logout
 **POST** `/api/host/auth/logout`
 
 **Headers:** `Authorization: Bearer <accessToken>`
@@ -185,16 +216,107 @@ Speaker signup also **requires email and phone OTP verification first** using th
 
 **Headers:** `Authorization: Bearer <accessToken>`
 
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "speaker_id",
+    "email": "speaker@example.com",
+    "name": "Jane Speaker",
+    "bio": "Expert in technology",
+    "phone": "+1234567890",
+    "profileImage": "",
+    "isVerified": false,
+    "isActive": true,
+    "lastLogin": "2024-01-15T10:00:00Z"
+  }
+}
+```
+
 #### 4. Update Speaker Profile
 **PUT** `/api/speaker/auth/profile`
 
 **Headers:** `Authorization: Bearer <accessToken>`
 
-#### 5. Refresh Token
+**Request Body:**
+```json
+{
+  "name": "Updated Name",
+  "bio": "Updated bio",
+  "phone": "+1234567890",
+  "profileImage": "https://example.com/image.jpg"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "speaker_id",
+    "email": "speaker@example.com",
+    "name": "Updated Name",
+    "bio": "Updated bio",
+    "phone": "+1234567890",
+    "profileImage": "https://example.com/image.jpg",
+    "isVerified": false
+  }
+}
+```
+
+#### 5. Upload Speaker Profile Image
+**POST** `/api/speaker/auth/profile-image`
+
+**Headers:** `Authorization: Bearer <accessToken>`
+
+**Request Body:** Form-data with field name `profileImage` containing the image file
+
+**Supported Image Formats:** JPEG, JPG, PNG, GIF, WebP
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Profile image uploaded successfully",
+  "data": {
+    "url": "https://bucket.s3.region.amazonaws.com/uploads/1234567890-987654321.jpg",
+    "speaker": {
+      "_id": "speaker_id",
+      "email": "speaker@example.com",
+      "name": "Jane Speaker",
+      "profileImage": "https://bucket.s3.region.amazonaws.com/uploads/1234567890-987654321.jpg"
+    }
+  }
+}
+```
+
+**Note:** 
+- The old profile image (if exists) will be automatically deleted from S3
+- Only the authenticated speaker can upload their own profile image
+- Maximum file size depends on your server configuration
+
+#### 6. Refresh Token
 **POST** `/api/speaker/auth/refresh-token`
 
-#### 6. Logout
+**Request Body:**
+```json
+{
+  "refreshToken": "refresh_token_here"
+}
+```
+
+#### 7. Logout
 **POST** `/api/speaker/auth/logout`
+
+**Headers:** `Authorization: Bearer <accessToken>`
+
+**Request Body:**
+```json
+{
+  "refreshToken": "refresh_token_here"
+}
+```
 
 ---
 
@@ -849,6 +971,20 @@ curl -X POST http://localhost:3100/api/conference/:conferenceId/questions \
     ],
     "correctOption": "A"
   }'
+```
+
+### Host/Speaker Uploading Profile Image
+
+```bash
+# Host Profile Image Upload
+curl -X POST http://localhost:3100/api/host/auth/profile-image \
+  -H "Authorization: Bearer <host_accessToken>" \
+  -F "profileImage=@/path/to/image.jpg"
+
+# Speaker Profile Image Upload
+curl -X POST http://localhost:3100/api/speaker/auth/profile-image \
+  -H "Authorization: Bearer <speaker_accessToken>" \
+  -F "profileImage=@/path/to/image.jpg"
 ```
 
 ### User Answering a Question

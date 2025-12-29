@@ -6,14 +6,17 @@ const {
     getProfile,
     updateProfile,
     refreshToken,
-    logout
+    logout,
+    uploadProfileImage
 } = require('../../controllers/conference/speakerAuthController');
 const { protect, verifyRefreshToken } = require('../../middleware/speakerAuth');
+const upload = require('../../middleware/s3Upload');
 
 router.post('/signup', signup);
 router.post('/login', login);
 router.get('/profile', protect, getProfile);
 router.put('/profile', protect, updateProfile);
+router.post('/profile-image', protect, upload.single('profileImage'), uploadProfileImage);
 router.post('/refresh-token', verifyRefreshToken, refreshToken);
 router.post('/logout', protect, logout);
 

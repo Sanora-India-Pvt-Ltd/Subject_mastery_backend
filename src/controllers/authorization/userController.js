@@ -1784,6 +1784,22 @@ const deleteUserMedia = async (req, res) => {
             });
         }
 
+        // Reject reserved route names that cannot be used as media IDs
+        if (mediaId === 'profile-image' || mediaId === 'cover-photo') {
+            return res.status(400).json({
+                success: false,
+                message: `"${mediaId}" is a reserved route name. Use DELETE /api/media/${mediaId} to remove your ${mediaId === 'profile-image' ? 'profile image' : 'cover photo'}.`
+            });
+        }
+
+        // Validate that mediaId is a valid ObjectId
+        if (!mongoose.Types.ObjectId.isValid(mediaId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid media ID format. Media ID must be a valid ObjectId."
+            });
+        }
+
         // Find media that belongs to this specific user
         const media = await Media.findOne({ 
             _id: mediaId, 
@@ -1832,6 +1848,23 @@ await User.findByIdAndUpdate(user._id, {
 
     } catch (err) {
         console.error('Delete user media error:', err);
+        
+        // Handle CastError specifically for invalid ObjectId
+        if (err.name === 'CastError' && err.path === '_id') {
+            const invalidValue = err.value;
+            // Check if it's a reserved route name
+            if (invalidValue === 'profile-image' || invalidValue === 'cover-photo') {
+                return res.status(400).json({
+                    success: false,
+                    message: `"${invalidValue}" is a reserved route name. Use DELETE /api/media/${invalidValue} to remove your ${invalidValue === 'profile-image' ? 'profile image' : 'cover photo'}.`
+                });
+            }
+            return res.status(400).json({
+                success: false,
+                message: `Invalid media ID format: "${invalidValue}". Media ID must be a valid ObjectId.`
+            });
+        }
+        
         return res.status(500).json({
             success: false,
             message: "Failed to delete media",
