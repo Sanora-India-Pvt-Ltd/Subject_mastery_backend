@@ -244,6 +244,19 @@ const getFormattedComments = async (contentId, limit = 15) => {
         });
 
         return comments.map(comment => {
+            // Handle null userId (deleted user or unpopulated)
+            if (!comment.userId) {
+                return {
+                    id: comment._id.toString(),
+                    userId: null,
+                    user: null,
+                    text: comment.text,
+                    createdAt: comment.createdAt,
+                    replies: [],
+                    replyCount: 0
+                };
+            }
+
             const commentUserId = comment.userId._id ? comment.userId._id.toString() : comment.userId.toString();
             const commentUserInfo = comment.userId._id ? {
                 id: comment.userId._id.toString(),
@@ -258,6 +271,17 @@ const getFormattedComments = async (contentId, limit = 15) => {
                 .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
                 .slice(0, 5)
                 .map(reply => {
+                    // Handle null userId in replies
+                    if (!reply.userId) {
+                        return {
+                            id: reply._id.toString(),
+                            userId: null,
+                            user: null,
+                            text: reply.text,
+                            createdAt: reply.createdAt
+                        };
+                    }
+
                     const replyUserId = reply.userId._id ? reply.userId._id.toString() : reply.userId.toString();
                     const replyUserInfo = reply.userId._id ? {
                         id: reply.userId._id.toString(),
