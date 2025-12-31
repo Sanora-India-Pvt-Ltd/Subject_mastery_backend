@@ -1512,6 +1512,14 @@ const deleteComment = async (req, res) => {
 
         // If replyId is provided, delete the reply
         if (replyId) {
+            // Ensure comments array exists
+            if (!post.comments || !Array.isArray(post.comments)) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Parent comment not found'
+                });
+            }
+
             // Find the parent comment
             const parentComment = post.comments.id(commentId);
 
@@ -1519,6 +1527,14 @@ const deleteComment = async (req, res) => {
                 return res.status(404).json({
                     success: false,
                     message: 'Parent comment not found'
+                });
+            }
+
+            // Ensure replies array exists
+            if (!parentComment.replies || !Array.isArray(parentComment.replies)) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Reply not found'
                 });
             }
 
@@ -1587,6 +1603,14 @@ const deleteComment = async (req, res) => {
             });
         } else {
             // Delete top-level comment
+            // Ensure comments array exists
+            if (!post.comments || !Array.isArray(post.comments)) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Comment not found'
+                });
+            }
+
             // Find the comment
             const commentIndex = post.comments.findIndex(
                 comment => comment._id.toString() === commentId
