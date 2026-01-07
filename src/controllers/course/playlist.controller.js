@@ -1,7 +1,6 @@
 const Playlist = require('../../models/course/Playlist');
 const Video = require('../../models/course/Video');
 const Course = require('../../models/course/Course');
-const videoService = require('../../services/video/videoService');
 
 /**
  * Create playlist (course owner only)
@@ -30,11 +29,9 @@ const createPlaylist = async (req, res) => {
 
         const playlist = await Playlist.create({
             courseId,
-            details: {
-                name,
-                description: description || '',
-                thumbnail: thumbnail || null
-            },
+            name,
+            description: description || '',
+            thumbnail: thumbnail || null,
             order: order || 0
         });
 
@@ -80,83 +77,6 @@ const getPlaylists = async (req, res) => {
 };
 
 /**
- * Get single playlist by ID
- */
-const getPlaylistById = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const userId = req.userId; // From user auth middleware (optional)
-        const universityId = req.universityId; // From university auth middleware (optional)
-
-        const playlist = await Playlist.findById(id).lean();
-
-        if (!playlist) {
-            return res.status(404).json({
-                success: false,
-                message: 'Playlist not found'
-            });
-        }
-
-        // Check access permissions
-        const course = await Course.findById(playlist.courseId);
-        if (!course) {
-            return res.status(404).json({
-                success: false,
-                message: 'Course not found'
-            });
-        }
-
-        // If university is accessing, verify ownership
-        if (universityId && course.universityId.toString() !== universityId.toString()) {
-            return res.status(403).json({
-                success: false,
-                message: 'You do not have permission to access this playlist'
-            });
-        }
-
-        // If user is accessing, check if enrolled
-        if (userId && !universityId) {
-            const UserCourseProgress = require('../../models/progress/UserCourseProgress');
-            const progress = await UserCourseProgress.findOne({ 
-                userId, 
-                courseId: playlist.courseId 
-            });
-            
-            if (!progress) {
-                return res.status(403).json({
-                    success: false,
-                    message: 'You must be enrolled in this course to access playlists'
-                });
-            }
-        }
-
-        // Get videos in playlist if user has access
-        const videos = await Video.find({ playlistId: id })
-            .sort({ order: 1, createdAt: 1 })
-            .select('details.title details.thumbnail media.duration order')
-            .lean();
-
-        res.status(200).json({
-            success: true,
-            message: 'Playlist retrieved successfully',
-            data: {
-                playlist: {
-                    ...playlist,
-                    videos
-                }
-            }
-        });
-    } catch (error) {
-        console.error('Get playlist error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error retrieving playlist',
-            error: error.message
-        });
-    }
-};
-
-/**
  * Update playlist (reorder, rename)
  */
 const updatePlaylist = async (req, res) => {
@@ -184,9 +104,9 @@ const updatePlaylist = async (req, res) => {
         }
 
         // Update fields
-        if (name !== undefined) playlist.details.name = name;
-        if (description !== undefined) playlist.details.description = description;
-        if (thumbnail !== undefined) playlist.details.thumbnail = thumbnail;
+        if (name !== undefined) playlist.name = name;
+        if (description !== undefined) playlist.description = description;
+        if (thumbnail !== undefined) playlist.thumbnail = thumbnail;
         if (order !== undefined) playlist.order = order;
 
         await playlist.save();
@@ -252,83 +172,10 @@ const deletePlaylist = async (req, res) => {
     }
 };
 
-/**
- * Update playlist thumbnail (upload thumbnail to S3)
- */
-const updatePlaylistThumbnail = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const file = req.file; // From multer middleware
-        const universityId = req.universityId; // From middleware
-
-        if (!file) {
-            // Check if error was from file filter
-            if (req.fileValidationError) {
-                return res.status(400).json({
-                    success: false,
-                    message: req.fileValidationError
-                });
-            }
-            return res.status(400).json({
-                success: false,
-                message: 'Thumbnail file is required'
-            });
-        }
-
-        // Validate it's an image
-        if (!file.mimetype.startsWith('image/')) {
-            return res.status(400).json({
-                success: false,
-                message: 'Only image files are allowed for thumbnails'
-            });
-        }
-
-        const playlist = await Playlist.findById(id);
-
-        if (!playlist) {
-            return res.status(404).json({
-                success: false,
-                message: 'Playlist not found'
-            });
-        }
-
-        // Verify course ownership
-        const course = await Course.findById(playlist.courseId);
-        if (!course || course.universityId.toString() !== universityId.toString()) {
-            return res.status(403).json({
-                success: false,
-                message: 'You do not have permission to update this playlist thumbnail'
-            });
-        }
-
-        // Upload thumbnail
-        const thumbnailUrl = await videoService.uploadThumbnail(file, `playlist-${playlist._id}`);
-
-        // Update playlist
-        playlist.details.thumbnail = thumbnailUrl;
-        await playlist.save();
-
-        res.status(200).json({
-            success: true,
-            message: 'Playlist thumbnail updated successfully',
-            data: { thumbnail: thumbnailUrl }
-        });
-    } catch (error) {
-        console.error('Update playlist thumbnail error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error updating playlist thumbnail',
-            error: error.message
-        });
-    }
-};
-
 module.exports = {
     createPlaylist,
     getPlaylists,
-    getPlaylistById,
     updatePlaylist,
-    deletePlaylist,
-    updatePlaylistThumbnail
+    deletePlaylist
 };
 

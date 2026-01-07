@@ -22,12 +22,7 @@ const processAnalyticsEvent = async (eventData) => {
     // Update user activity
     await UserActivity.findOneAndUpdate(
         { userId },
-        { 
-            activity: {
-                lastActiveAt: new Date(),
-                updatedAt: new Date()
-            }
-        },
+        { lastActiveAt: new Date(), updatedAt: new Date() },
         { upsert: true }
     );
 
@@ -111,7 +106,7 @@ const calculateIdleUsers = async (courseId, days = 7) => {
     // Get active users
     const activeUsers = await UserActivity.find({
         userId: { $in: userIds },
-        'activity.lastActiveAt': { $gte: cutoffDate }
+        lastActiveAt: { $gte: cutoffDate }
     }).select('userId').lean();
 
     const activeUserIds = new Set(activeUsers.map(u => u.userId.toString()));

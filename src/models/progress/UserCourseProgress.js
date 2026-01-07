@@ -11,26 +11,24 @@ const userCourseProgressSchema = new mongoose.Schema({
         ref: 'Course',
         required: true
     },
-    progress: {
-        completedVideos: {
-            type: Number,
-            default: 0,
-            min: 0
-        },
-        completionPercent: {
-            type: Number,
-            default: 0,
-            min: 0,
-            max: 100
-        },
-        lastAccessedAt: {
-            type: Date,
-            default: Date.now
-        },
-        updatedAt: {
-            type: Date,
-            default: Date.now
-        }
+    completedVideos: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    completionPercent: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 100
+    },
+    lastAccessedAt: {
+        type: Date,
+        default: Date.now
+    },
+    updatedAt: {
+        type: Date,
+        default: Date.now
     }
 }, {
     timestamps: true

@@ -7,15 +7,13 @@ const userActivitySchema = new mongoose.Schema({
         required: true,
         unique: true
     },
-    activity: {
-        lastActiveAt: {
-            type: Date,
-            default: Date.now
-        },
-        updatedAt: {
-            type: Date,
-            default: Date.now
-        }
+    lastActiveAt: {
+        type: Date,
+        default: Date.now
+    },
+    updatedAt: {
+        type: Date,
+        default: Date.now
     }
 }, {
     timestamps: true
@@ -23,7 +21,7 @@ const userActivitySchema = new mongoose.Schema({
 
 // Index for userId (unique)
 userActivitySchema.index({ userId: 1 }, { unique: true });
-userActivitySchema.index({ 'activity.lastActiveAt': 1 });
+userActivitySchema.index({ lastActiveAt: 1 });
 
 module.exports = mongoose.model('UserActivity', userActivitySchema);
 

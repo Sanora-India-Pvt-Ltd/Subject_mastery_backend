@@ -69,13 +69,11 @@ const uploadVideoController = async (req, res) => {
 
 /**
  * Get video with progress tracking
- * Allows both enrolled users and course owners (universities) to access
  */
 const getVideo = async (req, res) => {
     try {
         const { id } = req.params;
         const userId = req.userId; // From user auth middleware (optional)
-        const universityId = req.universityId; // From university auth middleware (optional)
 
         const video = await Video.findById(id)
             .populate('playlistId', 'name')
@@ -89,40 +87,7 @@ const getVideo = async (req, res) => {
             });
         }
 
-        // Check access permissions
-        const course = await Course.findById(video.courseId);
-        if (!course) {
-            return res.status(404).json({
-                success: false,
-                message: 'Course not found'
-            });
-        }
-
-        // If university is accessing, verify ownership
-        if (universityId) {
-            if (course.universityId.toString() !== universityId.toString()) {
-                return res.status(403).json({
-                    success: false,
-                    message: 'You do not have permission to access this video'
-                });
-            }
-        } else if (userId) {
-            // If user is accessing, check if enrolled
-            const UserCourseProgress = require('../../models/progress/UserCourseProgress');
-            const progress = await UserCourseProgress.findOne({ 
-                userId, 
-                courseId: video.courseId 
-            });
-            
-            if (!progress) {
-                return res.status(403).json({
-                    success: false,
-                    message: 'You must be enrolled in this course to access videos'
-                });
-            }
-        }
-
-        // Get user progress if authenticated as user
+        // Get user progress if authenticated
         let progress = null;
         if (userId) {
             const UserVideoProgress = require('../../models/progress/UserVideoProgress');
@@ -134,10 +99,7 @@ const getVideo = async (req, res) => {
             message: 'Video retrieved successfully',
             data: {
                 video,
-                progress: progress ? {
-                    lastWatchedSecond: progress.progress.lastWatchedSecond,
-                    completed: progress.progress.completed
-                } : {
+                progress: progress || {
                     lastWatchedSecond: 0,
                     completed: false
                 }
@@ -155,64 +117,17 @@ const getVideo = async (req, res) => {
 
 /**
  * Get all videos in playlist
- * Allows both enrolled users and course owners (universities) to access
  */
 const getPlaylistVideos = async (req, res) => {
     try {
         const { playlistId } = req.params;
         const userId = req.userId; // From user auth middleware (optional)
-        const universityId = req.universityId; // From university auth middleware (optional)
 
-        // Get playlist to find course
-        const playlist = await Playlist.findById(playlistId);
-        if (!playlist) {
-            return res.status(404).json({
-                success: false,
-                message: 'Playlist not found'
-            });
-        }
-
-        // Check access permissions
-        const course = await Course.findById(playlist.courseId);
-        if (!course) {
-            return res.status(404).json({
-                success: false,
-                message: 'Course not found'
-            });
-        }
-
-        // If university is accessing, verify ownership
-        // Course owners can see ALL videos in their playlists (no restrictions)
-        if (universityId) {
-            if (course.universityId.toString() !== universityId.toString()) {
-                return res.status(403).json({
-                    success: false,
-                    message: 'You do not have permission to access videos in this playlist'
-                });
-            }
-            // Course owner verified - they can see all videos, continue to fetch
-        } else if (userId) {
-            // If user is accessing, check if enrolled
-            const UserCourseProgress = require('../../models/progress/UserCourseProgress');
-            const progress = await UserCourseProgress.findOne({ 
-                userId, 
-                courseId: playlist.courseId 
-            });
-            
-            if (!progress) {
-                return res.status(403).json({
-                    success: false,
-                    message: 'You must be enrolled in this course to access videos'
-                });
-            }
-        }
-
-        // Fetch ALL videos in the playlist (course owners see everything, enrolled users see everything they're allowed to)
         const videos = await Video.find({ playlistId })
             .sort({ order: 1, createdAt: 1 })
             .lean();
 
-        // Get user progress for all videos if authenticated as user
+        // Get user progress for all videos if authenticated
         let progressMap = {};
         if (userId) {
             const UserVideoProgress = require('../../models/progress/UserVideoProgress');
@@ -224,8 +139,8 @@ const getPlaylistVideos = async (req, res) => {
 
             progressList.forEach(p => {
                 progressMap[p.videoId.toString()] = {
-                    lastWatchedSecond: p.progress.lastWatchedSecond,
-                    completed: p.progress.completed
+                    lastWatchedSecond: p.lastWatchedSecond,
+                    completed: p.completed
                 };
             });
         }
@@ -282,8 +197,8 @@ const updateVideo = async (req, res) => {
         }
 
         // Update fields
-        if (title !== undefined) video.details.title = title;
-        if (description !== undefined) video.details.description = description;
+        if (title !== undefined) video.title = title;
+        if (description !== undefined) video.description = description;
         if (order !== undefined) video.order = order;
 
         await video.save();
@@ -330,8 +245,8 @@ const deleteVideoController = async (req, res) => {
         }
 
         // Delete from S3
-        if (video.media.s3Key) {
-            await videoService.deleteVideo(video.media.s3Key);
+        if (video.s3Key) {
+            await videoService.deleteVideo(video.s3Key);
         }
 
         // Delete video document
@@ -361,24 +276,9 @@ const updateVideoThumbnail = async (req, res) => {
         const universityId = req.universityId; // From middleware
 
         if (!file) {
-            // Check if error was from file filter
-            if (req.fileValidationError) {
-                return res.status(400).json({
-                    success: false,
-                    message: req.fileValidationError
-                });
-            }
             return res.status(400).json({
                 success: false,
                 message: 'Thumbnail file is required'
-            });
-        }
-
-        // Validate it's an image
-        if (!file.mimetype.startsWith('image/')) {
-            return res.status(400).json({
-                success: false,
-                message: 'Only image files are allowed for thumbnails'
             });
         }
 
@@ -404,7 +304,7 @@ const updateVideoThumbnail = async (req, res) => {
         const thumbnailUrl = await videoService.uploadThumbnail(file, video._id);
 
         // Update video
-        video.details.thumbnail = thumbnailUrl;
+        video.thumbnail = thumbnailUrl;
         await video.save();
 
         res.status(200).json({

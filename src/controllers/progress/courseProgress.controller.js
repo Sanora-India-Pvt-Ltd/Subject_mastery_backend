@@ -34,14 +34,35 @@ const getCourseProgress = async (req, res) => {
         // Get total videos in course
         const totalVideos = await Video.countDocuments({ courseId });
 
+        // Ensure completedVideos and completionPercent have default values
+        const completedVideos = courseProgress.completedVideos ?? 0;
+        const completionPercent = courseProgress.completionPercent ?? 0;
+
+        // Explicitly pick fields to avoid leaking any nested "progress" property
+        const {
+            _id,
+            userId: progressUserId,
+            courseId: progressCourseId,
+            lastAccessedAt,
+            updatedAt,
+            createdAt
+        } = courseProgress;
+
         res.status(200).json({
             success: true,
             message: 'Course progress retrieved successfully',
             data: {
                 progress: {
-                    ...courseProgress.progress,
+                    _id,
+                    userId: progressUserId,
+                    courseId: progressCourseId,
+                    completedVideos,
+                    completionPercent,
+                    lastAccessedAt,
+                    updatedAt,
+                    createdAt,
                     totalVideos,
-                    remainingVideos: totalVideos - courseProgress.progress.completedVideos
+                    remainingVideos: totalVideos - completedVideos
                 }
             }
         });
@@ -80,10 +101,10 @@ const getCompletionStats = async (req, res) => {
 
                 return {
                     courseId: progress.courseId,
-                    courseName: course?.details?.name || 'Unknown',
-                    completedVideos: progress.progress.completedVideos,
+                    courseName: course?.name || 'Unknown',
+                    completedVideos: progress.completedVideos ?? 0,
                     totalVideos,
-                    completionPercent: progress.progress.completionPercent
+                    completionPercent: progress.completionPercent ?? 0
                 };
             })
         );
@@ -155,11 +176,9 @@ const resetProgress = async (req, res) => {
         await UserCourseProgress.findOneAndUpdate(
             { userId: targetUserIdToReset, courseId },
             {
-                progress: {
-                    completedVideos: 0,
-                    completionPercent: 0,
-                    lastAccessedAt: new Date()
-                }
+                completedVideos: 0,
+                completionPercent: 0,
+                lastAccessedAt: new Date()
             },
             { upsert: true }
         );

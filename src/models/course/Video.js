@@ -11,42 +11,38 @@ const videoSchema = new mongoose.Schema({
         ref: 'Course',
         required: true
     },
-    details: {
-        title: {
-            type: String,
-            required: true,
-            trim: true
-        },
-        description: {
-            type: String,
-            default: ''
-        },
-        thumbnail: {
-            type: String,
-            default: null
-        }
+    title: {
+        type: String,
+        required: true,
+        trim: true
     },
-    media: {
-        videoUrl: {
-            type: String,
-            required: true
-        },
-        s3Key: {
-            type: String,
-            default: null
-        },
-        subtitles: {
-            type: String,  // VTT/SRT subtitle text content
-            default: null
-        },
-        duration: {
-            type: Number, // in seconds
-            default: 0
-        }
+    description: {
+        type: String,
+        default: ''
+    },
+    subtitles: {
+        type: String,  // VTT/SRT subtitle text content
+        default: null
+    },
+    videoUrl: {
+        type: String,
+        required: true
+    },
+    thumbnail: {
+        type: String,
+        default: null
+    },
+    duration: {
+        type: Number, // in seconds
+        default: 0
     },
     order: {
         type: Number,
         default: 0
+    },
+    s3Key: {
+        type: String,
+        default: null
     },
     createdAt: {
         type: Date,

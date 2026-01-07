@@ -11,20 +11,18 @@ const userVideoProgressSchema = new mongoose.Schema({
         ref: 'Video',
         required: true
     },
-    progress: {
-        lastWatchedSecond: {
-            type: Number,
-            default: 0,
-            min: 0
-        },
-        completed: {
-            type: Boolean,
-            default: false
-        },
-        updatedAt: {
-            type: Date,
-            default: Date.now
-        }
+    lastWatchedSecond: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    completed: {
+        type: Boolean,
+        default: false
+    },
+    updatedAt: {
+        type: Date,
+        default: Date.now
     }
 }, {
     timestamps: true
@@ -34,7 +32,7 @@ const userVideoProgressSchema = new mongoose.Schema({
 userVideoProgressSchema.index({ userId: 1, videoId: 1 }, { unique: true });
 
 // Additional indexes for queries
-userVideoProgressSchema.index({ userId: 1, 'progress.completed': 1 });
+userVideoProgressSchema.index({ userId: 1, completed: 1 });
 userVideoProgressSchema.index({ videoId: 1 });
 
 module.exports = mongoose.model('UserVideoProgress', userVideoProgressSchema);

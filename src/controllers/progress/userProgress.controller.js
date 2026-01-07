@@ -49,11 +49,9 @@ const updateVideoProgress = async (req, res) => {
         const progress = await UserVideoProgress.findOneAndUpdate(
             { userId, videoId },
             {
-                progress: {
-                    lastWatchedSecond: lastWatchedSecond || 0,
-                    completed: completed || false,
-                    updatedAt: new Date()
-                }
+                lastWatchedSecond: lastWatchedSecond || 0,
+                completed: completed || false,
+                updatedAt: new Date()
             },
             { upsert: true, new: true }
         );
@@ -94,10 +92,7 @@ const getVideoProgress = async (req, res) => {
             success: true,
             message: 'Progress retrieved successfully',
             data: {
-                progress: progress ? {
-                    lastWatchedSecond: progress.progress.lastWatchedSecond,
-                    completed: progress.progress.completed
-                } : {
+                progress: progress || {
                     lastWatchedSecond: 0,
                     completed: false
                 }
@@ -142,8 +137,8 @@ const getMultipleProgress = async (req, res) => {
         const progressMap = {};
         progressList.forEach(p => {
             progressMap[p.videoId.toString()] = {
-                lastWatchedSecond: p.progress.lastWatchedSecond,
-                completed: p.progress.completed
+                lastWatchedSecond: p.lastWatchedSecond,
+                completed: p.completed
             };
         });
 
@@ -190,10 +185,8 @@ const markVideoComplete = async (req, res) => {
         const progress = await UserVideoProgress.findOneAndUpdate(
             { userId, videoId },
             {
-                progress: {
-                    completed: true,
-                    updatedAt: new Date()
-                }
+                completed: true,
+                updatedAt: new Date()
             },
             { upsert: true, new: true }
         );

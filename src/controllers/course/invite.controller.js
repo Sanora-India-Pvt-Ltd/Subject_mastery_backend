@@ -190,10 +190,8 @@ const acceptInvite = async (req, res) => {
         await UserCourseProgress.create({
             userId,
             courseId: invite.courseId,
-            progress: {
-                completedVideos: 0,
-                completionPercent: 0
-            }
+            completedVideos: 0,
+            completionPercent: 0
         });
 
         // Update course stats

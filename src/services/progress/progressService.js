@@ -9,10 +9,8 @@ const upsertVideoProgress = async (userId, videoId, progressData) => {
     const progress = await UserVideoProgress.findOneAndUpdate(
         { userId, videoId },
         {
-            progress: {
-                ...progressData,
-                updatedAt: new Date()
-            }
+            ...progressData,
+            updatedAt: new Date()
         },
         { upsert: true, new: true }
     );
@@ -38,7 +36,7 @@ const calculateCourseCompletion = async (userId, courseId) => {
     const completedCount = await UserVideoProgress.countDocuments({
         userId,
         videoId: { $in: videoIds },
-        'progress.completed': true
+        completed: true
     });
 
     const completionPercent = Math.round((completedCount / totalVideos) * 100);
@@ -83,11 +81,9 @@ const batchUpdateProgress = async (updates) => {
             filter: { userId: update.userId, videoId: update.videoId },
             update: {
                 $set: {
-                    progress: {
-                        lastWatchedSecond: update.lastWatchedSecond,
-                        completed: update.completed,
-                        updatedAt: new Date()
-                    }
+                    lastWatchedSecond: update.lastWatchedSecond,
+                    completed: update.completed,
+                    updatedAt: new Date()
                 }
             },
             upsert: true
@@ -106,12 +102,10 @@ const updateCourseProgress = async (userId, courseId) => {
     await UserCourseProgress.findOneAndUpdate(
         { userId, courseId },
         {
-            progress: {
-                completedVideos: completion.completedVideos,
-                completionPercent: completion.completionPercent,
-                lastAccessedAt: new Date(),
-                updatedAt: new Date()
-            }
+            completedVideos: completion.completedVideos,
+            completionPercent: completion.completionPercent,
+            lastAccessedAt: new Date(),
+            updatedAt: new Date()
         },
         { upsert: true }
     );

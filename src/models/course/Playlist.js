@@ -6,20 +6,18 @@ const playlistSchema = new mongoose.Schema({
         ref: 'Course',
         required: true
     },
-    details: {
-        name: {
-            type: String,
-            required: true,
-            trim: true
-        },
-        description: {
-            type: String,
-            default: ''
-        },
-        thumbnail: {
-            type: String,
-            default: null
-        }
+    name: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    thumbnail: {
+        type: String,
+        default: null
+    },
+    description: {
+        type: String,
+        default: ''
     },
     order: {
         type: Number,

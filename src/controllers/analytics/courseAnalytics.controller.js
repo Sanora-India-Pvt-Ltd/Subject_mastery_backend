@@ -143,7 +143,7 @@ const getIdleUsers = async (req, res) => {
         // Get users with activity after cutoff
         const activeUsers = await UserActivity.find({
             userId: { $in: userIds },
-            'activity.lastActiveAt': { $gte: cutoffDate }
+            lastActiveAt: { $gte: cutoffDate }
         }).select('userId').lean();
 
         const activeUserIds = new Set(activeUsers.map(u => u.userId.toString()));
@@ -224,7 +224,7 @@ const getUserEngagementMetrics = async (req, res) => {
         }, 0); // in seconds
 
         const avgCompletionRate = enrolledUsers.length > 0
-            ? enrolledUsers.reduce((sum, u) => sum + (u.progress?.completionPercent || 0), 0) / enrolledUsers.length
+            ? enrolledUsers.reduce((sum, u) => sum + u.completionPercent, 0) / enrolledUsers.length
             : 0;
 
         res.status(200).json({
