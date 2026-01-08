@@ -44,14 +44,14 @@ router.get('/test', (req, res) => {
 });
 
 router.post('/', protectUniversity, createCourse);
-router.get('/', protectUniversity, getCourses);
+router.get('/', getCourses); // Public - returns only LIVE/FULL courses
 router.get('/:id', protect, getCourseById); // Public or authenticated
 router.put('/:id', protectUniversity, updateCourse);
 router.delete('/:id', protectUniversity, deleteCourse);
 
 // Debug: Log registered routes
 console.log('📋 Course routes registered:');
-console.log('  GET    /api/courses (protected, university)');
+console.log('  GET    /api/courses (public - LIVE/FULL courses only)');
 console.log('  POST   /api/courses (protected, university)');
 console.log('  GET    /api/courses/:id (protected)');
 console.log('  PUT    /api/courses/:id (protected, university)');

@@ -44,6 +44,10 @@ const courseSchema = new mongoose.Schema({
         enum: ['DRAFT', 'LIVE', 'FULL', 'COMPLETED'],
         default: 'DRAFT'
     },
+    publishedAt: {
+        type: Date,
+        default: null
+    },
     rewardTokensPerCompletion: {
         type: Number,
         default: 0,

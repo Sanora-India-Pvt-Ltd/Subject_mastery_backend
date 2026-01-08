@@ -53,13 +53,15 @@ const createCourse = async (req, res) => {
 };
 
 /**
- * Get all courses for logged-in university
+ * Get all courses (public endpoint - returns only LIVE/FULL courses)
+ * Works for authenticated and unauthenticated users
  */
 const getCourses = async (req, res) => {
     try {
-        const universityId = req.universityId; // From middleware
-
-        const courses = await Course.find({ universityId })
+        // Filter only LIVE and FULL courses (public visibility)
+        const courses = await Course.find({
+            status: { $in: ['LIVE', 'FULL'] }
+        })
             .sort({ createdAt: -1 })
             .lean();
 
@@ -707,6 +709,92 @@ const getCourseAnalytics = async (req, res) => {
     }
 };
 
+/**
+ * Publish a course (DRAFT → LIVE)
+ * POST /api/university/courses/:courseId/publish
+ */
+const publishCourse = async (req, res) => {
+    try {
+        const { courseId } = req.params;
+        const universityId = req.universityId;
+
+        // Validate courseId
+        if (!courseId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Course ID is required'
+            });
+        }
+
+        // Fetch course
+        const course = await Course.findById(courseId);
+
+        // Verify course exists
+        if (!course) {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
+
+        // Verify ownership
+        if (course.universityId.toString() !== universityId.toString()) {
+            return res.status(403).json({
+                success: false,
+                message: 'You do not have permission to publish this course'
+            });
+        }
+
+        // Validate publishing conditions
+        // 1. Course must be in DRAFT status
+        if (course.status !== 'DRAFT') {
+            return res.status(400).json({
+                success: false,
+                message: `Course cannot be published. Current status: ${course.status}. Only DRAFT courses can be published.`
+            });
+        }
+
+        // 2. At least ONE Video must exist for this course
+        const videoCount = await Video.countDocuments({ courseId: course._id });
+        if (videoCount === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Course must have at least one video before it can be published'
+            });
+        }
+
+        // 3. If maxCompletions is set, it must be > 0
+        if (course.maxCompletions !== null && course.maxCompletions !== undefined && course.maxCompletions <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'maxCompletions must be greater than 0 if set'
+            });
+        }
+
+        // All validations passed - publish the course
+        course.status = 'LIVE';
+        course.publishedAt = new Date();
+        await course.save();
+
+        res.status(200).json({
+            success: true,
+            message: 'Course is now live',
+            data: {
+                courseId: course._id.toString(),
+                status: course.status,
+                publishedAt: course.publishedAt
+            }
+        });
+    } catch (error) {
+        console.error('Publish course error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error publishing course',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     createCourse,
     getCourses,
@@ -718,6 +806,7 @@ module.exports = {
     getCourseEnrollments,
     approveEnrollment,
     rejectEnrollment,
-    getCourseAnalytics
+    getCourseAnalytics,
+    publishCourse
 };
 
