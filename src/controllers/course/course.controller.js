@@ -304,7 +304,7 @@ const updateCourseThumbnail = async (req, res) => {
  * Request enrollment in a course
  * POST /api/courses/:courseId/enroll-request
  */
-const requestEnrollment = async (req, res) => {
+const requestEnrollment = async (req, res, next) => {
     try {
         const { courseId } = req.params;
         const userId = req.userId; // From protect middleware
@@ -381,7 +381,7 @@ const requestEnrollment = async (req, res) => {
             });
         }
 
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: 'Error processing enrollment request',
             error: error.message

@@ -43,7 +43,7 @@ courseEnrollmentSchema.index({ status: 1, createdAt: -1 });
 courseEnrollmentSchema.index({ expiresAt: 1 }); // For expiry queries
 
 // Pre-save hook: Check expiry before saving
-courseEnrollmentSchema.pre('save', function(next) {
+courseEnrollmentSchema.pre('save', async function() {
     // Only check expiry for APPROVED or IN_PROGRESS statuses
     if ((this.status === 'APPROVED' || this.status === 'IN_PROGRESS') && this.expiresAt) {
         const now = new Date();
@@ -52,7 +52,7 @@ courseEnrollmentSchema.pre('save', function(next) {
             this.status = 'EXPIRED';
         }
     }
-    next();
+    // No need to call next() in async pre-save hooks
 });
 
 module.exports = mongoose.model('CourseEnrollment', courseEnrollmentSchema);
