@@ -1,5 +1,6 @@
 const UserVideoProgress = require('../../models/progress/UserVideoProgress');
 const Video = require('../../models/course/Video');
+const { updateCourseProgress } = require('../../services/progress/progressService');
 
 // Throttle progress updates (10 seconds)
 const progressUpdateCache = new Map();
@@ -11,13 +12,20 @@ const updateVideoProgress = async (req, res) => {
     try {
         // Support videoId from either params (PUT /video/:videoId) or body (POST /video)
         const videoId = req.params.videoId || req.body.videoId;
-        const { lastWatchedSecond, completed } = req.body;
+        const { lastWatchedSecond, progressPercent } = req.body;
         const userId = req.userId; // From user auth middleware
 
         if (!userId) {
             return res.status(401).json({
                 success: false,
                 message: 'Authentication required'
+            });
+        }
+
+        if (!videoId) {
+            return res.status(400).json({
+                success: false,
+                message: 'videoId is required'
             });
         }
 
@@ -46,16 +54,51 @@ const updateVideoProgress = async (req, res) => {
         // Update cache
         progressUpdateCache.set(cacheKey, now);
 
+        // Get existing progress to check if already completed (for idempotency)
+        const existingProgress = await UserVideoProgress.findOne({ userId, videoId });
+        const wasAlreadyCompleted = existingProgress && existingProgress.completed;
+
+        // Prepare update data
+        const updateData = {
+            updatedAt: new Date()
+        };
+
+        // 1️⃣ Always update progressPercent if provided
+        if (progressPercent !== undefined && progressPercent !== null) {
+            updateData.progressPercent = Math.min(100, Math.max(0, progressPercent));
+        }
+
+        // 2️⃣ Update resume position ONLY if provided
+        if (lastWatchedSecond !== undefined && lastWatchedSecond !== null) {
+            updateData.lastWatchedSecond = Math.max(0, lastWatchedSecond);
+        }
+
+        // 3️⃣ COMPLETION LOGIC: Mark as completed if progressPercent >= 100
+        // Only mark as completed if not already completed (idempotent)
+        if (progressPercent !== undefined && progressPercent !== null && progressPercent >= 100) {
+            if (!wasAlreadyCompleted) {
+                updateData.completed = true;
+                updateData.completedAt = new Date();
+            }
+        }
+
         // UPSERT progress
         const progress = await UserVideoProgress.findOneAndUpdate(
             { userId, videoId },
-            {
-                lastWatchedSecond: lastWatchedSecond || 0,
-                completed: completed || false,
-                updatedAt: new Date()
-            },
+            updateData,
             { upsert: true, new: true }
         );
+
+        // 5️⃣ If video just completed, trigger course completion logic
+        // Check if video was just completed in this request (not already completed before)
+        const justCompleted = progress.completed && !wasAlreadyCompleted;
+        
+        if (justCompleted) {
+            // Trigger course completion logic (non-blocking)
+            updateCourseProgress(userId, video.courseId).catch(err => {
+                console.error('Error updating course progress after video completion:', err);
+            });
+        }
 
         res.status(200).json({
             success: true,

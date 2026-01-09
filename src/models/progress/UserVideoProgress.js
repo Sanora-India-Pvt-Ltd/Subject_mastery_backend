@@ -16,9 +16,19 @@ const userVideoProgressSchema = new mongoose.Schema({
         default: 0,
         min: 0
     },
+    progressPercent: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 100
+    },
     completed: {
         type: Boolean,
         default: false
+    },
+    completedAt: {
+        type: Date,
+        default: null
     },
     updatedAt: {
         type: Date,
