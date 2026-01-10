@@ -388,6 +388,14 @@ const requestEnrollment = async (req, res, next) => {
             });
         }
 
+        // 1. Reject if course is not LIVE
+        if (course.status !== 'LIVE') {
+            return res.status(400).json({
+                success: false,
+                message: `Course is not available for enrollment. Current status: ${course.status}`
+            });
+        }
+
         // Check if user already has an enrollment request
         const existingEnrollment = await CourseEnrollment.findOne({
             userId,
@@ -405,18 +413,68 @@ const requestEnrollment = async (req, res, next) => {
             });
         }
 
-        // Create enrollment - ALL enrollments require manual approval
+        // Determine if course is invite-only
+        const isInviteOnly = course.isInviteOnly !== undefined ? course.isInviteOnly : course.inviteOnly;
+
+        // 2. If invite-only, create enrollment with REQUESTED status (manual approval)
+        if (isInviteOnly) {
+            const enrollment = await CourseEnrollment.create({
+                userId,
+                courseId,
+                status: 'REQUESTED'
+            });
+
+            return res.status(201).json({
+                success: true,
+                message: 'Enrollment request submitted',
+                data: { enrollment }
+            });
+        }
+
+        // 3. For non-invite-only courses: Check maxCompletions cap
+        if (course.maxCompletions !== null && course.maxCompletions !== undefined) {
+            // Count existing enrollments with active statuses
+            const activeEnrollmentCount = await CourseEnrollment.countDocuments({
+                courseId,
+                status: { $in: ['APPROVED', 'IN_PROGRESS', 'COMPLETED'] }
+            });
+
+            // 5. If count >= maxCompletions, reject and mark course as FULL
+            if (activeEnrollmentCount >= course.maxCompletions) {
+                // Update course status to FULL if not already
+                if (course.status !== 'FULL') {
+                    await Course.findByIdAndUpdate(courseId, { status: 'FULL' });
+                }
+
+                return res.status(400).json({
+                    success: false,
+                    message: 'Course enrollment limit reached. This course is now full.',
+                    data: {
+                        maxCompletions: course.maxCompletions,
+                        currentEnrollments: activeEnrollmentCount
+                    }
+                });
+            }
+        }
+
+        // 4. Auto-approve enrollment (under limit or no limit set)
         const enrollmentData = {
             userId,
             courseId,
-            status: 'REQUESTED'
+            status: 'APPROVED',
+            approvedAt: new Date()
         };
+
+        // Set expiresAt if course has completionDeadline
+        if (course.completionDeadline) {
+            enrollmentData.expiresAt = course.completionDeadline;
+        }
 
         const enrollment = await CourseEnrollment.create(enrollmentData);
 
         res.status(201).json({
             success: true,
-            message: 'Enrollment request submitted',
+            message: 'Enrollment approved automatically',
             data: { enrollment }
         });
     } catch (error) {
