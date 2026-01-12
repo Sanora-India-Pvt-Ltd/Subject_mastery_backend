@@ -43,5 +43,7 @@ const mcqGenerationJobSchema = new mongoose.Schema({
 mcqGenerationJobSchema.index({ videoId: 1, status: 1 });
 mcqGenerationJobSchema.index({ courseId: 1, status: 1 });
 
-module.exports = mongoose.model('MCQGenerationJob', mcqGenerationJobSchema);
+module.exports =
+  mongoose.models.MCQGenerationJob ||
+  mongoose.model('MCQGenerationJob', mcqGenerationJobSchema);
 
