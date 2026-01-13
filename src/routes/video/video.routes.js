@@ -9,7 +9,8 @@ const {
     deleteVideo,
     updateVideoThumbnail,
     trackProductView,
-    trackProductClick
+    trackProductClick,
+    getVideoQuestions
 } = require('../../controllers/video/video.controller');
 const { protectUniversity } = require('../../middleware/universityAuth.middleware');
 const { protect } = require('../../middleware/auth');
@@ -25,6 +26,8 @@ const upload = multer({
 // Video Routes
 router.post('/', protectUniversity, upload.single('video'), uploadVideo);
 router.get('/playlists/:playlistId/videos', protect, getPlaylistVideos);
+// Learner API: Get VideoQuestion records for a video (must be before /:id route)
+router.get('/:videoId/questions', protect, getVideoQuestions);
 router.get('/:id', protect, getVideo);
 router.put('/:id', protectUniversity, updateVideo);
 router.delete('/:id', protectUniversity, deleteVideo);

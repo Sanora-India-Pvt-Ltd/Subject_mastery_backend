@@ -433,11 +433,87 @@ const regenerateVideoQuestions = async (req, res) => {
     }
 };
 
+/**
+ * Publish a VideoQuestion (University only)
+ * POST /api/university/questions/:questionId/publish
+ */
+const publishVideoQuestion = async (req, res) => {
+    try {
+        const { questionId } = req.params;
+        const universityId = req.universityId; // From requireUniversity middleware
+
+        // 1. Extract questionId from params (already done above)
+
+        // 2. Find VideoQuestion by _id
+        const videoQuestion = await VideoQuestion.findById(questionId);
+        if (!videoQuestion) {
+            return res.status(404).json({
+                success: false,
+                message: 'Question not found'
+            });
+        }
+
+        // 3. Fetch Video using question.videoId
+        const video = await Video.findById(videoQuestion.videoId);
+        if (!video) {
+            return res.status(404).json({
+                success: false,
+                message: 'Video not found'
+            });
+        }
+
+        // 4. Fetch Course using video.courseId
+        const course = await Course.findById(video.courseId);
+        if (!course) {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
+
+        // 5. Ownership check: course.universityId === req.universityId
+        if (course.universityId.toString() !== universityId.toString()) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied. You do not own this course.'
+            });
+        }
+
+        // 6. If question.status !== 'ACTIVE' (using ACTIVE as published state):
+        // Note: Model enum is ['DRAFT', 'ACTIVE'], so using 'ACTIVE' instead of 'LIVE'
+        const publishedAt = new Date();
+        if (videoQuestion.status !== 'ACTIVE') {
+            videoQuestion.status = 'ACTIVE';
+            await videoQuestion.save();
+        }
+
+        // 7. Return response
+        return res.status(200).json({
+            success: true,
+            message: 'Question published successfully',
+            data: {
+                questionId: questionId,
+                status: videoQuestion.status,
+                publishedAt: publishedAt
+            }
+        });
+
+    } catch (error) {
+        console.error('Publish video question error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Error publishing question',
+            error: error.message
+        });
+    }
+};
+
 module.exports = {
     getVideoQuestions,
     updateVideoQuestion,
     deleteVideoQuestion,
     createManualVideoQuestion,
-    regenerateVideoQuestions
+    regenerateVideoQuestions,
+    publishVideoQuestion
 };
 

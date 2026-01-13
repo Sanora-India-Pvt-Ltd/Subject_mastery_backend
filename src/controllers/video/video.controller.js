@@ -1,6 +1,7 @@
 const Video = require('../../models/course/Video');
 const Playlist = require('../../models/course/Playlist');
 const Course = require('../../models/course/Course');
+const VideoQuestion = require('../../models/course/VideoQuestion');
 const videoService = require('../../services/video/videoService');
 
 /**
@@ -404,6 +405,65 @@ const trackProductClick = async (req, res) => {
     }
 };
 
+/**
+ * Get VideoQuestion records for a video (Learner API)
+ * GET /api/videos/:videoId/questions
+ * Returns only ACTIVE questions with correct field mapping
+ */
+const getVideoQuestions = async (req, res) => {
+    try {
+        const { videoId } = req.params;
+        const userId = req.userId; // From protect middleware (optional)
+
+        // Verify video exists
+        const video = await Video.findById(videoId);
+        if (!video) {
+            return res.status(404).json({
+                success: false,
+                message: 'Video not found'
+            });
+        }
+
+        // Query VideoQuestion with status: 'ACTIVE'
+        const questions = await VideoQuestion.find({
+            videoId: videoId,
+            status: 'ACTIVE'
+        })
+            .sort({ createdAt: 1 })
+            .lean();
+
+        // Map fields for API response (camelCase → snake_case for correctAnswer)
+        const mappedQuestions = questions.map(q => ({
+            _id: q._id,
+            videoId: q.videoId,
+            question: q.question,
+            options: q.options,
+            correct_answer: q.correctAnswer, // Map camelCase to snake_case
+            timestamp_seconds: q.aiMeta?.timestamp_seconds || null,
+            part_number: q.aiMeta?.part_number || null,
+            source: q.source,
+            createdAt: q.createdAt,
+            updatedAt: q.updatedAt
+        }));
+
+        return res.status(200).json({
+            success: true,
+            message: 'Questions retrieved successfully',
+            data: {
+                questions: mappedQuestions
+            }
+        });
+
+    } catch (error) {
+        console.error('Get video questions error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Error retrieving questions',
+            error: error.message
+        });
+    }
+};
+
 module.exports = {
     uploadVideo: uploadVideoController,
     getVideo,
@@ -412,6 +472,7 @@ module.exports = {
     deleteVideo: deleteVideoController,
     updateVideoThumbnail,
     trackProductView,
-    trackProductClick
+    trackProductClick,
+    getVideoQuestions
 };
 
