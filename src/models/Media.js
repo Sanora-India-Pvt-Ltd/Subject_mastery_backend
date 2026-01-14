@@ -65,12 +65,10 @@ mediaSchema.index({ userId: 1, createdAt: -1 });
 mediaSchema.index({ universityId: 1, createdAt: -1 });
 
 // Validation: At least one of userId or universityId must be present
-mediaSchema.pre('save', function(next) {
+mediaSchema.pre('save', async function() {
     if (!this.userId && !this.universityId) {
-        const error = new Error('Either userId or universityId must be provided');
-        return next(error);
+        throw new Error('Either userId or universityId must be provided');
     }
-    next();
 });
 
 module.exports =
