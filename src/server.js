@@ -869,6 +869,23 @@ try {
     });
 }
 
+// Marketplace wishlist routes
+try {
+    console.log('🔄 Loading marketplace wishlist routes...');
+    app.use('/api/marketplace/wishlist', require('./routes/marketplace/wishlistRoutes'));
+    console.log('✅ Marketplace wishlist routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading marketplace wishlist routes:', error.message);
+    console.error('Stack:', error.stack);
+    app.use('/api/marketplace/wishlist', (req, res) => {
+        res.status(500).json({
+            success: false,
+            message: 'Marketplace wishlist routes failed to load. Check server logs.',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    });
+}
+
 // Video transcoding routes
 try {
     console.log('🔄 Loading video transcoding routes...');
