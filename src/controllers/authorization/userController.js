@@ -1169,9 +1169,13 @@ const uploadMedia = async (req, res) => {
             });
         }
 
-        // Get user from flexibleAuth (supports both USER and UNIVERSITY tokens)
+        // Get user or university from flexibleAuth (supports both USER and UNIVERSITY tokens)
         const user = req.user;
-        if (!user) {
+        const university = req.university;
+        const userId = req.userId;
+        const universityId = req.universityId;
+        
+        if (!user && !university) {
             return res.status(401).json({
                 success: false,
                 message: "Authentication required"
@@ -1209,18 +1213,26 @@ const uploadMedia = async (req, res) => {
         const mediaType = isVideoFile ? 'video' : 'image';
             const format = file.mimetype.split('/')[1] || 'unknown';
 
-        // Save upload record to database - associated with this specific user
-        const mediaRecord = await Media.create({
-            userId: user._id, // Ensures it's only associated with this user
+        // Save upload record to database - associated with user or university
+        const mediaData = {
             url: uploadResult.url,
             public_id: uploadResult.key, // Store S3 key in public_id field for backward compatibility
             format: format,
             resource_type: mediaType,
-                fileSize: file.size,
-                originalFilename: file.originalname,
-            folder: 'user_uploads',
+            fileSize: file.size,
+            originalFilename: file.originalname,
+            folder: user ? 'user_uploads' : 'university_uploads',
             provider: uploadResult.provider
-        });
+        };
+        
+        // Set userId or universityId based on token type
+        if (user && userId) {
+            mediaData.userId = userId;
+        } else if (university && universityId) {
+            mediaData.universityId = universityId;
+        }
+        
+        const mediaRecord = await Media.create(mediaData);
 
             uploadedFiles.push({
                 url: uploadResult.url,

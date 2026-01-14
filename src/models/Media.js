@@ -4,8 +4,13 @@ const mediaSchema = new mongoose.Schema({
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true
+        required: false
         // Index removed - covered by compound index { userId: 1, createdAt: -1 }
+    },
+    universityId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'University',
+        required: false
     },
     url: {
         type: String,
@@ -56,6 +61,19 @@ const mediaSchema = new mongoose.Schema({
 
 // Index for querying by user and date
 mediaSchema.index({ userId: 1, createdAt: -1 });
+// Index for querying by university and date
+mediaSchema.index({ universityId: 1, createdAt: -1 });
 
-module.exports = mongoose.model('Media', mediaSchema);
+// Validation: At least one of userId or universityId must be present
+mediaSchema.pre('save', function(next) {
+    if (!this.userId && !this.universityId) {
+        const error = new Error('Either userId or universityId must be provided');
+        return next(error);
+    }
+    next();
+});
+
+module.exports =
+  mongoose.models.Media ||
+  mongoose.model('Media', mediaSchema);
 
