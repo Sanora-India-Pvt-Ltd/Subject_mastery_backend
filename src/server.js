@@ -472,6 +472,21 @@ try {
 try {
     console.log('🔄 Loading user routes...');
     app.use('/api/user', require('./routes/authorization/userRoutes'));
+    
+    // Address routes
+    try {
+        console.log('🔄 Loading address routes...');
+        app.use('/api/addresses', require('./routes/authorization/addressRoutes'));
+        console.log('✅ Address routes loaded successfully');
+    } catch (error) {
+        console.error('❌ Error loading address routes:', error.message);
+        app.use('/api/addresses', (req, res) => {
+            res.status(500).json({
+                success: false,
+                message: 'Address routes failed to load. Check server logs.'
+            });
+        });
+    }
     console.log('✅ User routes loaded successfully');
 } catch (error) {
     console.error('❌ Error loading user routes:', error.message);
