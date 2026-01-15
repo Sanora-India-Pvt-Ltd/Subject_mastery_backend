@@ -32,6 +32,15 @@ const initSocketServer = async (httpServer) => {
         transports: ['websocket', 'polling']
     });
 
+    // Attach io to app.locals and global for worker access
+    // This allows notification worker to access io instance
+    if (httpServer && httpServer.app) {
+        httpServer.app.locals = httpServer.app.locals || {};
+        httpServer.app.locals.io = io;
+    }
+    // Also set global for worker access (if running in same process)
+    global.io = io;
+
     // Redis is disabled - using in-memory adapter only
     console.log('ℹ️  Using in-memory Socket.IO adapter (single server only)');
 
@@ -74,6 +83,32 @@ const initSocketServer = async (httpServer) => {
                         role: 'SPEAKER'
                     };
                     socket.userType = 'speaker';
+                } else if (decoded.type === 'university') {
+                    // University authentication
+                    const University = require('../models/auth/University');
+                    const university = await University.findById(decoded.id).select('-password');
+                    if (!university) {
+                        return next(new Error('Authentication error: University not found'));
+                    }
+                    
+                    // Check if active
+                    const isActive = university.account?.status?.isActive ?? university.isActive;
+                    if (!isActive) {
+                        return next(new Error('Authentication error: University account is inactive'));
+                    }
+                    
+                    // Check if verified
+                    const isVerified = university.verification?.isVerified ?? university.isVerified;
+                    if (!isVerified) {
+                        return next(new Error('Authentication error: Email verification required'));
+                    }
+                    
+                    socket.universityId = university._id.toString();
+                    socket.identity = {
+                        id: university._id.toString(),
+                        type: 'UNIVERSITY'
+                    };
+                    socket.userType = 'university';
                 } else {
                     // Default to User authentication
                     const user = await User.findById(decoded.id).select('-auth');
@@ -82,6 +117,10 @@ const initSocketServer = async (httpServer) => {
                 }
                 socket.userId = user._id.toString();
                 socket.user = user;
+                    socket.identity = {
+                        id: user._id.toString(),
+                        type: 'USER'
+                    };
                     socket.userType = 'user';
                 }
 
@@ -96,8 +135,16 @@ const initSocketServer = async (httpServer) => {
 
     // ✅ Socket.io Presence Logic (Correct Pattern)
     io.on('connection', async (socket) => {
-        const userId = socket.userId;
-        console.log(`✅ User connected: ${userId}`);
+        const userId = socket.userId || socket.universityId;
+        const identity = socket.identity || (socket.userId ? {
+            id: socket.userId,
+            type: 'USER'
+        } : socket.universityId ? {
+            id: socket.universityId,
+            type: 'UNIVERSITY'
+        } : null);
+        
+        console.log(`✅ ${identity?.type || 'User'} connected: ${userId}`);
 
         // FIX #5: Move Redis client acquisition to connection scope
         // Get Redis client once per connection for reuse across handlers
@@ -107,11 +154,24 @@ const initSocketServer = async (httpServer) => {
         // FIX #4: Track explicitly left conferences to avoid reprocessing in disconnect cleanup
         const explicitlyLeftConferences = new Set();
 
-        // Set user online in Redis
-        await setUserOnline(userId);
+        // Set user online in Redis (only for users, not universities)
+        if (socket.userId) {
+            await setUserOnline(userId);
+        }
 
-        // Join user's personal room
-        socket.join(`user:${userId}`);
+        // Join notification rooms based on identity
+        if (socket.identity) {
+            if (socket.identity.type === 'USER') {
+                socket.join(`user:${socket.identity.id}`);
+                console.log(`🔌 Notification socket connected: USER ${socket.identity.id}`);
+            } else if (socket.identity.type === 'UNIVERSITY') {
+                socket.join(`university:${socket.identity.id}`);
+                console.log(`🔌 Notification socket connected: UNIVERSITY ${socket.identity.id}`);
+            }
+        } else if (socket.userId) {
+            // Fallback for existing user connections
+            socket.join(`user:${socket.userId}`);
+        }
 
         // Emit online status to user's contacts
         socket.broadcast.emit('user:online', { userId });
@@ -1071,11 +1131,25 @@ const initSocketServer = async (httpServer) => {
 
         // Handle disconnect
         socket.on('disconnect', async () => {
-            console.log(`❌ User disconnected: ${userId}`);
+            const identity = socket.identity || (socket.userId ? {
+                id: socket.userId,
+                type: 'USER'
+            } : socket.universityId ? {
+                id: socket.universityId,
+                type: 'UNIVERSITY'
+            } : null);
             
-            // Remove from online status and set last seen
-            await setUserOffline(userId);
-            socket.broadcast.emit('user:offline', { userId });
+            if (identity) {
+                console.log(`🔌 Notification socket disconnected: ${identity.type} ${identity.id}`);
+            }
+            
+            console.log(`❌ User disconnected: ${userId || socket.universityId || 'unknown'}`);
+            
+            // Remove from online status and set last seen (only for users)
+            if (socket.userId) {
+                await setUserOffline(userId);
+                socket.broadcast.emit('user:offline', { userId });
+            }
 
             // ============================================
             // CONFERENCE DISCONNECT CLEANUP

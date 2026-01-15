@@ -886,6 +886,40 @@ try {
     });
 }
 
+// Notification routes
+try {
+    console.log('🔄 Loading notification routes...');
+    app.use('/api/notifications', require('./routes/notification/notification.routes'));
+    console.log('✅ Notification routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading notification routes:', error.message);
+    console.error('Stack:', error.stack);
+    app.use('/api/notifications', (req, res) => {
+        res.status(500).json({
+            success: false,
+            message: 'Notification routes failed to load. Check server logs.',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    });
+}
+
+// Admin routes
+try {
+    console.log('🔄 Loading admin routes...');
+    app.use('/api/admin', require('./routes/admin/adminNotification.routes'));
+    console.log('✅ Admin routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading admin routes:', error.message);
+    console.error('Stack:', error.stack);
+    app.use('/api/admin', (req, res) => {
+        res.status(500).json({
+            success: false,
+            message: 'Admin routes failed to load. Check server logs.',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    });
+}
+
 // Video transcoding routes
 try {
     console.log('🔄 Loading video transcoding routes...');
@@ -1432,6 +1466,9 @@ if (registeredRoutes.length > 0) {
 // Create HTTP server for Socket.IO
 const httpServer = http.createServer(app);
 
+// Attach app to httpServer for socketServer to access app.locals
+httpServer.app = app;
+
 // Initialize Redis connection for conference polling
 const { initRedis } = require('./config/redisConnection');
 
@@ -1451,6 +1488,11 @@ const { startMCQGenerationWorker } = require('./workers/mcqGenerationWorker');
         
         // Start MCQ generation worker (after database connection)
         startMCQGenerationWorker();
+        
+        // Start notification delivery worker
+        const { startNotificationWorker } = require('./workers/notification.worker');
+        startNotificationWorker();
+        console.log('✅ Notification worker started');
         
         // Start server
         httpServer.listen(PORT, () => {
