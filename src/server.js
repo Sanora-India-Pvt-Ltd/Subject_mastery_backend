@@ -920,6 +920,23 @@ try {
     });
 }
 
+// Debug routes (temporary - remove in production)
+try {
+    console.log('🔄 Loading debug routes...');
+    app.use('/api/debug/notifications', require('./routes/debug/notificationTest.routes'));
+    console.log('✅ Debug routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading debug routes:', error.message);
+    console.error('Stack:', error.stack);
+    app.use('/api/debug/notifications', (req, res) => {
+        res.status(500).json({
+            success: false,
+            message: 'Debug routes failed to load. Check server logs.',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    });
+}
+
 // Video transcoding routes
 try {
     console.log('🔄 Loading video transcoding routes...');

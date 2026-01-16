@@ -1,5 +1,7 @@
 const Notification = require('../../models/notification/Notification');
 const mongoose = require('mongoose');
+const { getCategoryMeta } = require('../../utils/notificationCategoryMeta');
+const { NOTIFICATION_CATEGORIES } = require('../../constants/notificationCategories');
 
 /**
  * Get user's notifications (paginated)
@@ -9,6 +11,7 @@ const mongoose = require('mongoose');
  * - page (default: 1)
  * - limit (default: 20, max: 50)
  * - unreadOnly (boolean, optional)
+ * - category (optional) - Filter by category (e.g., 'COURSE', 'SYSTEM')
  */
 const getMyNotifications = async (req, res) => {
     try {
@@ -33,6 +36,7 @@ const getMyNotifications = async (req, res) => {
         const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
         const skip = (page - 1) * limit;
         const unreadOnly = req.query.unreadOnly === 'true' || req.query.unreadOnly === true;
+        const category = req.query.category ? req.query.category.toUpperCase() : null;
 
         // Build query
         const query = {
@@ -45,6 +49,18 @@ const getMyNotifications = async (req, res) => {
             query.isRead = false;
         }
 
+        // Add category filter if provided
+        if (category) {
+            // Validate category exists in allowed categories
+            // If invalid, fallback to SYSTEM per requirements
+            if (NOTIFICATION_CATEGORIES.includes(category)) {
+                query.category = category;
+            } else {
+                // Invalid category - fallback to SYSTEM
+                query.category = 'SYSTEM';
+            }
+        }
+
         // Fetch notifications (using compound index for performance)
         const [notifications, totalCount] = await Promise.all([
             Notification.find(query)
@@ -55,6 +71,15 @@ const getMyNotifications = async (req, res) => {
             Notification.countDocuments(query)
         ]);
 
+        // Enrich notifications with category metadata
+        const enrichedNotifications = notifications.map(notification => {
+            const categoryMeta = getCategoryMeta(notification.category || 'SYSTEM');
+            return {
+                ...notification,
+                categoryMeta
+            };
+        });
+
         // Calculate pagination metadata
         const totalPages = Math.ceil(totalCount / limit);
         const hasNextPage = page < totalPages;
@@ -64,7 +89,7 @@ const getMyNotifications = async (req, res) => {
             success: true,
             message: 'Notifications retrieved successfully',
             data: {
-                notifications,
+                notifications: enrichedNotifications,
                 pagination: {
                     currentPage: page,
                     limit,
@@ -135,14 +160,14 @@ const getUnreadCount = async (req, res) => {
 
 /**
  * Mark a single notification as read
- * POST /api/notifications/:id/read
+ * PUT /api/notifications/:notificationId/read
  */
 const markAsRead = async (req, res) => {
     try {
-        const { id } = req.params;
+        const { notificationId } = req.params;
 
         // Validate notification ID
-        if (!mongoose.Types.ObjectId.isValid(id)) {
+        if (!mongoose.Types.ObjectId.isValid(notificationId)) {
             return res.status(400).json({
                 success: false,
                 message: 'Invalid notification ID'
@@ -165,17 +190,24 @@ const markAsRead = async (req, res) => {
             });
         }
 
-        // Find notification and verify ownership
-        const notification = await Notification.findOne({
-            _id: id,
-            recipientId,
-            recipientType
-        });
+        // Find notification by ID first
+        const notification = await Notification.findById(notificationId);
 
         if (!notification) {
             return res.status(404).json({
                 success: false,
                 message: 'Notification not found'
+            });
+        }
+
+        // Verify ownership - return 403 if belongs to someone else
+        if (
+            notification.recipientId.toString() !== recipientId.toString() ||
+            notification.recipientType !== recipientType
+        ) {
+            return res.status(403).json({
+                success: false,
+                message: 'You do not have permission to mark this notification as read'
             });
         }
 
@@ -188,14 +220,7 @@ const markAsRead = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: 'Notification marked as read',
-            data: {
-                notification: {
-                    _id: notification._id,
-                    isRead: notification.isRead,
-                    readAt: notification.readAt
-                }
-            }
+            message: 'Notification marked as read'
         });
 
     } catch (error) {

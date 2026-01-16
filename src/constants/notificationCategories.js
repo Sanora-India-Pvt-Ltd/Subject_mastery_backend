@@ -13,22 +13,28 @@
  */
 
 const NOTIFICATION_CATEGORIES = [
+    'SYSTEM',
     'COURSE',
     'VIDEO',
     'SOCIAL',
     'MARKETPLACE',
     'WALLET',
-    'SYSTEM'
+    'CONFERENCE',
+    'PAYMENT',
+    'SECURITY'
 ];
 
 // Category enum for validation
 const NOTIFICATION_CATEGORY_ENUM = {
+    SYSTEM: 'SYSTEM',
     COURSE: 'COURSE',
     VIDEO: 'VIDEO',
     SOCIAL: 'SOCIAL',
     MARKETPLACE: 'MARKETPLACE',
     WALLET: 'WALLET',
-    SYSTEM: 'SYSTEM'
+    CONFERENCE: 'CONFERENCE',
+    PAYMENT: 'PAYMENT',
+    SECURITY: 'SECURITY'
 };
 
 module.exports = {

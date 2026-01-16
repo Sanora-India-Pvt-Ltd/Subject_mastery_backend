@@ -32,8 +32,8 @@ router.get('/', flexibleAuth, getMyNotifications);
 router.get('/unread-count', flexibleAuth, getUnreadCount);
 
 // Mark a single notification as read
-// POST /api/notifications/:id/read
-router.post('/:id/read', flexibleAuth, markAsRead);
+// PUT /api/notifications/:notificationId/read
+router.put('/:notificationId/read', flexibleAuth, markAsRead);
 
 // Mark all notifications as read
 // POST /api/notifications/read-all
