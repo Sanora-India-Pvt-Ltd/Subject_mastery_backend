@@ -36,7 +36,7 @@ const getMyNotifications = async (req, res) => {
         const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
         const skip = (page - 1) * limit;
         const unreadOnly = req.query.unreadOnly === 'true' || req.query.unreadOnly === true;
-        const category = req.query.category ? req.query.category.toUpperCase() : null;
+        const { category } = req.query;
 
         // Build query
         const query = {
@@ -49,16 +49,9 @@ const getMyNotifications = async (req, res) => {
             query.isRead = false;
         }
 
-        // Add category filter if provided
-        if (category) {
-            // Validate category exists in allowed categories
-            // If invalid, fallback to SYSTEM per requirements
-            if (NOTIFICATION_CATEGORIES.includes(category)) {
-                query.category = category;
-            } else {
-                // Invalid category - fallback to SYSTEM
-                query.category = 'SYSTEM';
-            }
+        // Add category filter ONLY if valid
+        if (category && NOTIFICATION_CATEGORIES.includes(category.toUpperCase())) {
+            query.category = category.toUpperCase();
         }
 
         // Fetch notifications (using compound index for performance)
