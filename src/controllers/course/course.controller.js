@@ -434,6 +434,7 @@ const requestEnrollment = async (req, res, next) => {
                     type: 'COURSE_ENROLLMENT_REQUESTED',
                     title: 'New Enrollment Request',
                     message: `A student has requested enrollment in "${course.name}"`,
+                    channels: ['IN_APP', 'PUSH'],
                     entity: {
                         type: 'COURSE',
                         id: courseId
@@ -647,6 +648,7 @@ const approveEnrollment = async (req, res) => {
                 type: 'COURSE_ENROLLMENT_APPROVED',
                 title: 'Enrollment Approved',
                 message: `Your enrollment request for "${course.name}" has been approved`,
+                channels: ['IN_APP', 'PUSH'],
                 entity: {
                     type: 'COURSE',
                     id: courseId

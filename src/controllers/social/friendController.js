@@ -159,6 +159,7 @@ const sendFriendRequest = async (req, res) => {
                 type: 'FRIEND_REQUEST_RECEIVED',
                 title: 'New Friend Request',
                 message: `${friendRequest.sender.profile?.name?.full || 'Someone'} sent you a friend request`,
+                channels: ['IN_APP', 'PUSH'],
                 entity: {
                     type: 'FRIEND_REQUEST',
                     id: friendRequest._id
@@ -282,6 +283,7 @@ const acceptFriendRequest = async (req, res) => {
                 type: 'FRIEND_REQUEST_ACCEPTED',
                 title: 'Friend Request Accepted',
                 message: `${friendRequest.receiver.profile?.name?.full || 'Someone'} accepted your friend request`,
+                channels: ['IN_APP', 'PUSH'],
                 entity: {
                     type: 'FRIEND_REQUEST',
                     id: friendRequest._id

@@ -508,6 +508,7 @@ const publishVideoQuestion = async (req, res) => {
                         type: 'VIDEO_QUIZ_PUBLISHED',
                         title: 'New Quiz Available',
                         message: `A new quiz is now available for "${video.title}"`,
+                        channels: ['IN_APP', 'PUSH'],
                         entity: {
                             type: 'VIDEO',
                             id: video._id

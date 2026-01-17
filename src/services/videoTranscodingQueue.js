@@ -213,6 +213,7 @@ class VideoTranscodingQueue extends EventEmitter {
                                     type: 'NEW_VIDEO_AVAILABLE',
                                     title: 'New Video Available',
                                     message: `A new video "${video.title}" is now available`,
+                                    channels: ['IN_APP', 'PUSH'],
                                     entity: {
                                         type: 'VIDEO',
                                         id: videoId

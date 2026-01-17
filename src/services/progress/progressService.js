@@ -199,6 +199,7 @@ const handleCourseCompletion = async (userId, courseId) => {
                     type: 'COURSE_COMPLETED',
                     title: 'Course Completed',
                     message: `Congratulations! You've completed "${course.name}"`,
+                    channels: ['IN_APP', 'PUSH'],
                     entity: {
                         type: 'COURSE',
                         id: courseId
