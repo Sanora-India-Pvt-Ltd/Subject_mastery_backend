@@ -5,6 +5,7 @@ const Course = require('../../models/course/Course');
 const Video = require('../../models/course/Video');
 const TokenWallet = require('../../models/wallet/TokenWallet');
 const TokenTransaction = require('../../models/wallet/TokenTransaction');
+const { emitNotification } = require('../notification/notificationEmitter');
 
 /**
  * UPSERT user video progress (throttled, 10 sec interval)
@@ -187,6 +188,32 @@ const handleCourseCompletion = async (userId, courseId) => {
 
         // STEP 2: Increment course completedCount (first-time completion only)
         const course = await Course.findById(courseId);
+
+        // Emit notification to user about course completion
+        if (course) {
+            try {
+                await emitNotification({
+                    recipientType: 'USER',
+                    recipientId: userId,
+                    category: 'COURSE',
+                    type: 'COURSE_COMPLETED',
+                    title: 'Course Completed',
+                    message: `Congratulations! You've completed "${course.name}"`,
+                    entity: {
+                        type: 'COURSE',
+                        id: courseId
+                    },
+                    payload: {
+                        courseId: courseId.toString(),
+                        courseName: course.name,
+                        enrollmentId: enrollment._id.toString()
+                    }
+                });
+            } catch (notifError) {
+                // Don't break completion flow if notification fails
+                console.error('Failed to emit course completion notification:', notifError);
+            }
+        }
         if (course) {
             // Use atomic increment to prevent race conditions
             const updatedCourse = await Course.findByIdAndUpdate(

@@ -6,6 +6,7 @@ const CourseEnrollment = require('../../models/course/CourseEnrollment');
 const UserCourseProgress = require('../../models/progress/UserCourseProgress');
 const TokenTransaction = require('../../models/wallet/TokenTransaction');
 const videoService = require('../../services/video/videoService');
+const { emitNotification } = require('../../services/notification/notificationEmitter');
 
 /**
  * Create a new course
@@ -424,6 +425,30 @@ const requestEnrollment = async (req, res, next) => {
                 status: 'REQUESTED'
             });
 
+            // Emit notification to university about new enrollment request
+            try {
+                await emitNotification({
+                    recipientType: 'UNIVERSITY',
+                    recipientId: course.universityId,
+                    category: 'COURSE',
+                    type: 'COURSE_ENROLLMENT_REQUESTED',
+                    title: 'New Enrollment Request',
+                    message: `A student has requested enrollment in "${course.name}"`,
+                    entity: {
+                        type: 'COURSE',
+                        id: courseId
+                    },
+                    payload: {
+                        courseId: courseId.toString(),
+                        courseName: course.name,
+                        enrollmentId: enrollment._id.toString()
+                    }
+                });
+            } catch (notifError) {
+                // Don't break the API if notification fails
+                console.error('Failed to emit enrollment request notification:', notifError);
+            }
+
             return res.status(201).json({
                 success: true,
                 message: 'Enrollment request submitted',
@@ -612,6 +637,30 @@ const approveEnrollment = async (req, res) => {
 
         // Pre-save hook will check expiry automatically
         await enrollment.save();
+
+        // Emit notification to student about enrollment approval
+        try {
+            await emitNotification({
+                recipientType: 'USER',
+                recipientId: enrollment.userId,
+                category: 'COURSE',
+                type: 'COURSE_ENROLLMENT_APPROVED',
+                title: 'Enrollment Approved',
+                message: `Your enrollment request for "${course.name}" has been approved`,
+                entity: {
+                    type: 'COURSE',
+                    id: courseId
+                },
+                payload: {
+                    courseId: courseId.toString(),
+                    courseName: course.name,
+                    enrollmentId: enrollment._id.toString()
+                }
+            });
+        } catch (notifError) {
+            // Don't break the API if notification fails
+            console.error('Failed to emit enrollment approved notification:', notifError);
+        }
 
         res.status(200).json({
             success: true,

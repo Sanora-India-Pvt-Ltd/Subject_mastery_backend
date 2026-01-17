@@ -1,6 +1,7 @@
 const User = require('../../models/authorization/User');
 const FriendRequest = require('../../models/social/FriendRequest');
 const mongoose = require('mongoose');
+const { emitNotification } = require('../../services/notification/notificationEmitter');
 
 // Helper function to get all blocked user IDs (checks both root and social.blockedUsers)
 const getBlockedUserIds = async (userId) => {
@@ -149,6 +150,29 @@ const sendFriendRequest = async (req, res) => {
         await friendRequest.populate('sender', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email');
         await friendRequest.populate('receiver', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email');
 
+        // Emit notification to receiver about new friend request
+        try {
+            await emitNotification({
+                recipientType: 'USER',
+                recipientId: receiverId,
+                category: 'SOCIAL',
+                type: 'FRIEND_REQUEST_RECEIVED',
+                title: 'New Friend Request',
+                message: `${friendRequest.sender.profile?.name?.full || 'Someone'} sent you a friend request`,
+                entity: {
+                    type: 'FRIEND_REQUEST',
+                    id: friendRequest._id
+                },
+                payload: {
+                    senderId: senderId.toString(),
+                    senderName: friendRequest.sender.profile?.name?.full || 'Unknown'
+                }
+            });
+        } catch (notifError) {
+            // Don't break the API if notification fails
+            console.error('Failed to emit friend request notification:', notifError);
+        }
+
         res.status(201).json({
             success: true,
             message: 'Friend request sent successfully',
@@ -248,6 +272,29 @@ const acceptFriendRequest = async (req, res) => {
         // Populate sender and receiver details
         await friendRequest.populate('sender', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email');
         await friendRequest.populate('receiver', 'profile.name.first profile.name.last profile.name.full profile.profileImage profile.email');
+
+        // Emit notification to original sender about acceptance
+        try {
+            await emitNotification({
+                recipientType: 'USER',
+                recipientId: senderId,
+                category: 'SOCIAL',
+                type: 'FRIEND_REQUEST_ACCEPTED',
+                title: 'Friend Request Accepted',
+                message: `${friendRequest.receiver.profile?.name?.full || 'Someone'} accepted your friend request`,
+                entity: {
+                    type: 'FRIEND_REQUEST',
+                    id: friendRequest._id
+                },
+                payload: {
+                    receiverId: receiverId.toString(),
+                    receiverName: friendRequest.receiver.profile?.name?.full || 'Unknown'
+                }
+            });
+        } catch (notifError) {
+            // Don't break the API if notification fails
+            console.error('Failed to emit friend request accepted notification:', notifError);
+        }
 
         res.json({
             success: true,

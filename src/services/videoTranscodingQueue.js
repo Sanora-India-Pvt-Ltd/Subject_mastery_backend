@@ -11,6 +11,8 @@ const VideoTranscodingJob = require('../models/VideoTranscodingJob');
 const Video = require('../models/course/Video');
 const MCQGenerationJob = require('../models/course/MCQGenerationJob');
 const StorageService = require('./storage.service');
+const CourseEnrollment = require('../models/course/CourseEnrollment');
+const { emitNotification } = require('../notification/notificationEmitter');
 
 class VideoTranscodingQueue extends EventEmitter {
     constructor() {
@@ -191,6 +193,49 @@ class VideoTranscodingQueue extends EventEmitter {
                     );
 
                     console.log(`[VideoQueue] Video ${videoId} updated to READY status`);
+
+                    // Notify enrolled users about new video
+                    try {
+                        const video = await Video.findById(videoId);
+                        if (video && video.courseId) {
+                            // Get all enrolled users (APPROVED, IN_PROGRESS, or COMPLETED)
+                            const enrollments = await CourseEnrollment.find({
+                                courseId: video.courseId,
+                                status: { $in: ['APPROVED', 'IN_PROGRESS', 'COMPLETED'] }
+                            }).select('userId').lean();
+
+                            // Emit notification to each enrolled user (non-blocking)
+                            const notificationPromises = enrollments.map(enrollment =>
+                                emitNotification({
+                                    recipientType: 'USER',
+                                    recipientId: enrollment.userId,
+                                    category: 'COURSE',
+                                    type: 'NEW_VIDEO_AVAILABLE',
+                                    title: 'New Video Available',
+                                    message: `A new video "${video.title}" is now available`,
+                                    entity: {
+                                        type: 'VIDEO',
+                                        id: videoId
+                                    },
+                                    payload: {
+                                        videoId: videoId.toString(),
+                                        videoTitle: video.title,
+                                        courseId: video.courseId.toString()
+                                    }
+                                }).catch(err => {
+                                    console.error(`Failed to notify user ${enrollment.userId} about new video:`, err);
+                                })
+                            );
+
+                            // Fire and forget - don't wait for all notifications
+                            Promise.all(notificationPromises).catch(err => {
+                                console.error('Error sending video ready notifications:', err);
+                            });
+                        }
+                    } catch (notifError) {
+                        // Don't break video processing if notification fails
+                        console.error('Failed to emit video ready notifications:', notifError);
+                    }
 
                     // Queue MCQ generation job (asynchronous, non-blocking)
                     try {

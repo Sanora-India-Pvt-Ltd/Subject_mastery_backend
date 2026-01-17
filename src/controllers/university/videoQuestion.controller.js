@@ -2,6 +2,8 @@ const Video = require('../../models/course/Video');
 const VideoQuestion = require('../../models/course/VideoQuestion');
 const Course = require('../../models/course/Course');
 const MCQGenerationJob = require('../../models/ai/MCQGenerationJob');
+const CourseEnrollment = require('../../models/course/CourseEnrollment');
+const { emitNotification } = require('../../services/notification/notificationEmitter');
 
 /**
  * List MCQs for a video (University only)
@@ -482,9 +484,53 @@ const publishVideoQuestion = async (req, res) => {
         // 6. If question.status !== 'ACTIVE' (using ACTIVE as published state):
         // Note: Model enum is ['DRAFT', 'ACTIVE'], so using 'ACTIVE' instead of 'LIVE'
         const publishedAt = new Date();
-        if (videoQuestion.status !== 'ACTIVE') {
+        const wasJustPublished = videoQuestion.status !== 'ACTIVE';
+        if (wasJustPublished) {
             videoQuestion.status = 'ACTIVE';
             await videoQuestion.save();
+        }
+
+        // Notify enrolled users about new quiz (only if just published)
+        if (wasJustPublished) {
+            try {
+                // Get all enrolled users (APPROVED, IN_PROGRESS, or COMPLETED)
+                const enrollments = await CourseEnrollment.find({
+                    courseId: course._id,
+                    status: { $in: ['APPROVED', 'IN_PROGRESS', 'COMPLETED'] }
+                }).select('userId').lean();
+
+                // Emit notification to each enrolled user (non-blocking)
+                const notificationPromises = enrollments.map(enrollment =>
+                    emitNotification({
+                        recipientType: 'USER',
+                        recipientId: enrollment.userId,
+                        category: 'COURSE',
+                        type: 'VIDEO_QUIZ_PUBLISHED',
+                        title: 'New Quiz Available',
+                        message: `A new quiz is now available for "${video.title}"`,
+                        entity: {
+                            type: 'VIDEO',
+                            id: video._id
+                        },
+                        payload: {
+                            videoId: video._id.toString(),
+                            videoTitle: video.title,
+                            courseId: course._id.toString(),
+                            courseName: course.name
+                        }
+                    }).catch(err => {
+                        console.error(`Failed to notify user ${enrollment.userId} about quiz:`, err);
+                    })
+                );
+
+                // Fire and forget - don't wait for all notifications
+                Promise.all(notificationPromises).catch(err => {
+                    console.error('Error sending quiz published notifications:', err);
+                });
+            } catch (notifError) {
+                // Don't break the API if notification fails
+                console.error('Failed to emit quiz published notifications:', notifError);
+            }
         }
 
         // 7. Return response
