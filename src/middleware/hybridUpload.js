@@ -18,19 +18,28 @@ const diskStorage = multer.diskStorage({
   }
 });
 
-// S3 storage for images (direct upload)
-const s3Storage = multerS3({
-  s3,
-  bucket: process.env.AWS_BUCKET_NAME,
-  contentType: multerS3.AUTO_CONTENT_TYPE,
-  key: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const fileName = `uploads/${Date.now()}-${Math.round(
-      Math.random() * 1e9
-    )}${ext}`;
-    cb(null, fileName);
+// S3 storage for images (direct upload) - lazy initialization
+let s3Storage = null;
+function getS3Storage() {
+  if (!s3Storage) {
+    if (!process.env.AWS_BUCKET_NAME) {
+      throw new Error('AWS_BUCKET_NAME environment variable is required for S3 uploads');
+    }
+    s3Storage = multerS3({
+      s3,
+      bucket: process.env.AWS_BUCKET_NAME,
+      contentType: multerS3.AUTO_CONTENT_TYPE,
+      key: (req, file, cb) => {
+        const ext = path.extname(file.originalname);
+        const fileName = `uploads/${Date.now()}-${Math.round(
+          Math.random() * 1e9
+        )}${ext}`;
+        cb(null, fileName);
+      }
+    });
   }
-});
+  return s3Storage;
+}
 
 // Hybrid upload: diskStorage for videos, s3Storage for images
 const upload = multer({

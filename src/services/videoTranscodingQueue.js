@@ -12,7 +12,7 @@ const Video = require('../models/course/Video');
 const MCQGenerationJob = require('../models/course/MCQGenerationJob');
 const StorageService = require('./storage.service');
 const CourseEnrollment = require('../models/course/CourseEnrollment');
-const { emitNotification } = require('../notification/notificationEmitter');
+const { emitNotification } = require('./notification/notificationEmitter');
 
 class VideoTranscodingQueue extends EventEmitter {
     constructor() {
