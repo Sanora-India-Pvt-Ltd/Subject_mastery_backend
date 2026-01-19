@@ -1186,14 +1186,17 @@ const uploadMedia = async (req, res) => {
 
         // Process each file
         for (const file of req.files) {
-            // Validate mimetype (only image/* or video/*)
-            const isValidMimetype = file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/');
+            // Validate mimetype (image/*, video/*, or audio/*)
+            const isValidMimetype = file.mimetype.startsWith('image/') || 
+                                   file.mimetype.startsWith('video/') || 
+                                   file.mimetype.startsWith('audio/');
             if (!isValidMimetype) {
                 continue; // Skip invalid files, continue with others
             }
 
-        // Check if uploaded file is a video
+        // Check if uploaded file is a video or audio
             const isVideoFile = isVideo(file.mimetype);
+            const isAudioFile = file.mimetype.startsWith('audio/');
 
         // Handle file upload based on storage type
         // diskUpload provides file.path, multer-s3 provides file.location and file.key
@@ -1210,7 +1213,7 @@ const uploadMedia = async (req, res) => {
         }
 
         // Determine media type from mimetype
-        const mediaType = isVideoFile ? 'video' : 'image';
+        const mediaType = isVideoFile ? 'video' : (isAudioFile ? 'audio' : 'image');
             const format = file.mimetype.split('/')[1] || 'unknown';
 
         // Save upload record to database - associated with user or university
@@ -1249,7 +1252,7 @@ const uploadMedia = async (req, res) => {
         if (uploadedFiles.length === 0) {
             return res.status(400).json({
                 success: false,
-                message: "No valid files uploaded. Only image/* and video/* files are allowed."
+                message: "No valid files uploaded. Only image/*, video/*, and audio/* files are allowed."
             });
         }
 

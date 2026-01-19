@@ -452,14 +452,6 @@ const sendMessage = async (req, res) => {
             });
         }
 
-        // Reject audio messages
-        if (messageType === 'audio' || (media && media.some(m => m.type === 'audio'))) {
-            return res.status(400).json({
-                success: false,
-                message: 'Audio messages are not allowed'
-            });
-        }
-
         // Verify conversation and authorization
         const conversation = await Conversation.findById(conversationId);
         if (!conversation) {
@@ -503,11 +495,20 @@ const sendMessage = async (req, res) => {
             }
         }
 
+        // Determine message type if not provided
+        let detectedMessageType = messageType;
+        if (!detectedMessageType && media && media.length > 0) {
+            // Use the first media item's type, or default to 'image'
+            detectedMessageType = media[0].type || 'image';
+        } else if (!detectedMessageType) {
+            detectedMessageType = 'text';
+        }
+
         // Create message
         const messageData = {
             conversationId,
             senderId: userId,
-            messageType: messageType || (media && media.length > 0 ? 'image' : 'text'),
+            messageType: detectedMessageType,
             status: 'sent'
         };
 
