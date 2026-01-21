@@ -156,7 +156,7 @@ const initSocketServer = async (httpServer) => {
 
         // Set user online in Redis (only for users, not universities)
         if (socket.userId) {
-            await setUserOnline(userId);
+        await setUserOnline(userId);
         }
 
         // Join notification rooms based on identity
@@ -1341,8 +1341,8 @@ const initSocketServer = async (httpServer) => {
             
             // Remove from online status and set last seen (only for users)
             if (socket.userId) {
-                await setUserOffline(userId);
-                socket.broadcast.emit('user:offline', { userId });
+            await setUserOffline(userId);
+            socket.broadcast.emit('user:offline', { userId });
             }
 
             // ============================================

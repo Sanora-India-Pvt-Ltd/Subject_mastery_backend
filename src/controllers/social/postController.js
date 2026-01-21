@@ -925,6 +925,19 @@ const getUserPosts = async (req, res) => {
         // Get total count for pagination
         const totalPosts = await Post.countDocuments(query);
 
+        // Fetch likes for all posts in batch (likes are stored in Like collection, similar to comments)
+        const postIds = posts.map(post => post._id);
+        const likeDocs = await Like.find({
+            content: 'post',
+            contentId: { $in: postIds }
+        }).lean();
+        
+        // Create a map of postId to likes array
+        const likesMap = new Map();
+        likeDocs.forEach(likeDoc => {
+            likesMap.set(likeDoc.contentId.toString(), likeDoc.likes || [[], [], [], [], [], []]);
+        });
+
         // Fetch comments and comment counts for all posts
         const postsWithComments = await Promise.all(
             posts.map(async (post) => {
@@ -941,6 +954,12 @@ const getUserPosts = async (req, res) => {
                 const commentCount = await post.getCommentCount();
                 const comments = await getFormattedComments(post._id, 15);
                 
+                // Get likes from Like collection
+                const postLikes = likesMap.get(post._id.toString()) || [[], [], [], [], [], []];
+                const likeCount = Array.isArray(postLikes)
+                    ? postLikes.reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0)
+                    : 0;
+                
                 // Enrich media with transcoding status for videos
                 const enrichedMedia = await enrichMediaWithTranscodingStatus(post.media || []);
 
@@ -950,9 +969,9 @@ const getUserPosts = async (req, res) => {
                     user: userInfo,
                     caption: post.caption,
                     media: enrichedMedia,
-                    likes: post.likes || [[], [], [], [], [], []],
+                    likes: postLikes,
                     comments: comments,
-                    likeCount: post.likeCount,
+                    likeCount: likeCount,
                     commentCount: commentCount,
                     createdAt: post.createdAt,
                     updatedAt: post.updatedAt

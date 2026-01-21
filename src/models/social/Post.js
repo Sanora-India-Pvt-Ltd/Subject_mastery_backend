@@ -72,6 +72,44 @@ postSchema.methods.getCommentCount = async function() {
     return topLevelCount + replyCount;
 };
 
+// Instance method to get total like count (sum of all reaction types)
+// Fetches from Like collection, similar to getCommentCount
+postSchema.methods.getLikeCount = async function() {
+    try {
+        const Like = mongoose.model('Like');
+        const likeDoc = await Like.findOne({ 
+            content: 'post', 
+            contentId: this._id 
+        }).lean();
+        
+        if (!likeDoc || !likeDoc.likes || !Array.isArray(likeDoc.likes)) {
+            return 0;
+        }
+        
+        // Sum all user IDs across all reaction type arrays
+        // Use Set to handle duplicates (same user can't like twice, but just in case)
+        const allLikes = new Set();
+        likeDoc.likes.forEach((reactionArray) => {
+            if (Array.isArray(reactionArray)) {
+                reactionArray.forEach((userId) => {
+                    if (userId) {
+                        // Handle both ObjectId and string formats
+                        const idStr = userId.toString ? userId.toString() : String(userId);
+                        if (idStr && idStr !== 'null' && idStr !== 'undefined' && idStr.length > 0) {
+                            allLikes.add(idStr);
+                        }
+                    }
+                });
+            }
+        });
+        
+        return allLikes.size;
+    } catch (error) {
+        console.error('Error calculating like count:', error);
+        return 0;
+    }
+};
+
 // Ensure virtuals are included in JSON
 postSchema.set('toJSON', { virtuals: true });
 postSchema.set('toObject', { virtuals: true });
