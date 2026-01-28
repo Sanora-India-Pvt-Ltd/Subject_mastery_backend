@@ -53,7 +53,7 @@ const generatePublicCode = () => {
  */
 const createConference = async (req, res) => {
     try {
-        const { title, description, speakerIds } = req.body;
+        const { title, description, speakerIds, pptUrl } = req.body;
         let hostId = null;
         let ownerModel = 'User';
 
@@ -126,7 +126,8 @@ const createConference = async (req, res) => {
             ownerModel,
             speakers: speakers,
             publicCode,
-            status: 'DRAFT'
+            status: 'DRAFT',
+            pptUrl: pptUrl || null
         });
 
         // Generate QR code for the conference
@@ -265,7 +266,7 @@ const getConferenceById = async (req, res) => {
 const updateConference = async (req, res) => {
     try {
         const { conferenceId } = req.params;
-        const { title, description, speakerIds } = req.body;
+        const { title, description, speakerIds, pptUrl } = req.body;
         const conference = req.conference;
         const userRole = req.userRole;
 
@@ -315,6 +316,20 @@ const updateConference = async (req, res) => {
                 conference.speakers = validSpeakers.map(s => s._id);
             } else {
                 conference.speakers = [];
+            }
+        }
+
+        if (pptUrl !== undefined) {
+            // Validate URL format (basic validation)
+            if (pptUrl !== null && pptUrl !== '' && typeof pptUrl === 'string') {
+                conference.pptUrl = pptUrl.trim();
+            } else if (pptUrl === null || pptUrl === '') {
+                conference.pptUrl = null;
+            } else {
+                return res.status(400).json({
+                    success: false,
+                    message: 'pptUrl must be a valid URL string or null'
+                });
             }
         }
 
