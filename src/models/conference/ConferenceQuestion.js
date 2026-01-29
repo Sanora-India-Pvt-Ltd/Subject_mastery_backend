@@ -36,6 +36,7 @@ const conferenceQuestionSchema = new mongoose.Schema({
         required: true,
         min: 1
     },
+    // PPT slide/page index (0-based or 1-based) – links question to a specific slide
     slideIndex: {
         type: Number
     },

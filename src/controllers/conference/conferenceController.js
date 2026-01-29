@@ -495,7 +495,7 @@ const endConference = async (req, res) => {
 const addQuestion = async (req, res) => {
     try {
         const { conferenceId } = req.params;
-        const { order, questionText, options, correctOption } = req.body;
+        const { order, questionText, options, correctOption, slideIndex, pageNumber } = req.body;
         const userId = req.user?._id || req.hostUser?._id || req.speaker?._id;
         const conference = req.conference;
         const userRole = req.userRole;
@@ -581,8 +581,24 @@ const addQuestion = async (req, res) => {
             questionOrder = maxOrderQuestion ? maxOrderQuestion.order + 1 : 1;
         }
 
+        // PPT slide/page index (optional): accept slideIndex or pageNumber (0-based or 1-based)
+        let pptSlideIndex = slideIndex;
+        if (pptSlideIndex === undefined && pageNumber !== undefined) {
+            pptSlideIndex = pageNumber;
+        }
+        if (pptSlideIndex !== undefined) {
+            const num = Number(pptSlideIndex);
+            if (Number.isNaN(num) || num < 0 || !Number.isInteger(num)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'slideIndex/pageNumber must be a non-negative integer'
+                });
+            }
+            pptSlideIndex = num; // use validated integer
+        }
+
         // Create question
-        const question = await ConferenceQuestion.create({
+        const createPayload = {
             conferenceId,
             order: questionOrder,
             questionText: questionText.trim(),
@@ -595,7 +611,11 @@ const addQuestion = async (req, res) => {
             createdById,
             createdByModel,
             status: 'IDLE'
-        });
+        };
+        if (pptSlideIndex !== undefined) {
+            createPayload.slideIndex = pptSlideIndex;
+        }
+        const question = await ConferenceQuestion.create(createPayload);
 
         res.status(201).json({
             success: true,
@@ -617,7 +637,7 @@ const addQuestion = async (req, res) => {
 const updateQuestion = async (req, res) => {
     try {
         const { conferenceId, questionId } = req.params;
-        const { questionText, options, correctOption, order } = req.body;
+        const { questionText, options, correctOption, order, slideIndex, pageNumber } = req.body;
         const userId = req.user._id;
         const userRole = req.userRole;
 
@@ -685,6 +705,23 @@ const updateQuestion = async (req, res) => {
 
         if (order !== undefined) {
             question.order = order;
+        }
+
+        // PPT slide/page index: accept slideIndex or pageNumber (null to clear)
+        if (slideIndex !== undefined || pageNumber !== undefined) {
+            const raw = slideIndex !== undefined ? slideIndex : pageNumber;
+            if (raw === null || raw === '') {
+                question.slideIndex = undefined;
+            } else {
+                const num = Number(raw);
+                if (Number.isNaN(num) || num < 0 || !Number.isInteger(num)) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'slideIndex/pageNumber must be a non-negative integer or null'
+                    });
+                }
+                question.slideIndex = num;
+            }
         }
 
         await question.save();
@@ -817,7 +854,7 @@ const pushQuestionLive = async (req, res) => {
         const expiresAt = startedAt + (duration * 1000);
         const ttlSeconds = duration + 5; // TTL = duration + 5 seconds buffer
 
-        // Prepare live question data
+        // Prepare live question data (include PPT slide/page index when set)
         const liveQuestionData = {
             conferenceId,
             questionId: question._id.toString(),
@@ -830,6 +867,9 @@ const pushQuestionLive = async (req, res) => {
             expiresAt,
             duration
         };
+        if (question.slideIndex != null) {
+            liveQuestionData.slideIndex = question.slideIndex;
+        }
 
         const liveQuestionKey = `conference:${conferenceId}:live_question`;
 
