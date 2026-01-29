@@ -83,7 +83,7 @@ const emitNotification = async (payload) => {
         }
 
         // Validate category enum
-        const validCategories = ['COURSE', 'VIDEO', 'SOCIAL', 'MARKETPLACE', 'WALLET', 'SYSTEM'];
+        const validCategories = ['COURSE', 'VIDEO', 'SOCIAL', 'MARKETPLACE', 'WALLET', 'SYSTEM', 'MINDTRAIN'];
         if (!validCategories.includes(payload.category)) {
             console.error('❌ Notification emission failed: Invalid category', {
                 category: payload.category,
