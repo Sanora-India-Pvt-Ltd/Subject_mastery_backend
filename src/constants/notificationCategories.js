@@ -21,7 +21,9 @@ const NOTIFICATION_CATEGORIES = [
     'WALLET',
     'CONFERENCE',
     'PAYMENT',
-    'SECURITY'
+    'SECURITY',
+    // MindTrain learning assistant / mastery system
+    'MINDTRAIN'
 ];
 
 // Category enum for validation
@@ -34,7 +36,8 @@ const NOTIFICATION_CATEGORY_ENUM = {
     WALLET: 'WALLET',
     CONFERENCE: 'CONFERENCE',
     PAYMENT: 'PAYMENT',
-    SECURITY: 'SECURITY'
+    SECURITY: 'SECURITY',
+    MINDTRAIN: 'MINDTRAIN'
 };
 
 module.exports = {

@@ -31,7 +31,7 @@ const notificationSchema = new mongoose.Schema({
     // Notification Classification
     category: {
         type: String,
-        enum: ['COURSE', 'VIDEO', 'SOCIAL', 'MARKETPLACE', 'WALLET', 'SYSTEM'],
+        enum: ['COURSE', 'VIDEO', 'SOCIAL', 'MARKETPLACE', 'WALLET', 'SYSTEM', 'MINDTRAIN'],
         required: true,
         index: true
         // High-level grouping for filtering and organization
