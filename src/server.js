@@ -903,6 +903,68 @@ try {
     });
 }
 
+// MindTrain alarm profile routes
+try {
+    console.log('🔄 Loading MindTrain alarm profile routes...');
+    app.use('/api/mindtrain', require('./routes/MindTrain/alarmProfile.routes'));
+    console.log('✅ MindTrain alarm profile routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading MindTrain alarm profile routes:', error.message);
+    console.error('Stack:', error.stack);
+    app.use('/api/mindtrain', (req, res) => {
+        res.status(500).json({
+            success: false,
+            message: 'MindTrain alarm profile routes failed to load. Check server logs.',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    });
+}
+
+// MindTrain sync config routes
+try {
+    console.log('🔄 Loading MindTrain sync config routes...');
+    app.use('/api/mindtrain/alarm-profiles', require('./routes/MindTrain/syncConfig.routes'));
+    console.log('✅ MindTrain sync config routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading MindTrain sync config routes:', error.message);
+    console.error('Stack:', error.stack);
+    app.use('/api/mindtrain/alarm-profiles', (req, res) => {
+        res.status(500).json({
+            success: false,
+            message: 'MindTrain sync config routes failed to load. Check server logs.',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    });
+}
+
+// MindTrain sync health routes
+try {
+    console.log('🔄 Loading MindTrain sync health routes...');
+    app.use('/api/mindtrain/alarm-profiles', require('./routes/MindTrain/syncHealth.routes'));
+    console.log('✅ MindTrain sync health routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading MindTrain sync health routes:', error.message);
+    console.error('Stack:', error.stack);
+    // Note: syncHealth routes are registered on same path as syncConfig, so error handling is already covered
+}
+
+// MindTrain FCM notification routes
+try {
+    console.log('🔄 Loading MindTrain FCM notification routes...');
+    app.use('/api/mindtrain/fcm-notifications', require('./routes/MindTrain/fcmNotification.routes'));
+    console.log('✅ MindTrain FCM notification routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading MindTrain FCM notification routes:', error.message);
+    console.error('Stack:', error.stack);
+    app.use('/api/mindtrain/fcm-notifications', (req, res) => {
+        res.status(500).json({
+            success: false,
+            message: 'MindTrain FCM notification routes failed to load. Check server logs.',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    });
+}
+
 // Admin routes
 try {
     console.log('🔄 Loading admin routes...');
