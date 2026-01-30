@@ -1170,33 +1170,20 @@ const uploadMedia = async (req, res) => {
         }
 
         // Get user or university from flexibleAuth (supports both USER and UNIVERSITY tokens)
+        // Note: This endpoint is now public, so user/university are optional
         const user = req.user;
         const university = req.university;
         const userId = req.userId;
         const universityId = req.universityId;
-        
-        if (!user && !university) {
-            return res.status(401).json({
-                success: false,
-                message: "Authentication required"
-            });
-        }
 
         const uploadedFiles = [];
 
-        // Process each file
+        // Process each file - accept all file types
         for (const file of req.files) {
-            // Validate mimetype (image/*, video/*, or audio/*)
-            const isValidMimetype = file.mimetype.startsWith('image/') || 
-                                   file.mimetype.startsWith('video/') || 
-                                   file.mimetype.startsWith('audio/');
-            if (!isValidMimetype) {
-                continue; // Skip invalid files, continue with others
-            }
-
-        // Check if uploaded file is a video or audio
+            // Check if uploaded file is a video or audio (for type classification)
             const isVideoFile = isVideo(file.mimetype);
             const isAudioFile = file.mimetype.startsWith('audio/');
+            const isImageFile = file.mimetype.startsWith('image/');
 
         // Handle file upload based on storage type
         // diskUpload provides file.path, multer-s3 provides file.location and file.key
@@ -1212,11 +1199,30 @@ const uploadMedia = async (req, res) => {
                 continue; // Skip invalid files
         }
 
-        // Determine media type from mimetype
-        const mediaType = isVideoFile ? 'video' : (isAudioFile ? 'audio' : 'image');
+        // Determine media type from mimetype - support all file types
+        let mediaType;
+        if (isVideoFile) {
+            mediaType = 'video';
+        } else if (isAudioFile) {
+            mediaType = 'audio';
+        } else if (isImageFile) {
+            mediaType = 'image';
+        } else {
+            // Handle other file types (PPT, Excel, CSV, PDF, etc.)
+            // Map mimetype to valid enum values
+            const mimetypeParts = file.mimetype.split('/');
+            const primaryType = mimetypeParts[0];
+            
+            // Map common mimetypes to valid enum values
+            if (primaryType === 'application' || primaryType === 'text') {
+                mediaType = primaryType; // 'application' or 'text' are now in enum
+            } else {
+                mediaType = 'file'; // Fallback to 'file' for any other type
+            }
+        }
             const format = file.mimetype.split('/')[1] || 'unknown';
 
-        // Save upload record to database - associated with user or university
+        // Save upload record to database - associated with user or university (if authenticated)
         const mediaData = {
             url: uploadResult.url,
             public_id: uploadResult.key, // Store S3 key in public_id field for backward compatibility
@@ -1224,16 +1230,17 @@ const uploadMedia = async (req, res) => {
             resource_type: mediaType,
             fileSize: file.size,
             originalFilename: file.originalname,
-            folder: user ? 'user_uploads' : 'university_uploads',
+            folder: user ? 'user_uploads' : (university ? 'university_uploads' : 'public_uploads'),
             provider: uploadResult.provider
         };
         
-        // Set userId or universityId based on token type
+        // Set userId or universityId based on token type (if authenticated)
         if (user && userId) {
             mediaData.userId = userId;
         } else if (university && universityId) {
             mediaData.universityId = universityId;
         }
+        // If neither user nor university, media is uploaded without association (public upload)
         
         const mediaRecord = await Media.create(mediaData);
 
@@ -1248,11 +1255,11 @@ const uploadMedia = async (req, res) => {
             });
         }
 
-        // If no valid files were processed
+        // If no files were processed
         if (uploadedFiles.length === 0) {
             return res.status(400).json({
                 success: false,
-                message: "No valid files uploaded. Only image/*, video/*, and audio/* files are allowed."
+                message: "No files were uploaded or processed successfully."
             });
         }
 

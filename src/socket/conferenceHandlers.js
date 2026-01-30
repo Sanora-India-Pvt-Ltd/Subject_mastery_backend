@@ -107,7 +107,7 @@ async function pushQuestionLiveInternal(io, conferenceId, questionId, duration) 
         // Start timer countdown
         startQuestionTimer(io, conferenceId, questionId, duration);
 
-        // Emit question live event
+        // Emit question live event (include PPT slide/page index when set)
         const liveQuestionData = {
             conferenceId,
             questionId,
@@ -117,6 +117,9 @@ async function pushQuestionLiveInternal(io, conferenceId, questionId, duration) 
             startedAt: Date.now(),
             expiresAt: Date.now() + (duration * 1000)
         };
+        if (question.slideIndex != null) {
+            liveQuestionData.slideIndex = question.slideIndex;
+        }
 
         io.to(`conference:${conferenceId}`).emit('question:live', liveQuestionData);
         logSocketEvent('OUT', 'question:live', {
@@ -271,6 +274,9 @@ const initConferenceHandlers = (io) => {
                                 startedAt: liveQuestion.startedAt,
                                 expiresAt: liveQuestion.expiresAt
                             };
+                            if (liveQuestion.slideIndex != null) {
+                                liveQuestionData.slideIndex = liveQuestion.slideIndex;
+                            }
                         }
                     }
                 }

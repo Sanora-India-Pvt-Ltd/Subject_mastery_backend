@@ -67,6 +67,11 @@ const conferenceSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Conversation',
         default: null
+    },
+    pptUrl: {
+        type: String,
+        default: null,
+        trim: true
     }
 }, {
     timestamps: true
