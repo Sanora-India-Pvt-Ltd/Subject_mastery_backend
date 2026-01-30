@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { getMindTrainConnection } = require('../../config/dbMindTrain');
 
 /**
  * AlarmProfile Model
@@ -11,6 +12,8 @@ const mongoose = require('mongoose');
  * - Flexible scheduling (fixed time or dynamic)
  * - Sync tracking and health monitoring
  * - Multi-device support
+ * 
+ * NOTE: This model uses the MindTrain database connection (separate from main DB)
  */
 
 const alarmProfileSchema = new mongoose.Schema({
@@ -186,5 +189,29 @@ alarmProfileSchema.index({ userId: 1, isActive: 1, lastSyncTimestamp: 1 });
 // Compound index for scheduled sync checks
 alarmProfileSchema.index({ userId: 1, nextSyncCheckTime: 1 });
 
-module.exports = mongoose.model('AlarmProfile', alarmProfileSchema);
+/**
+ * Get or create the AlarmProfile model using MindTrain database connection
+ * Model is created on the MindTrain connection (separate database)
+ */
+const getModel = () => {
+    const connection = getMindTrainConnection();
+    if (!connection) {
+        throw new Error(
+            'MindTrain database connection not initialized. ' +
+            'Ensure connectMindTrainDB() is called in server.js before loading routes.'
+        );
+    }
+    
+    // Return existing model if already registered on this connection
+    if (connection.models.AlarmProfile) {
+        return connection.models.AlarmProfile;
+    }
+    
+    // Create and return model on the MindTrain connection
+    return connection.model('AlarmProfile', alarmProfileSchema);
+};
+
+// Export the model (will be created when first accessed)
+// This ensures connection is ready when model is used
+module.exports = getModel();
 

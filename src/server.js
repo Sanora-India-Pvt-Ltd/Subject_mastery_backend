@@ -85,6 +85,7 @@ const express = require('express');
 const http = require('http');
 const cors = require('cors');
 const connectDB = require('./config/db');
+const { connectMindTrainDB } = require('./config/dbMindTrain');
 const passport = require('passport');
 require('./middleware/passport');
 
@@ -93,8 +94,19 @@ const { OAuth2Client } = require('google-auth-library');
 const User = require('./models/authorization/User');
 const jwt = require('jsonwebtoken');
 
-// Connect to MongoDB
-connectDB();
+// Connect to MongoDB databases
+// Initialize main database connection
+connectDB().catch((error) => {
+    console.error('Failed to connect to main database:', error);
+    process.exit(1);
+});
+
+// Initialize MindTrain database connection
+connectMindTrainDB().catch((error) => {
+    console.error('Failed to connect to MindTrain database:', error);
+    // Don't exit - allow server to start but MindTrain features won't work
+    console.warn('⚠️  Server will continue but MindTrain features may not work');
+});
 
 const app = express();
 

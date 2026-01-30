@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { getMindTrainConnection } = require('../../config/dbMindTrain');
 
 /**
  * SyncHealthLog Model
@@ -12,6 +13,8 @@ const mongoose = require('mongoose');
  * - Missed alarm detection and reporting
  * - Device state monitoring (doze mode, battery, network)
  * - Health score calculation
+ * 
+ * NOTE: This model uses the MindTrain database connection (separate from main DB)
  */
 
 const syncHealthLogSchema = new mongoose.Schema({
@@ -140,5 +143,28 @@ syncHealthLogSchema.index({ deviceId: 1, reportedAt: -1 });
 // Index for health score analysis
 syncHealthLogSchema.index({ userId: 1, healthScore: 1, reportedAt: -1 });
 
-module.exports = mongoose.model('SyncHealthLog', syncHealthLogSchema);
+/**
+ * Get or create the SyncHealthLog model using MindTrain database connection
+ * Model is created on the MindTrain connection (separate database)
+ */
+const getModel = () => {
+    const connection = getMindTrainConnection();
+    if (!connection) {
+        throw new Error(
+            'MindTrain database connection not initialized. ' +
+            'Ensure connectMindTrainDB() is called in server.js before loading routes.'
+        );
+    }
+    
+    // Return existing model if already registered on this connection
+    if (connection.models.SyncHealthLog) {
+        return connection.models.SyncHealthLog;
+    }
+    
+    // Create and return model on the MindTrain connection
+    return connection.model('SyncHealthLog', syncHealthLogSchema);
+};
+
+// Export the model (will be created when first accessed)
+module.exports = getModel();
 

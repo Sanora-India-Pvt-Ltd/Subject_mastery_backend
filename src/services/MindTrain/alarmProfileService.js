@@ -1,5 +1,6 @@
 const AlarmProfile = require('../../models/MindTrain/AlarmProfile');
 const mongoose = require('mongoose');
+const { getMindTrainConnection } = require('../../config/dbMindTrain');
 
 /**
  * Alarm Profile Service
@@ -8,6 +9,8 @@ const mongoose = require('mongoose');
  * - Create/update alarm profiles
  * - Deactivate other profiles when one becomes active
  * - Sync status tracking
+ * 
+ * NOTE: Uses MindTrain database connection for all operations
  */
 
 /**
@@ -20,7 +23,13 @@ const mongoose = require('mongoose');
  * @returns {Promise<Object>} Created/updated profile and list of deactivated profiles
  */
 const createOrUpdateAlarmProfile = async (profileData) => {
-    const session = await mongoose.startSession();
+    // Get MindTrain connection for transaction
+    const mindTrainConnection = getMindTrainConnection();
+    if (!mindTrainConnection) {
+        throw new Error('MindTrain database connection not initialized');
+    }
+    
+    const session = await mindTrainConnection.startSession();
     session.startTransaction();
 
     try {
