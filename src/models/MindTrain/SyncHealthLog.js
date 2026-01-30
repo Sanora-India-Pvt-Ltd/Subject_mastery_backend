@@ -131,7 +131,7 @@ const syncHealthLogSchema = new mongoose.Schema({
 });
 
 // Indexes for better query performance
-// Compound index for quick health checks per user
+// Compound index for quick health checks per user (this matches the expected index)
 syncHealthLogSchema.index({ userId: 1, reportedAt: -1 });
 
 // Index for device-specific health logs

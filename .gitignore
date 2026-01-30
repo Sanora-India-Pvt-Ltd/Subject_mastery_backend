@@ -1,6 +1,7 @@
 .gitignore
 node_modules/
 .env
+.cursorrules
 *.log
 CURL_COMMANDS.md
 POSTMAN_QUICK_REFERENCE.md

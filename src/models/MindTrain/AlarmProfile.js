@@ -19,7 +19,6 @@ const alarmProfileSchema = new mongoose.Schema({
         type: String,
         required: true,
         unique: true,
-        index: true,
         trim: true
     },
 
@@ -27,8 +26,7 @@ const alarmProfileSchema = new mongoose.Schema({
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true,
-        index: true
+        required: true
     },
 
     // Alarm content
@@ -167,17 +165,26 @@ const alarmProfileSchema = new mongoose.Schema({
 });
 
 // Indexes for better query performance
+// Unique index on id for fast lookups
+alarmProfileSchema.index({ id: 1 }, { unique: true });
+
+// Index on userId for user-specific queries
+alarmProfileSchema.index({ userId: 1 });
+
+// Index on isActive for filtering active profiles
+alarmProfileSchema.index({ isActive: 1 });
+
+// Index on lastSyncTimestamp for sync queries
+alarmProfileSchema.index({ lastSyncTimestamp: 1 });
+
+// Index on nextSyncCheckTime for scheduled sync checks
+alarmProfileSchema.index({ nextSyncCheckTime: 1 });
+
 // Compound index for fetching active profiles with sync info
 alarmProfileSchema.index({ userId: 1, isActive: 1, lastSyncTimestamp: 1 });
 
 // Compound index for scheduled sync checks
 alarmProfileSchema.index({ userId: 1, nextSyncCheckTime: 1 });
-
-// Index on userId for user-specific queries
-alarmProfileSchema.index({ userId: 1 });
-
-// Index on id for fast lookups
-alarmProfileSchema.index({ id: 1 });
 
 module.exports = mongoose.model('AlarmProfile', alarmProfileSchema);
 

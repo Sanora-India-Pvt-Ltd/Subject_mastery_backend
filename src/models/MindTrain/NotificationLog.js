@@ -35,14 +35,12 @@ const notificationLogSchema = new mongoose.Schema({
     type: {
         type: String,
         enum: ['sync_trigger', 'alarm_missed', 'schedule_update', 'system_alert'],
-        default: 'sync_trigger',
-        index: true
+        default: 'sync_trigger'
     },
 
     // Timing - notification lifecycle
     scheduledTime: {
-        type: Date,
-        index: true
+        type: Date
     },
 
     sentAt: {
@@ -69,8 +67,7 @@ const notificationLogSchema = new mongoose.Schema({
     status: {
         type: String,
         enum: ['pending', 'sent', 'delivered', 'opened', 'failed', 'bounced'],
-        default: 'pending',
-        index: true
+        default: 'pending'
     },
 
     deliveryError: {
@@ -118,7 +115,6 @@ const notificationLogSchema = new mongoose.Schema({
     deviceId: {
         type: String,
         default: null,
-        index: true,
         trim: true
     },
 
@@ -132,6 +128,21 @@ const notificationLogSchema = new mongoose.Schema({
 });
 
 // Indexes for better query performance
+// Index on type for filtering by notification type
+notificationLogSchema.index({ type: 1 });
+
+// Index on scheduledTime for scheduled queries
+notificationLogSchema.index({ scheduledTime: 1 });
+
+// Index on status for status-based queries
+notificationLogSchema.index({ status: 1 });
+
+// Index on deviceId for device-specific queries
+notificationLogSchema.index({ deviceId: 1 });
+
+// Index on createdAt for time-based queries
+notificationLogSchema.index({ createdAt: 1 });
+
 // Compound index for push notification scheduling
 notificationLogSchema.index({ status: 1, scheduledTime: 1 });
 

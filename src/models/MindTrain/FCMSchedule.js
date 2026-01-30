@@ -18,16 +18,14 @@ const fcmScheduleSchema = new mongoose.Schema({
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true,
-        index: true
+        required: true
     },
 
     // Active alarm profile reference
     activeProfileId: {
         type: String,
         ref: 'AlarmProfile',
-        required: true,
-        index: true
+        required: true
     },
 
     // Notification timing
@@ -50,14 +48,12 @@ const fcmScheduleSchema = new mongoose.Schema({
     timezone: {
         type: String,
         default: 'UTC',
-        index: true,
         trim: true
     },
 
     isEnabled: {
         type: Boolean,
-        default: true,
-        index: true
+        default: true
     },
 
     // Delivery tracking
@@ -67,13 +63,11 @@ const fcmScheduleSchema = new mongoose.Schema({
     },
 
     nextMorningNotification: {
-        type: Date,
-        index: true
+        type: Date
     },
 
     nextEveningNotification: {
-        type: Date,
-        index: true
+        type: Date
     },
 
     // Metadata
@@ -93,6 +87,24 @@ const fcmScheduleSchema = new mongoose.Schema({
 });
 
 // Indexes for better query performance
+// Unique constraint: one FCM schedule per user
+fcmScheduleSchema.index({ userId: 1 }, { unique: true });
+
+// Index on activeProfileId for profile lookups
+fcmScheduleSchema.index({ activeProfileId: 1 });
+
+// Index on timezone for timezone-based queries
+fcmScheduleSchema.index({ timezone: 1 });
+
+// Index on isEnabled for filtering enabled schedules
+fcmScheduleSchema.index({ isEnabled: 1 });
+
+// Index on nextMorningNotification for scheduled queries
+fcmScheduleSchema.index({ nextMorningNotification: 1 });
+
+// Index on nextEveningNotification for scheduled queries
+fcmScheduleSchema.index({ nextEveningNotification: 1 });
+
 // Compound index for scheduled morning push notifications
 fcmScheduleSchema.index({ 
     isEnabled: 1, 
@@ -104,9 +116,6 @@ fcmScheduleSchema.index({
     isEnabled: 1, 
     nextEveningNotification: 1 
 });
-
-// Unique constraint: one FCM schedule per user
-fcmScheduleSchema.index({ userId: 1 }, { unique: true });
 
 module.exports = mongoose.model('FCMSchedule', fcmScheduleSchema);
 
