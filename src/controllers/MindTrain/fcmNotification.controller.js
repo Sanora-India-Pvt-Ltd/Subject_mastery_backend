@@ -173,37 +173,29 @@ const fcmCallback = async (req, res) => {
 /**
  * POST /api/mindtrain/fcm-notifications/test
  * 
- * Test endpoint to manually trigger a notification for a specific user.
+ * Test endpoint to manually trigger a notification.
+ * Can send to a specific user or broadcast to all users.
  * Useful for testing WebSocket and FCM delivery.
  * 
  * Authentication: Not required (for testing purposes)
  * 
- * Request Body:
+ * Request Body (Single User):
  * {
- *   "userId": "user_id_here", // Required
- *   "profileId": "profile_id_here", // Required
+ *   "userId": "user_id_here", // Required for single user
+ *   "profileId": "profile_id_here", // Required for single user
+ *   "notificationType": "morning" // "morning" | "evening"
+ * }
+ * 
+ * Request Body (Broadcast to All):
+ * {
+ *   "broadcast": true, // Set to true to broadcast to all users
+ *   "profileId": "profile_id_here", // Optional for broadcast
  *   "notificationType": "morning" // "morning" | "evening"
  * }
  */
 const testNotification = async (req, res) => {
     try {
-        const { userId, profileId, notificationType = 'morning' } = req.body;
-
-        if (!userId) {
-            return res.status(400).json({
-                success: false,
-                message: 'userId is required',
-                code: 'USER_ID_REQUIRED'
-            });
-        }
-
-        if (!profileId) {
-            return res.status(400).json({
-                success: false,
-                message: 'profileId is required',
-                code: 'PROFILE_ID_REQUIRED'
-            });
-        }
+        const { userId, profileId, notificationType = 'morning', broadcast = false } = req.body;
 
         if (!['morning', 'evening'].includes(notificationType)) {
             return res.status(400).json({
@@ -213,12 +205,66 @@ const testNotification = async (req, res) => {
             });
         }
 
+        // Import notification service
+        const { sendMindTrainNotification, broadcastMindTrainNotification } = require('../../services/MindTrain/mindTrainNotification.service');
+
+        // Handle broadcast mode
+        if (broadcast || !userId) {
+            console.log(`[TestNotification] Broadcasting test notification to all users`);
+
+            const result = await broadcastMindTrainNotification({
+                profileId: profileId || null,
+                notificationType: notificationType
+            });
+
+            if (result.success) {
+                return res.status(200).json({
+                    success: true,
+                    message: 'Test notification broadcasted successfully',
+                    data: {
+                        broadcast: true,
+                        profileId: profileId || null,
+                        notificationType: notificationType,
+                        deliveryMethod: result.deliveryMethod,
+                        stats: result.stats,
+                        timestamp: new Date().toISOString()
+                    }
+                });
+            } else {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to broadcast test notification',
+                    code: 'BROADCAST_FAILED',
+                    error: result.message || result.error,
+                    data: {
+                        broadcast: true,
+                        profileId: profileId || null,
+                        notificationType: notificationType
+                    }
+                });
+            }
+        }
+
+        // Handle single user mode
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                message: 'userId is required when broadcast is false',
+                code: 'USER_ID_REQUIRED'
+            });
+        }
+
+        if (!profileId) {
+            return res.status(400).json({
+                success: false,
+                message: 'profileId is required when broadcast is false',
+                code: 'PROFILE_ID_REQUIRED'
+            });
+        }
+
         console.log(`[TestNotification] Sending test notification to user ${userId}`);
 
-        // Import notification service
-        const { sendMindTrainNotification } = require('../../services/MindTrain/mindTrainNotification.service');
-
-        // Send notification
+        // Send notification to single user
         const result = await sendMindTrainNotification({
             userId: userId,
             profileId: profileId,
@@ -263,9 +309,84 @@ const testNotification = async (req, res) => {
     }
 };
 
+/**
+ * POST /api/mindtrain/fcm-notifications/broadcast
+ * 
+ * Dedicated endpoint to broadcast notifications to all users.
+ * Same functionality as test endpoint with broadcast: true, but cleaner API.
+ * 
+ * Authentication: Not required (for testing purposes)
+ * 
+ * Request Body:
+ * {
+ *   "notificationType": "morning", // "morning" | "evening"
+ *   "profileId": "profile_id_here" // Optional
+ * }
+ */
+const broadcastNotification = async (req, res) => {
+    try {
+        const { notificationType = 'morning', profileId = null } = req.body;
+
+        if (!['morning', 'evening'].includes(notificationType)) {
+            return res.status(400).json({
+                success: false,
+                message: 'notificationType must be "morning" or "evening"',
+                code: 'INVALID_NOTIFICATION_TYPE'
+            });
+        }
+
+        console.log(`[BroadcastNotification] Broadcasting notification to all users`);
+
+        // Import notification service
+        const { broadcastMindTrainNotification } = require('../../services/MindTrain/mindTrainNotification.service');
+
+        const result = await broadcastMindTrainNotification({
+            profileId: profileId,
+            notificationType: notificationType
+        });
+
+        if (result.success) {
+            return res.status(200).json({
+                success: true,
+                message: 'Notification broadcasted successfully',
+                data: {
+                    broadcast: true,
+                    profileId: profileId || null,
+                    notificationType: notificationType,
+                    deliveryMethod: result.deliveryMethod,
+                    stats: result.stats,
+                    timestamp: new Date().toISOString()
+                }
+            });
+        } else {
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to broadcast notification',
+                code: 'BROADCAST_FAILED',
+                error: result.message || result.error,
+                data: {
+                    broadcast: true,
+                    profileId: profileId || null,
+                    notificationType: notificationType
+                }
+            });
+        }
+
+    } catch (error) {
+        console.error('Broadcast notification error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to broadcast notification',
+            code: 'BROADCAST_ERROR',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     sendFCMNotifications,
     fcmCallback,
-    testNotification
+    testNotification,
+    broadcastNotification
 };
 

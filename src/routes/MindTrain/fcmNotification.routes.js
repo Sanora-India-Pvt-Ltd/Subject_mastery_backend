@@ -1,6 +1,6 @@
 const express = require('express');
 const { protect } = require('../../middleware/auth');
-const { sendFCMNotifications, fcmCallback, testNotification } = require('../../controllers/MindTrain/fcmNotification.controller');
+const { sendFCMNotifications, fcmCallback, testNotification, broadcastNotification } = require('../../controllers/MindTrain/fcmNotification.controller');
 
 const router = express.Router();
 
@@ -24,6 +24,13 @@ router.post('/callback', fcmCallback);
  * Authentication: Not required (for testing purposes)
  */
 router.post('/test', testNotification);
+
+/**
+ * POST /api/mindtrain/fcm-notifications/broadcast
+ * Broadcast notification to all users
+ * Authentication: Not required (for testing purposes)
+ */
+router.post('/broadcast', broadcastNotification);
 
 module.exports = router;
 
