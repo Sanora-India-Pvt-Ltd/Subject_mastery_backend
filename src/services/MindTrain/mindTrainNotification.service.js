@@ -1,17 +1,14 @@
-const { emitNotification } = require('../notification/notificationEmitter');
 const { getIO } = require('../../socket/socketServer');
-const NotificationLog = require('../../models/MindTrain/NotificationLog');
-const User = require('../../models/authorization/User');
-const mongoose = require('mongoose');
 
 /**
  * MindTrain Notification Service
  * 
- * Broadcast-only notification system using unified notification system with IN_APP and PUSH channels:
- * - IN_APP: Real-time delivery via Socket.IO when app is open
- * - PUSH: FCM push notification when app is closed
+ * Broadcast-only notification system via Socket.IO:
+ * - Real-time delivery to all connected users via Socket.IO
+ * - No per-user notifications or database records
+ * - No Redis/queue required
  * 
- * Also emits custom mindtrain:sync_notification event for real-time sync handling.
+ * Emits custom mindtrain:sync_notification and unified notification events.
  */
 
 /**
@@ -87,86 +84,15 @@ const broadcastMindTrainNotification = async ({ profileId = null, notificationTy
             console.warn('[MindTrainNotification] Failed to broadcast socket event:', socketError);
         }
 
-        // Send FCM push notifications to all users via unified notification system
-        let processedCount = 0;
-        let failedCount = 0;
-        const batchSize = 500;
-
-        try {
-            // Get all users in batches
-            let userSkip = 0;
-            let hasMoreUsers = true;
-
-            while (hasMoreUsers) {
-                const users = await User.find({})
-                    .select('_id')
-                    .skip(userSkip)
-                    .limit(batchSize)
-                    .lean();
-
-                if (users.length === 0) {
-                    hasMoreUsers = false;
-                } else {
-                    // Process batch in parallel
-                    const batchPromises = users.map(async (user) => {
-                        try {
-                            await emitNotification({
-                                recipientType: 'USER',
-                                recipientId: user._id,
-                                category: 'MINDTRAIN',
-                                type: 'MINDTRAIN_SYNC_TRIGGER',
-                                title: title,
-                                message: message,
-                                channels: ['IN_APP', 'PUSH'],
-                                entity: profileId ? {
-                                    type: 'ALARM_PROFILE',
-                                    id: profileId
-                                } : undefined,
-                                payload: notificationPayload,
-                                priority: 'HIGH',
-                                _broadcast: true,
-                                _broadcastScope: 'USERS',
-                                _createdBy: 'SYSTEM'
-                            });
-                            return { success: true };
-                        } catch (error) {
-                            console.error(`[MindTrainNotification] Failed for user ${user._id}:`, error.message);
-                            return { success: false, error: error.message };
-                        }
-                    });
-
-                    const batchResults = await Promise.all(batchPromises);
-                    batchResults.forEach(result => {
-                        if (result.success) {
-                            processedCount++;
-                        } else {
-                            failedCount++;
-                        }
-                    });
-
-                    userSkip += batchSize;
-                    if (users.length < batchSize) {
-                        hasMoreUsers = false;
-                    }
-                }
-            }
-
-            console.log(`[MindTrainNotification] 📦 Processed ${processedCount} users, ${failedCount} failed`);
-        } catch (fcmError) {
-            console.error('[MindTrainNotification] Failed to send FCM notifications:', fcmError);
-        }
-
-        console.log(`[MindTrainNotification] ✅ Broadcast completed: ${socketBroadcastCount} sockets, ${processedCount} FCM notifications`);
+        console.log(`[MindTrainNotification] ✅ Broadcast completed: ${socketBroadcastCount} connected sockets`);
 
         return {
             success: true,
             deliveryMethod: 'broadcast',
-            message: 'Notification broadcasted to all users',
-            channels: ['IN_APP', 'PUSH'],
+            message: 'Notification broadcasted to all connected users',
+            channels: ['IN_APP'],
             stats: {
-                socketBroadcastCount,
-                fcmProcessedCount: processedCount,
-                fcmFailedCount: failedCount
+                socketBroadcastCount
             }
         };
 
