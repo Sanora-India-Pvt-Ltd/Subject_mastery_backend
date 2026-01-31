@@ -8,11 +8,48 @@ const { sendMindTrainNotification } = require('../../services/MindTrain/mindTrai
  * Runs every 5 minutes to check for users due to receive notifications.
  * Uses hybrid delivery: WebSocket first (real-time), FCM fallback (reliable).
  * 
- * Schedule: */5 * * * * (every 5 minutes)
+ * Smart Scheduling: Only runs during notification hours to reduce server load.
+ * - Morning window: 6:00 AM - 10:00 AM UTC
+ * - Evening window: 6:00 PM - 10:00 PM UTC
+ * 
+ * Schedule: Every 5 minutes (but only executes during notification windows)
  */
 
 let job = null;
 let isRunning = false;
+
+// Notification time windows (UTC)
+// Adjust these based on your user base timezones
+const NOTIFICATION_WINDOWS = {
+    morning: {
+        startHour: 6,  // 6:00 AM UTC
+        endHour: 10    // 10:00 AM UTC
+    },
+    evening: {
+        startHour: 18, // 6:00 PM UTC
+        endHour: 22    // 10:00 PM UTC
+    }
+};
+
+/**
+ * Check if current time is within notification windows
+ * 
+ * @returns {boolean} True if within notification hours
+ */
+const isNotificationHour = () => {
+    const now = new Date();
+    const currentHour = now.getUTCHours();
+    
+    // Check morning window (6 AM - 10 AM UTC)
+    const inMorningWindow = currentHour >= NOTIFICATION_WINDOWS.morning.startHour && 
+                           currentHour < NOTIFICATION_WINDOWS.morning.endHour;
+    
+    // Check evening window (6 PM - 10 PM UTC)
+    const inEveningWindow = currentHour >= NOTIFICATION_WINDOWS.evening.startHour && 
+                            currentHour < NOTIFICATION_WINDOWS.evening.endHour;
+    
+    return inMorningWindow || inEveningWindow;
+};
 
 /**
  * Check and send notifications for a specific type (morning or evening)
@@ -100,11 +137,20 @@ const runJob = async () => {
         return;
     }
 
+    // Smart scheduling: Only run during notification hours
+    if (!isNotificationHour()) {
+        const now = new Date();
+        const currentHour = now.getUTCHours();
+        console.log(`[FCMJob] ⏸️  Skipping check (outside notification hours, current UTC hour: ${currentHour})`);
+        return;
+    }
+
     isRunning = true;
     const startTime = Date.now();
 
     try {
-        console.log('[FCMJob] 🚀 Starting FCM notification check');
+        const now = new Date();
+        console.log(`[FCMJob] 🚀 Starting FCM notification check at ${now.toISOString()}`);
 
         // Process morning and evening notifications in parallel
         const [morningResult, eveningResult] = await Promise.all([
@@ -166,11 +212,47 @@ const stop = () => {
  * Get job status
  */
 const getStatus = () => {
+    const now = new Date();
+    const currentHour = now.getUTCHours();
+    const inWindow = isNotificationHour();
+    
     return {
         isRunning: isRunning,
         isScheduled: job !== null,
-        schedule: '*/5 * * * * (every 5 minutes)'
+        schedule: '*/5 * * * * (every 5 minutes, smart scheduling enabled)',
+        currentUTCHour: currentHour,
+        inNotificationWindow: inWindow,
+        notificationWindows: NOTIFICATION_WINDOWS,
+        nextWindow: getNextWindow()
     };
+};
+
+/**
+ * Get next notification window time
+ */
+const getNextWindow = () => {
+    const now = new Date();
+    const currentHour = now.getUTCHours();
+    
+    // If before morning window
+    if (currentHour < NOTIFICATION_WINDOWS.morning.startHour) {
+        const next = new Date(now);
+        next.setUTCHours(NOTIFICATION_WINDOWS.morning.startHour, 0, 0, 0);
+        return { type: 'morning', time: next.toISOString() };
+    }
+    
+    // If between morning and evening window
+    if (currentHour < NOTIFICATION_WINDOWS.evening.startHour) {
+        const next = new Date(now);
+        next.setUTCHours(NOTIFICATION_WINDOWS.evening.startHour, 0, 0, 0);
+        return { type: 'evening', time: next.toISOString() };
+    }
+    
+    // If after evening window, next is tomorrow morning
+    const next = new Date(now);
+    next.setUTCDate(next.getUTCDate() + 1);
+    next.setUTCHours(NOTIFICATION_WINDOWS.morning.startHour, 0, 0, 0);
+    return { type: 'morning', time: next.toISOString() };
 };
 
 module.exports = {
