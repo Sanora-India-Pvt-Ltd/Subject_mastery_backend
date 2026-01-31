@@ -21,9 +21,9 @@ router.post('/callback', fcmCallback);
 /**
  * POST /api/mindtrain/fcm-notifications/test
  * Test endpoint to manually trigger a notification for testing
- * Authentication: Required (JWT)
+ * Authentication: Not required (for testing purposes)
  */
-router.post('/test', protect, testNotification);
+router.post('/test', testNotification);
 
 module.exports = router;
 

@@ -176,11 +176,11 @@ const fcmCallback = async (req, res) => {
  * Test endpoint to manually trigger a notification for a specific user.
  * Useful for testing WebSocket and FCM delivery.
  * 
- * Authentication: Required (JWT)
+ * Authentication: Not required (for testing purposes)
  * 
  * Request Body:
  * {
- *   "userId": "user_id_here", // Optional, defaults to authenticated user
+ *   "userId": "user_id_here", // Required
  *   "profileId": "profile_id_here", // Required
  *   "notificationType": "morning" // "morning" | "evening"
  * }
@@ -188,12 +188,8 @@ const fcmCallback = async (req, res) => {
 const testNotification = async (req, res) => {
     try {
         const { userId, profileId, notificationType = 'morning' } = req.body;
-        const authenticatedUserId = req.userId;
 
-        // Use provided userId or default to authenticated user
-        const targetUserId = userId || authenticatedUserId;
-
-        if (!targetUserId) {
+        if (!userId) {
             return res.status(400).json({
                 success: false,
                 message: 'userId is required',
@@ -217,14 +213,14 @@ const testNotification = async (req, res) => {
             });
         }
 
-        console.log(`[TestNotification] Sending test notification to user ${targetUserId}`);
+        console.log(`[TestNotification] Sending test notification to user ${userId}`);
 
         // Import notification service
         const { sendMindTrainNotification } = require('../../services/MindTrain/mindTrainNotification.service');
 
         // Send notification
         const result = await sendMindTrainNotification({
-            userId: targetUserId,
+            userId: userId,
             profileId: profileId,
             notificationType: notificationType
         });
@@ -234,7 +230,7 @@ const testNotification = async (req, res) => {
                 success: true,
                 message: 'Test notification sent successfully',
                 data: {
-                    userId: targetUserId,
+                    userId: userId,
                     profileId: profileId,
                     notificationType: notificationType,
                     deliveryMethod: result.deliveryMethod,
@@ -249,7 +245,7 @@ const testNotification = async (req, res) => {
                 code: 'NOTIFICATION_FAILED',
                 error: result.message || result.reason,
                 data: {
-                    userId: targetUserId,
+                    userId: userId,
                     profileId: profileId,
                     notificationType: notificationType
                 }

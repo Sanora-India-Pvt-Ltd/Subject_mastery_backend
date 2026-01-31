@@ -68,9 +68,3 @@ const emitMindTrainEvent = async (req, res, next) => {
 module.exports = {
     emitMindTrainEvent
 };
-
-
-
-
-
-
