@@ -170,8 +170,106 @@ const fcmCallback = async (req, res) => {
     }
 };
 
+/**
+ * POST /api/mindtrain/fcm-notifications/test
+ * 
+ * Test endpoint to manually trigger a notification for a specific user.
+ * Useful for testing WebSocket and FCM delivery.
+ * 
+ * Authentication: Required (JWT)
+ * 
+ * Request Body:
+ * {
+ *   "userId": "user_id_here", // Optional, defaults to authenticated user
+ *   "profileId": "profile_id_here", // Required
+ *   "notificationType": "morning" // "morning" | "evening"
+ * }
+ */
+const testNotification = async (req, res) => {
+    try {
+        const { userId, profileId, notificationType = 'morning' } = req.body;
+        const authenticatedUserId = req.userId;
+
+        // Use provided userId or default to authenticated user
+        const targetUserId = userId || authenticatedUserId;
+
+        if (!targetUserId) {
+            return res.status(400).json({
+                success: false,
+                message: 'userId is required',
+                code: 'USER_ID_REQUIRED'
+            });
+        }
+
+        if (!profileId) {
+            return res.status(400).json({
+                success: false,
+                message: 'profileId is required',
+                code: 'PROFILE_ID_REQUIRED'
+            });
+        }
+
+        if (!['morning', 'evening'].includes(notificationType)) {
+            return res.status(400).json({
+                success: false,
+                message: 'notificationType must be "morning" or "evening"',
+                code: 'INVALID_NOTIFICATION_TYPE'
+            });
+        }
+
+        console.log(`[TestNotification] Sending test notification to user ${targetUserId}`);
+
+        // Import notification service
+        const { sendMindTrainNotification } = require('../../services/MindTrain/mindTrainNotification.service');
+
+        // Send notification
+        const result = await sendMindTrainNotification({
+            userId: targetUserId,
+            profileId: profileId,
+            notificationType: notificationType
+        });
+
+        if (result.success) {
+            return res.status(200).json({
+                success: true,
+                message: 'Test notification sent successfully',
+                data: {
+                    userId: targetUserId,
+                    profileId: profileId,
+                    notificationType: notificationType,
+                    deliveryMethod: result.deliveryMethod,
+                    sentCount: result.sentCount || 1,
+                    timestamp: new Date().toISOString()
+                }
+            });
+        } else {
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to send test notification',
+                code: 'NOTIFICATION_FAILED',
+                error: result.message || result.reason,
+                data: {
+                    userId: targetUserId,
+                    profileId: profileId,
+                    notificationType: notificationType
+                }
+            });
+        }
+
+    } catch (error) {
+        console.error('Test notification error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to send test notification',
+            code: 'TEST_NOTIFICATION_ERROR',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     sendFCMNotifications,
-    fcmCallback
+    fcmCallback,
+    testNotification
 };
 

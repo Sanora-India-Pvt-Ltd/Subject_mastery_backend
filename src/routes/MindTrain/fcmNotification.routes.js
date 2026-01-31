@@ -1,6 +1,6 @@
 const express = require('express');
 const { protect } = require('../../middleware/auth');
-const { sendFCMNotifications, fcmCallback } = require('../../controllers/MindTrain/fcmNotification.controller');
+const { sendFCMNotifications, fcmCallback, testNotification } = require('../../controllers/MindTrain/fcmNotification.controller');
 
 const router = express.Router();
 
@@ -17,6 +17,13 @@ router.post('/send', protect, sendFCMNotifications);
  * TODO: Add Firebase Admin SDK authentication middleware
  */
 router.post('/callback', fcmCallback);
+
+/**
+ * POST /api/mindtrain/fcm-notifications/test
+ * Test endpoint to manually trigger a notification for testing
+ * Authentication: Required (JWT)
+ */
+router.post('/test', protect, testNotification);
 
 module.exports = router;
 

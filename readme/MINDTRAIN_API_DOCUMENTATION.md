@@ -9,6 +9,7 @@ This guide describes all MindTrain API endpoints for alarm profile management, s
 4. [Alarm Profile Management](#alarm-profile-management)
    - [Create Alarm Profile](#create-alarm-profile)
    - [Get Alarm Profiles](#get-alarm-profiles)
+   - [Delete Alarm Profile](#delete-alarm-profile)
 5. [Sync Configuration](#sync-configuration)
    - [Sync Config](#sync-config)
 6. [Sync Health & Status](#sync-health--status)
@@ -16,6 +17,7 @@ This guide describes all MindTrain API endpoints for alarm profile management, s
    - [Get Sync Status](#get-sync-status)
 7. [FCM Notifications](#fcm-notifications)
    - [Send FCM Notifications](#send-fcm-notifications)
+   - [Test Notification](#test-notification)
    - [FCM Callback](#fcm-callback)
 8. [Notes for Frontend Integration](#notes-for-frontend-integration)
 
@@ -190,6 +192,59 @@ Retrieves all alarm profiles for the authenticated user, separated into active a
 **Notes:**
 - Returns empty arrays if no profiles exist
 - Profiles are automatically separated into active and inactive
+
+### Delete Alarm Profile
+DELETE `/api/mindtrain/alarm-profiles/:profileId` (protected)
+
+Deletes an alarm profile and performs cascade cleanup:
+- Deletes FCM schedule associated with the profile
+- Deletes notification logs for the profile
+- Handles active profile transition (activates next profile or disables FCM)
+
+**URL Parameters:**
+- `profileId`: The unique identifier of the profile to delete
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Profile deleted successfully",
+  "data": {
+    "deletedProfileId": "profile_unique_id",
+    "cascadeCleanup": {
+      "fcmScheduleDeleted": true,
+      "notificationLogsDeleted": 5,
+      "remainingProfiles": 2,
+      "fcmDisabled": false
+    }
+  }
+}
+```
+
+**Response Fields:**
+- `deletedProfileId`: The ID of the deleted profile
+- `cascadeCleanup.fcmScheduleDeleted`: Whether FCM schedule was deleted
+- `cascadeCleanup.notificationLogsDeleted`: Number of notification logs deleted
+- `cascadeCleanup.remainingProfiles`: Number of profiles remaining for the user
+- `cascadeCleanup.fcmDisabled`: Whether FCM was disabled (if no profiles remain)
+
+**Error Responses:**
+- `400` - Profile ID is required
+- `401` - Authentication required
+- `404` - Profile not found
+- `500` - Server error
+
+**Error Codes:**
+- `PROFILE_ID_REQUIRED` - Profile ID parameter is required
+- `PROFILE_NOT_FOUND` - Profile not found or doesn't belong to user
+- `DELETE_FAILED` - Server error during deletion
+
+**Notes:**
+- Only the profile owner can delete their profile
+- If the deleted profile was active and other profiles exist, the next profile is automatically activated
+- If the deleted profile was active and no profiles remain, FCM is disabled
+- All related data (FCM schedule, notification logs) is cleaned up automatically
+- Deletion uses database transactions to ensure data consistency
 
 ## Sync Configuration
 
@@ -456,6 +511,79 @@ Server-side endpoint to trigger FCM notification sends. This is typically used b
 - `jobId` can be used to track job status
 - `estimatedTime` is calculated based on batch size
 
+### Test Notification
+POST `/api/mindtrain/fcm-notifications/test` (protected)
+
+Test endpoint to manually trigger a notification for a specific user. Useful for testing WebSocket and FCM delivery methods.
+
+**Request Body:**
+```json
+{
+  "profileId": "profile_unique_id",
+  "notificationType": "morning",
+  "userId": "user_id"
+}
+```
+
+**Required Fields:**
+- `profileId`: The unique identifier of the alarm profile
+
+**Optional Fields:**
+- `notificationType`: Either `"morning"` or `"evening"` (defaults to `"morning"`)
+- `userId`: User ID (defaults to authenticated user if not provided)
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Test notification sent successfully",
+  "data": {
+    "userId": "user_id",
+    "profileId": "profile_unique_id",
+    "notificationType": "morning",
+    "deliveryMethod": "websocket",
+    "sentCount": 1,
+    "timestamp": "2025-01-31T10:00:00.000Z"
+  }
+}
+```
+
+**Response Fields:**
+- `userId`: User ID who received the notification
+- `profileId`: Profile ID associated with the notification
+- `notificationType`: Type of notification sent
+- `deliveryMethod`: Either `"websocket"` (if app is open) or `"fcm"` (if app is closed)
+- `sentCount`: Number of devices notification was sent to
+- `timestamp`: When the notification was sent
+
+**Error Responses:**
+- `400` - Missing required fields or invalid notificationType
+- `401` - Authentication required
+- `500` - Server error
+
+**Error Codes:**
+- `PROFILE_ID_REQUIRED` - profileId is required
+- `INVALID_NOTIFICATION_TYPE` - notificationType must be "morning" or "evening"
+- `TEST_NOTIFICATION_ERROR` - Server error during test notification
+
+**Notes:**
+- This endpoint tests both WebSocket and FCM delivery automatically
+- If user has active WebSocket connection, notification is sent via WebSocket (instant)
+- If no WebSocket connection, notification is sent via FCM push notification
+- All test notifications are logged to NotificationLog collection
+- Useful for debugging and testing notification delivery
+
+**Testing Scenarios:**
+1. **Test WebSocket Delivery:**
+   - Open app (WebSocket connected)
+   - Call test endpoint
+   - Check app logs for `mindtrain:sync_notification` event
+
+2. **Test FCM Delivery:**
+   - Close app (WebSocket disconnected)
+   - Call test endpoint
+   - Check phone for push notification
+
 ### FCM Callback
 POST `/api/mindtrain/fcm-notifications/callback` (public)
 
@@ -562,4 +690,3 @@ FCM delivery status webhook callback. Receives delivery status updates from Fire
    - Use sync-config for major changes
    - Use create-alarm-profile for simple profile creation
    - Always verify userId matches authenticated user
-
