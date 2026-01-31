@@ -1,12 +1,11 @@
 const cron = require('node-cron');
-const fcmScheduleService = require('../../services/MindTrain/fcmScheduleService');
-const { sendMindTrainNotification } = require('../../services/MindTrain/mindTrainNotification.service');
+const { broadcastMindTrainNotification } = require('../../services/MindTrain/mindTrainNotification.service');
 
 /**
  * FCM Notification Cron Job
  * 
- * Runs every 5 minutes to check for users due to receive notifications.
- * Uses hybrid delivery: WebSocket first (real-time), FCM fallback (reliable).
+ * Runs every 5 minutes to broadcast notifications to all users.
+ * Uses hybrid delivery: WebSocket for connected users (real-time), FCM for all users (reliable).
  * 
  * Smart Scheduling: Only runs during notification hours to reduce server load.
  * - Morning window: 6:00 AM - 10:00 AM UTC
@@ -52,72 +51,42 @@ const isNotificationHour = () => {
 };
 
 /**
- * Check and send notifications for a specific type (morning or evening)
+ * Broadcast notifications for a specific type (morning or evening)
  */
 const processNotifications = async (notificationType) => {
     try {
         const currentTime = new Date();
-        console.log(`[FCMJob] Checking ${notificationType} notifications at ${currentTime.toISOString()}`);
+        console.log(`[FCMJob] Broadcasting ${notificationType} notifications at ${currentTime.toISOString()}`);
 
-        // Get schedules due for notification (15-minute window)
-        const schedules = await fcmScheduleService.getSchedulesForNotification(
-            notificationType,
-            currentTime,
-            15 // 15-minute window
-        );
+        // Broadcast to all users
+        const result = await broadcastMindTrainNotification({
+            profileId: null,
+            notificationType: notificationType
+        });
 
-        console.log(`[FCMJob] Found ${schedules.length} schedules due for ${notificationType} notifications`);
+        if (result.success) {
+            console.log(`[FCMJob] ✅ ${notificationType} notification broadcasted successfully`);
+            console.log(`  - Socket broadcasts: ${result.stats.socketBroadcastCount}`);
+            console.log(`  - FCM processed: ${result.stats.fcmProcessedCount}`);
+            console.log(`  - FCM failed: ${result.stats.fcmFailedCount}`);
 
-        if (schedules.length === 0) {
+            return {
+                processed: result.stats.fcmProcessedCount + result.stats.socketBroadcastCount,
+                sent: result.stats.fcmProcessedCount + result.stats.socketBroadcastCount,
+                failed: result.stats.fcmFailedCount
+            };
+        } else {
+            console.error(`[FCMJob] ⚠️ Failed to broadcast ${notificationType} notification: ${result.message || result.error}`);
             return {
                 processed: 0,
                 sent: 0,
-                failed: 0
+                failed: 0,
+                error: result.message || result.error
             };
         }
 
-        let sentCount = 0;
-        let failedCount = 0;
-
-        // Process each schedule
-        for (const schedule of schedules) {
-            try {
-                const result = await sendMindTrainNotification({
-                    userId: schedule.userId,
-                    profileId: schedule.activeProfileId,
-                    notificationType: notificationType,
-                    scheduleId: schedule._id?.toString()
-                });
-
-                if (result.success) {
-                    sentCount++;
-                    
-                    // Update schedule last sent time
-                    await fcmScheduleService.updateLastSentTime(
-                        schedule.userId,
-                        notificationType
-                    );
-
-                    console.log(`[FCMJob] ✅ ${notificationType} notification sent to user ${schedule.userId} via ${result.deliveryMethod}`);
-                } else {
-                    failedCount++;
-                    console.warn(`[FCMJob] ⚠️ Failed to send ${notificationType} notification to user ${schedule.userId}: ${result.message || result.reason}`);
-                }
-
-            } catch (error) {
-                failedCount++;
-                console.error(`[FCMJob] Error processing ${notificationType} notification for user ${schedule.userId}:`, error.message);
-            }
-        }
-
-        return {
-            processed: schedules.length,
-            sent: sentCount,
-            failed: failedCount
-        };
-
     } catch (error) {
-        console.error(`[FCMJob] Error processing ${notificationType} notifications:`, error);
+        console.error(`[FCMJob] Error broadcasting ${notificationType} notifications:`, error);
         return {
             processed: 0,
             sent: 0,

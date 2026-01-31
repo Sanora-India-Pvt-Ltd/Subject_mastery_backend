@@ -173,29 +173,20 @@ const fcmCallback = async (req, res) => {
 /**
  * POST /api/mindtrain/fcm-notifications/test
  * 
- * Test endpoint to manually trigger a notification.
- * Can send to a specific user or broadcast to all users.
+ * Test endpoint to manually trigger a broadcast notification.
  * Useful for testing WebSocket and FCM delivery.
  * 
  * Authentication: Not required (for testing purposes)
  * 
- * Request Body (Single User):
+ * Request Body:
  * {
- *   "userId": "user_id_here", // Required for single user
- *   "profileId": "profile_id_here", // Required for single user
- *   "notificationType": "morning" // "morning" | "evening"
- * }
- * 
- * Request Body (Broadcast to All):
- * {
- *   "broadcast": true, // Set to true to broadcast to all users
- *   "profileId": "profile_id_here", // Optional for broadcast
+ *   "profileId": "profile_id_here", // Optional
  *   "notificationType": "morning" // "morning" | "evening"
  * }
  */
 const testNotification = async (req, res) => {
     try {
-        const { userId, profileId, notificationType = 'morning', broadcast = false } = req.body;
+        const { profileId, notificationType = 'morning' } = req.body;
 
         if (!['morning', 'evening'].includes(notificationType)) {
             return res.status(400).json({
@@ -205,94 +196,38 @@ const testNotification = async (req, res) => {
             });
         }
 
+        console.log(`[TestNotification] Broadcasting test notification to all users`);
+
         // Import notification service
-        const { sendMindTrainNotification, broadcastMindTrainNotification } = require('../../services/MindTrain/mindTrainNotification.service');
+        const { broadcastMindTrainNotification } = require('../../services/MindTrain/mindTrainNotification.service');
 
-        // Handle broadcast mode
-        if (broadcast || !userId) {
-            console.log(`[TestNotification] Broadcasting test notification to all users`);
-
-            const result = await broadcastMindTrainNotification({
-                profileId: profileId || null,
-                notificationType: notificationType
-            });
-
-            if (result.success) {
-                return res.status(200).json({
-                    success: true,
-                    message: 'Test notification broadcasted successfully',
-                    data: {
-                        broadcast: true,
-                        profileId: profileId || null,
-                        notificationType: notificationType,
-                        deliveryMethod: result.deliveryMethod,
-                        stats: result.stats,
-                        timestamp: new Date().toISOString()
-                    }
-                });
-            } else {
-                return res.status(500).json({
-                    success: false,
-                    message: 'Failed to broadcast test notification',
-                    code: 'BROADCAST_FAILED',
-                    error: result.message || result.error,
-                    data: {
-                        broadcast: true,
-                        profileId: profileId || null,
-                        notificationType: notificationType
-                    }
-                });
-            }
-        }
-
-        // Handle single user mode
-        if (!userId) {
-            return res.status(400).json({
-                success: false,
-                message: 'userId is required when broadcast is false',
-                code: 'USER_ID_REQUIRED'
-            });
-        }
-
-        if (!profileId) {
-            return res.status(400).json({
-                success: false,
-                message: 'profileId is required when broadcast is false',
-                code: 'PROFILE_ID_REQUIRED'
-            });
-        }
-
-        console.log(`[TestNotification] Sending test notification to user ${userId}`);
-
-        // Send notification to single user
-        const result = await sendMindTrainNotification({
-            userId: userId,
-            profileId: profileId,
+        const result = await broadcastMindTrainNotification({
+            profileId: profileId || null,
             notificationType: notificationType
         });
 
         if (result.success) {
             return res.status(200).json({
                 success: true,
-                message: 'Test notification sent successfully',
+                message: 'Test notification broadcasted successfully',
                 data: {
-                    userId: userId,
-                    profileId: profileId,
+                    broadcast: true,
+                    profileId: profileId || null,
                     notificationType: notificationType,
                     deliveryMethod: result.deliveryMethod,
-                    sentCount: result.sentCount || 1,
+                    stats: result.stats,
                     timestamp: new Date().toISOString()
                 }
             });
         } else {
             return res.status(500).json({
                 success: false,
-                message: 'Failed to send test notification',
-                code: 'NOTIFICATION_FAILED',
-                error: result.message || result.reason,
+                message: 'Failed to broadcast test notification',
+                code: 'BROADCAST_FAILED',
+                error: result.message || result.error,
                 data: {
-                    userId: userId,
-                    profileId: profileId,
+                    broadcast: true,
+                    profileId: profileId || null,
                     notificationType: notificationType
                 }
             });
