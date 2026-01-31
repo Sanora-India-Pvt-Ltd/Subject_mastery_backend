@@ -17,7 +17,8 @@ This guide describes all MindTrain API endpoints for alarm profile management, s
    - [Get Sync Status](#get-sync-status)
 7. [FCM Notifications](#fcm-notifications)
    - [Send FCM Notifications](#send-fcm-notifications)
-   - [Test Notification](#test-notification)
+   - [Test Broadcast Notification](#test-broadcast-notification)
+   - [Broadcast Notification](#broadcast-notification)
    - [FCM Callback](#fcm-callback)
 8. [Notes for Frontend Integration](#notes-for-frontend-integration)
 
@@ -456,7 +457,7 @@ Client checks if server has any pending sync/recovery actions. Returns delta cha
 ## FCM Notifications
 
 ### Send FCM Notifications
-POST `/api/mindtrain/fcm-notifications/send` (protected)
+POST `/api/mindtrain/fcm-notifications/send` (protected - requires authentication)
 
 Server-side endpoint to trigger FCM notification sends. This is typically used by scheduled jobs or admin tools.
 
@@ -511,78 +512,161 @@ Server-side endpoint to trigger FCM notification sends. This is typically used b
 - `jobId` can be used to track job status
 - `estimatedTime` is calculated based on batch size
 
-### Test Notification
-POST `/api/mindtrain/fcm-notifications/test` (protected)
+### Test Broadcast Notification
+POST `/api/mindtrain/fcm-notifications/test` (public - no authentication required)
 
-Test endpoint to manually trigger a notification for a specific user. Useful for testing WebSocket and FCM delivery methods.
+Test endpoint to manually trigger a broadcast notification. Useful for testing WebSocket and FCM delivery methods.
 
 **Request Body:**
 ```json
 {
   "profileId": "profile_unique_id",
-  "notificationType": "morning",
-  "userId": "user_id"
+  "notificationType": "morning"
 }
 ```
 
 **Required Fields:**
-- `profileId`: The unique identifier of the alarm profile
+- None (all fields are optional)
 
 **Optional Fields:**
 - `notificationType`: Either `"morning"` or `"evening"` (defaults to `"morning"`)
-- `userId`: User ID (defaults to authenticated user if not provided)
+- `profileId`: Profile ID (optional - not needed for broadcast)
 
 **Success Response (200):**
 ```json
 {
   "success": true,
-  "message": "Test notification sent successfully",
+  "message": "Test notification broadcasted successfully",
   "data": {
-    "userId": "user_id",
-    "profileId": "profile_unique_id",
+    "broadcast": true,
+    "profileId": null,
     "notificationType": "morning",
-    "deliveryMethod": "websocket",
-    "sentCount": 1,
+    "deliveryMethod": "broadcast",
+    "stats": {
+      "socketBroadcastCount": 150,
+      "fcmProcessedCount": 5000,
+      "fcmFailedCount": 2
+    },
     "timestamp": "2025-01-31T10:00:00.000Z"
   }
 }
 ```
 
 **Response Fields:**
-- `userId`: User ID who received the notification
-- `profileId`: Profile ID associated with the notification
+- `broadcast`: Always `true` for broadcast responses
+- `profileId`: Profile ID (may be null if not provided)
 - `notificationType`: Type of notification sent
-- `deliveryMethod`: Either `"websocket"` (if app is open) or `"fcm"` (if app is closed)
-- `sentCount`: Number of devices notification was sent to
+- `deliveryMethod`: Always `"broadcast"` for broadcast responses
+- `stats.socketBroadcastCount`: Number of connected sockets that received the broadcast
+- `stats.fcmProcessedCount`: Total number of users who received FCM push notifications
+- `stats.fcmFailedCount`: Number of failed FCM deliveries
 - `timestamp`: When the notification was sent
 
 **Error Responses:**
-- `400` - Missing required fields or invalid notificationType
-- `401` - Authentication required
+- `400` - Invalid notificationType
 - `500` - Server error
 
 **Error Codes:**
-- `PROFILE_ID_REQUIRED` - profileId is required
 - `INVALID_NOTIFICATION_TYPE` - notificationType must be "morning" or "evening"
+- `BROADCAST_FAILED` - Failed to broadcast notification
 - `TEST_NOTIFICATION_ERROR` - Server error during test notification
 
 **Notes:**
-- This endpoint tests both WebSocket and FCM delivery automatically
-- If user has active WebSocket connection, notification is sent via WebSocket (instant)
-- If no WebSocket connection, notification is sent via FCM push notification
-- All test notifications are logged to NotificationLog collection
-- Useful for debugging and testing notification delivery
+- **No authentication required** - This endpoint is public for testing purposes
+- **Broadcasts to ALL users** - No userId or profileId needed
+- Sends via both Socket.IO (to connected users) and FCM push (to all users in database)
+- All connected users receive Socket.IO events instantly
+- All users in database receive FCM push notifications
+- Response includes statistics about delivery
+- Useful for debugging and testing broadcast notification delivery
 
 **Testing Scenarios:**
-1. **Test WebSocket Delivery:**
+
+1. **Test WebSocket Broadcast:**
    - Open app (WebSocket connected)
-   - Call test endpoint
+   - Call test endpoint with `notificationType`
    - Check app logs for `mindtrain:sync_notification` event
 
-2. **Test FCM Delivery:**
+2. **Test FCM Broadcast:**
    - Close app (WebSocket disconnected)
-   - Call test endpoint
+   - Call test endpoint with `notificationType`
    - Check phone for push notification
+
+### Broadcast Notification
+POST `/api/mindtrain/fcm-notifications/broadcast` (public - no authentication required)
+
+Broadcast notification to ALL users who have installed the app. **No profile ID or user ID needed** - sends to everyone automatically.
+
+**Request Body:**
+```json
+{
+  "notificationType": "morning"
+}
+```
+
+**Required Fields:**
+- None (all fields are optional)
+
+**Optional Fields:**
+- `notificationType`: Either `"morning"` or `"evening"` (defaults to `"morning"`)
+- `profileId`: Profile ID (optional - not needed for broadcast to all users)
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Notification broadcasted successfully",
+  "data": {
+    "broadcast": true,
+    "profileId": null,
+    "notificationType": "morning",
+    "deliveryMethod": "broadcast",
+    "stats": {
+      "socketBroadcastCount": 150,
+      "fcmProcessedCount": 5000,
+      "fcmFailedCount": 2
+    },
+    "timestamp": "2025-01-31T10:00:00.000Z"
+  }
+}
+```
+
+**Response Fields:**
+- `broadcast`: Always `true` for broadcast responses
+- `profileId`: Profile ID (may be null if not provided)
+- `notificationType`: Type of notification sent
+- `deliveryMethod`: Always `"broadcast"` for broadcast responses
+- `stats.socketBroadcastCount`: Number of connected sockets that received the broadcast
+- `stats.fcmProcessedCount`: Total number of users who received FCM push notifications
+- `stats.fcmFailedCount`: Number of failed FCM deliveries
+- `timestamp`: When the notification was sent
+
+**Error Responses:**
+- `400` - Invalid notificationType
+- `500` - Server error
+
+**Error Codes:**
+- `INVALID_NOTIFICATION_TYPE` - notificationType must be "morning" or "evening"
+- `BROADCAST_FAILED` - Failed to broadcast notification
+- `BROADCAST_ERROR` - Server error during broadcast
+
+**Notes:**
+- **No authentication required** - This endpoint is public for testing purposes
+- **No profileId or userId needed** - Broadcasts to ALL users automatically
+- Sends via both Socket.IO (to connected users) and FCM push (to all users in database)
+- All connected users receive Socket.IO events instantly
+- All users in database receive FCM push notifications
+- Response includes statistics about delivery
+- Useful for testing and sending announcements to all users
+
+**Example Usage:**
+```bash
+# Simple broadcast - no profile ID needed
+POST /api/mindtrain/fcm-notifications/broadcast
+{
+  "notificationType": "morning"
+}
+```
 
 ### FCM Callback
 POST `/api/mindtrain/fcm-notifications/callback` (public)
@@ -660,8 +744,10 @@ FCM delivery status webhook callback. Receives delivery status updates from Fire
 
 ### FCM Notifications
 - `send` endpoint is typically used by backend services, not frontend
+- `test` and `broadcast` endpoints are for testing and broadcasting to all users
 - `callback` endpoint is a webhook for Firebase, not called by frontend
 - Frontend should handle FCM tokens and notification display
+- All notifications are broadcast-only (no user-specific notifications)
 
 ### Error Handling
 - Check `success` field first
