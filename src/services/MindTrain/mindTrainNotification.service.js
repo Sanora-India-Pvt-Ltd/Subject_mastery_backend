@@ -1,12 +1,14 @@
 const { getIO } = require('../../socket/socketServer');
+const { sendPushNotification } = require('../notification/pushNotification.service');
+const User = require('../../models/authorization/User');
 
 /**
  * MindTrain Notification Service
  * 
- * Broadcast-only notification system via Socket.IO:
- * - Real-time delivery to all connected users via Socket.IO
- * - No per-user notifications or database records
- * - No Redis/queue required
+ * Broadcast notification system via Socket.IO and FCM Push:
+ * - Real-time delivery to all connected users via Socket.IO (IN_APP)
+ * - Push notifications to all users via FCM (PUSH)
+ * - No database notification records (broadcast only)
  * 
  * Emits custom mindtrain:sync_notification and unified notification events.
  */
@@ -84,15 +86,84 @@ const broadcastMindTrainNotification = async ({ profileId = null, notificationTy
             console.warn('[MindTrainNotification] Failed to broadcast socket event:', socketError);
         }
 
-        console.log(`[MindTrainNotification] ✅ Broadcast completed: ${socketBroadcastCount} connected sockets`);
+        // Send FCM push notifications to all users
+        let pushProcessedCount = 0;
+        let pushFailedCount = 0;
+        const batchSize = 500;
+
+        try {
+            // Get all users in batches
+            let userSkip = 0;
+            let hasMoreUsers = true;
+
+            while (hasMoreUsers) {
+                const users = await User.find({})
+                    .select('_id')
+                    .skip(userSkip)
+                    .limit(batchSize)
+                    .lean();
+
+                if (users.length === 0) {
+                    hasMoreUsers = false;
+                } else {
+                    // Process batch in parallel
+                    const batchPromises = users.map(async (user) => {
+                        try {
+                            const pushResult = await sendPushNotification({
+                                recipientId: user._id,
+                                recipientType: 'USER',
+                                title: title,
+                                body: message,
+                                data: {
+                                    category: 'MINDTRAIN',
+                                    type: 'MINDTRAIN_SYNC_TRIGGER',
+                                    ...notificationPayload
+                                }
+                            });
+
+                            if (pushResult.success && pushResult.sentCount > 0) {
+                                return { success: true };
+                            } else {
+                                return { success: false, reason: pushResult.reason || 'No tokens' };
+                            }
+                        } catch (error) {
+                            console.error(`[MindTrainNotification] Push failed for user ${user._id}:`, error.message);
+                            return { success: false, error: error.message };
+                        }
+                    });
+
+                    const batchResults = await Promise.all(batchPromises);
+                    batchResults.forEach(result => {
+                        if (result.success) {
+                            pushProcessedCount++;
+                        } else {
+                            pushFailedCount++;
+                        }
+                    });
+
+                    userSkip += batchSize;
+                    if (users.length < batchSize) {
+                        hasMoreUsers = false;
+                    }
+                }
+            }
+
+            console.log(`[MindTrainNotification] 📦 Push notifications: ${pushProcessedCount} sent, ${pushFailedCount} failed`);
+        } catch (pushError) {
+            console.error('[MindTrainNotification] Failed to send push notifications:', pushError);
+        }
+
+        console.log(`[MindTrainNotification] ✅ Broadcast completed: ${socketBroadcastCount} sockets, ${pushProcessedCount} push notifications`);
 
         return {
             success: true,
             deliveryMethod: 'broadcast',
-            message: 'Notification broadcasted to all connected users',
-            channels: ['IN_APP'],
+            message: 'Notification broadcasted to all users',
+            channels: ['IN_APP', 'PUSH'],
             stats: {
-                socketBroadcastCount
+                socketBroadcastCount,
+                pushProcessedCount,
+                pushFailedCount
             }
         };
 
