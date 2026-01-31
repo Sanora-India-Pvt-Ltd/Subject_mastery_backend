@@ -143,21 +143,14 @@ function findIndex(indexes, expectedIndex) {
 }
 
 async function verifyCollection(db, collectionName, modelName) {
-    try {
-        // Check if collection exists by listing collections
-        const collections = await db.listCollections({ name: collectionName }).toArray();
-        const exists = collections.length > 0;
-        
-        if (exists) {
-            const collection = db.collection(collectionName);
-            const count = await collection.countDocuments();
-            return { exists: true, count };
-        }
-        return { exists: false, count: 0 };
-    } catch (error) {
-        // If error occurs, assume collection doesn't exist
-        return { exists: false, count: 0 };
+    const collection = db.collection(collectionName);
+    const exists = await collection.exists();
+    
+    if (exists) {
+        const count = await collection.countDocuments();
+        return { exists: true, count };
     }
+    return { exists: false, count: 0 };
 }
 
 async function verifyIndexes(db, collectionName, expectedIndexes, modelName) {
@@ -219,25 +212,11 @@ async function verifyFields(model, requiredFields, modelName) {
     };
     
     for (const fieldName of requiredFields) {
-        // Check direct path first
-        let field = schema.paths[fieldName];
-        
-        // If not found, check if it's a nested object (e.g., 'data' might be stored as nested paths)
-        if (!field) {
-            // Check for nested paths that start with the field name
-            const nestedPaths = Object.keys(schema.paths).filter(path => 
-                path === fieldName || path.startsWith(fieldName + '.')
-            );
-            if (nestedPaths.length > 0) {
-                // Field exists as a nested object, get the parent path
-                field = schema.paths[nestedPaths[0].split('.')[0]] || schema.paths[fieldName];
-            }
-        }
-        
+        const field = schema.paths[fieldName];
         if (field) {
             results.found.push({
                 name: fieldName,
-                type: field.instance || (field.schema ? 'Mixed' : 'Mixed'),
+                type: field.instance,
                 required: field.isRequired || false,
                 default: field.defaultValue !== undefined ? field.defaultValue : null
             });

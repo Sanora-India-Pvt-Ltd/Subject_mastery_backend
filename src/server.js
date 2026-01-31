@@ -1585,6 +1585,16 @@ const { startMCQGenerationWorker } = require('./workers/mcqGenerationWorker');
         startNotificationWorker();
         console.log('✅ Notification worker started');
         
+        // Start MindTrain FCM notification cron job (after socket server)
+        try {
+            const fcmNotificationJob = require('./jobs/MindTrain/fcmNotificationJob');
+            fcmNotificationJob.start();
+            console.log('✅ MindTrain FCM notification job started');
+        } catch (error) {
+            console.error('❌ Failed to start MindTrain FCM notification job:', error.message);
+            console.warn('⚠️  MindTrain notifications will not be sent automatically');
+        }
+        
         // Start server
         httpServer.listen(PORT, () => {
     console.log(`\n🎯 Server running on port ${PORT}`);

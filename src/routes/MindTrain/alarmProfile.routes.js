@@ -1,6 +1,6 @@
 const express = require('express');
 const { protect } = require('../../middleware/auth');
-const { createAlarmProfile, getAlarmProfiles } = require('../../controllers/MindTrain/alarmProfile.controller');
+const { createAlarmProfile, getAlarmProfiles, deleteAlarmProfile } = require('../../controllers/MindTrain/alarmProfile.controller');
 
 const router = express.Router();
 
@@ -15,6 +15,13 @@ router.post('/create-alarm-profile', protect, createAlarmProfile);
  * Retrieves all alarm profiles for the authenticated user, separated into active and inactive profiles.
  */
 router.get('/get-alarm-profiles', protect, getAlarmProfiles);
+
+/**
+ * DELETE /api/mindtrain/alarm-profiles/:profileId
+ * Deletes an alarm profile and performs cascade cleanup (FCM schedule, notification logs).
+ * Handles active profile transition automatically.
+ */
+router.delete('/alarm-profiles/:profileId', protect, deleteAlarmProfile);
 
 module.exports = router;
 

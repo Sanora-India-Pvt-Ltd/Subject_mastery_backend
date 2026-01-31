@@ -1,4 +1,9 @@
 const alarmProfileService = require('../../services/MindTrain/alarmProfileService');
+const AlarmProfile = require('../../models/MindTrain/AlarmProfile');
+const FCMSchedule = require('../../models/MindTrain/FCMSchedule');
+const NotificationLog = require('../../models/MindTrain/NotificationLog');
+const { getMindTrainConnection } = require('../../config/dbMindTrain');
+const mongoose = require('mongoose');
 
 /**
  * POST /api/mindtrain/create-alarm-profile
@@ -178,8 +183,184 @@ const getAlarmProfiles = async (req, res) => {
     }
 };
 
+/**
+ * DELETE /api/mindtrain/alarm-profiles/:profileId
+ * 
+ * Deletes an alarm profile and performs cascade cleanup:
+ * - Deletes FCM schedule associated with the profile
+ * - Deletes notification logs for the profile
+ * - Handles active profile transition (activates next profile or disables FCM)
+ * 
+ * Authentication: Required (JWT)
+ */
+const deleteAlarmProfile = async (req, res) => {
+    // Get MindTrain connection for transaction
+    const mindTrainConnection = getMindTrainConnection();
+    if (!mindTrainConnection) {
+        return res.status(500).json({
+            success: false,
+            message: 'Database connection not available',
+            code: 'DATABASE_ERROR'
+        });
+    }
+
+    const session = await mindTrainConnection.startSession();
+    session.startTransaction();
+
+    try {
+        const { profileId } = req.params;
+        const userId = req.userId; // From JWT middleware
+
+        // Validate authentication
+        if (!userId) {
+            await session.abortTransaction();
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required',
+                code: 'AUTH_REQUIRED'
+            });
+        }
+
+        // Validate profileId
+        if (!profileId) {
+            await session.abortTransaction();
+            return res.status(400).json({
+                success: false,
+                message: 'Profile ID is required',
+                code: 'PROFILE_ID_REQUIRED'
+            });
+        }
+
+        console.log(`[Delete] User: ${userId}, Profile: ${profileId}`);
+
+        // Step 1: Verify ownership and get profile
+        const profile = await AlarmProfile.findOne({
+            id: profileId,
+            userId: userId,
+        }).session(session);
+
+        if (!profile) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({
+                success: false,
+                message: 'Profile not found',
+                code: 'PROFILE_NOT_FOUND'
+            });
+        }
+
+        console.log(`[Delete] Found profile: ${profile.title}`);
+
+        // Step 2: Check if has active alarms TODAY
+        // Note: AlarmTrigger model doesn't exist in this codebase, so we skip this check
+        // If you have scheduled alarms stored elsewhere, add that check here
+        // For now, we'll allow deletion regardless of active alarms
+
+        // Step 3: Delete FCM Schedule
+        const fcmDeleted = await FCMSchedule.deleteOne(
+            { activeProfileId: profileId },
+            { session }
+        );
+
+        console.log(`[Delete] FCM schedule deleted: ${fcmDeleted.deletedCount}`);
+
+        // Step 4: Delete notification logs
+        const notifDeleted = await NotificationLog.deleteMany(
+            { 'data.profileId': profileId },
+            { session }
+        );
+
+        console.log(`[Delete] Notifications deleted: ${notifDeleted.deletedCount}`);
+
+        // Step 5: Delete the profile
+        await AlarmProfile.deleteOne(
+            { id: profileId, userId: userId },
+            { session }
+        );
+
+        console.log(`[Delete] Profile deleted`);
+
+        // Step 6: Handle active profile transition
+        let remainingCount = 0;
+        let fcmDisabled = false;
+
+        if (profile.isActive) {
+            // Count remaining profiles (excluding the one we just deleted)
+            remainingCount = await AlarmProfile.countDocuments({
+                userId: userId,
+            }).session(session);
+
+            console.log(`[Delete] Remaining profiles: ${remainingCount}`);
+
+            if (remainingCount === 0) {
+                // Disable FCM if no profiles left
+                // Note: We already deleted the FCM schedule above, but check for any remaining
+                const remainingFCM = await FCMSchedule.countDocuments({
+                    userId: userId
+                }).session(session);
+
+                if (remainingFCM > 0) {
+                    await FCMSchedule.updateMany(
+                        { userId: userId },
+                        { isEnabled: false },
+                        { session }
+                    );
+                }
+
+                fcmDisabled = true;
+                console.log(`[Delete] FCM disabled (no profiles left)`);
+            } else {
+                // Activate next profile
+                const nextProfile = await AlarmProfile.findOne({
+                    userId: userId,
+                }).session(session);
+
+                if (nextProfile && !nextProfile.isActive) {
+                    nextProfile.isActive = true;
+                    nextProfile.lastSyncTimestamp = new Date();
+                    await nextProfile.save({ session });
+
+                    console.log(`[Delete] Activated next profile: ${nextProfile.id}`);
+                }
+            }
+        }
+
+        await session.commitTransaction();
+        session.endSession();
+        console.log(`[Delete] ✅ Transaction committed`);
+
+        res.status(200).json({
+            success: true,
+            message: 'Profile deleted successfully',
+            data: {
+                deletedProfileId: profileId,
+                cascadeCleanup: {
+                    fcmScheduleDeleted: fcmDeleted.deletedCount > 0,
+                    notificationLogsDeleted: notifDeleted.deletedCount,
+                    remainingProfiles: remainingCount,
+                    fcmDisabled: fcmDisabled,
+                },
+            },
+        });
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+
+        console.error('[Delete] Error:', error.message);
+        console.error('[Delete] Stack:', error.stack);
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to delete profile',
+            code: 'DELETE_FAILED',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     createAlarmProfile,
-    getAlarmProfiles
+    getAlarmProfiles,
+    deleteAlarmProfile
 };
 
