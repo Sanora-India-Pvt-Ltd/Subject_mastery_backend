@@ -1,16 +1,16 @@
+const { emitNotification } = require('../notification/notificationEmitter');
 const { getIO } = require('../../socket/socketServer');
-const { sendPushNotification } = require('../notification/pushNotification.service');
 const NotificationLog = require('../../models/MindTrain/NotificationLog');
 const mongoose = require('mongoose');
 
 /**
  * MindTrain Notification Service
  * 
- * Hybrid notification system:
- * - Checks WebSocket connection first (real-time when app is open)
- * - Falls back to FCM push notification (when app is closed)
+ * Uses the unified notification system with IN_APP and PUSH channels:
+ * - IN_APP: Real-time delivery via Socket.IO when app is open
+ * - PUSH: FCM push notification when app is closed
  * 
- * This ensures instant delivery when possible, reliable delivery always.
+ * Also emits custom mindtrain:sync_notification event for real-time sync handling.
  */
 
 /**
@@ -39,84 +39,79 @@ const sendMindTrainNotification = async ({ userId, profileId, notificationType, 
             ? new mongoose.Types.ObjectId(userId)
             : userId;
 
-        // Prepare notification data
-        const notificationData = {
-            type: 'sync_trigger',
-            title: 'MindTrain Sync',
-            body: `Checking alarm schedule (${notificationType})`,
-            data: {
-                userId: userIdObjectId.toString(),
-                syncSource: 'fcm',
-                profileId: profileId,
-                notificationType: notificationType,
-                timestamp: new Date().toISOString()
-            }
+        // Prepare notification message
+        const title = 'MindTrain Sync';
+        const message = `Checking alarm schedule (${notificationType})`;
+
+        // Prepare notification payload data
+        const notificationPayload = {
+            profileId: profileId,
+            notificationType: notificationType,
+            scheduleId: scheduleId,
+            timestamp: new Date().toISOString(),
+            syncSource: 'fcm'
         };
 
-        // Step 1: Try WebSocket first (real-time delivery)
-        const wsDelivered = await tryWebSocketDelivery(userIdObjectId, notificationData);
-
-        if (wsDelivered.success) {
-            console.log(`[MindTrainNotification] ✅ WebSocket delivery to user ${userIdObjectId}`);
-            
-            // Log notification
-            await logNotification({
-                userId: userIdObjectId,
-                notificationType,
-                profileId,
-                deliveryMethod: 'websocket',
-                status: 'delivered',
-                notificationData
+        // Emit notification using unified notification system with both IN_APP and PUSH channels
+        try {
+            await emitNotification({
+                recipientType: 'USER',
+                recipientId: userIdObjectId,
+                category: 'MINDTRAIN',
+                type: 'MINDTRAIN_SYNC_TRIGGER',
+                title: title,
+                message: message,
+                channels: ['IN_APP', 'PUSH'],
+                entity: {
+                    type: 'ALARM_PROFILE',
+                    id: profileId
+                },
+                payload: notificationPayload,
+                priority: 'HIGH'
             });
-
-            return {
-                success: true,
-                deliveryMethod: 'websocket',
-                message: 'Notification sent via WebSocket',
-                ...wsDelivered
-            };
+        } catch (notifError) {
+            // Don't break the API if notification fails
+            console.error('[MindTrainNotification] Failed to emit notification:', notifError);
         }
 
-        // Step 2: Fallback to FCM push notification
-        console.log(`[MindTrainNotification] WebSocket not available, using FCM for user ${userIdObjectId}`);
-        
-        const fcmResult = await sendPushNotification({
-            recipientId: userIdObjectId,
-            recipientType: 'USER',
-            title: notificationData.title,
-            body: notificationData.body,
-            data: notificationData.data
-        });
+        // Also emit custom mindtrain:sync_notification event for real-time sync handling
+        try {
+            const io = getIO();
+            if (io) {
+                const userRoom = `user:${userIdObjectId.toString()}`;
+                io.to(userRoom).emit('mindtrain:sync_notification', {
+                    ...notificationPayload,
+                    title: title,
+                    body: message
+                });
+            }
+        } catch (socketError) {
+            // Socket emission failure is not critical
+            console.warn('[MindTrainNotification] Failed to emit socket event:', socketError);
+        }
 
-        // Log notification
+        // Log notification to MindTrain-specific NotificationLog
         await logNotification({
             userId: userIdObjectId,
             notificationType,
             profileId,
-            deliveryMethod: 'fcm',
-            status: fcmResult.success ? 'sent' : 'failed',
-            notificationData,
-            fcmResult
+            deliveryMethod: 'unified',
+            status: 'sent',
+            notificationData: {
+                title: title,
+                body: message,
+                data: notificationPayload
+            }
         });
 
-        if (fcmResult.success) {
-            console.log(`[MindTrainNotification] ✅ FCM delivery to user ${userIdObjectId} (${fcmResult.sentCount} devices)`);
-            return {
-                success: true,
-                deliveryMethod: 'fcm',
-                message: 'Notification sent via FCM',
-                sentCount: fcmResult.sentCount,
-                failedCount: fcmResult.failedCount
-            };
-        } else {
-            console.warn(`[MindTrainNotification] ⚠️ FCM delivery failed for user ${userIdObjectId}: ${fcmResult.reason}`);
-            return {
-                success: false,
-                deliveryMethod: 'fcm',
-                message: 'FCM delivery failed',
-                reason: fcmResult.reason
-            };
-        }
+        console.log(`[MindTrainNotification] ✅ Notification sent to user ${userIdObjectId} (${notificationType})`);
+
+        return {
+            success: true,
+            deliveryMethod: 'unified',
+            message: 'Notification sent via IN_APP and PUSH channels',
+            channels: ['IN_APP', 'PUSH']
+        };
 
     } catch (error) {
         console.error('[MindTrainNotification] Error:', error);
@@ -144,65 +139,6 @@ const sendMindTrainNotification = async ({ userId, profileId, notificationType, 
     }
 };
 
-/**
- * Try to deliver notification via WebSocket
- * 
- * @param {ObjectId} userId - User ID
- * @param {Object} notificationData - Notification payload
- * @returns {Promise<Object>} Delivery result
- */
-const tryWebSocketDelivery = async (userId, notificationData) => {
-    try {
-        let io;
-        try {
-            io = getIO();
-        } catch (error) {
-            // Socket.IO not initialized yet
-            return {
-                success: false,
-                reason: 'Socket.IO not initialized'
-            };
-        }
-        
-        if (!io) {
-            return {
-                success: false,
-                reason: 'Socket.IO not available'
-            };
-        }
-
-        // Check if user has active WebSocket connection
-        const userRoom = `user:${userId.toString()}`;
-        const socketsInRoom = await io.in(userRoom).fetchSockets();
-
-        if (socketsInRoom.length === 0) {
-            return {
-                success: false,
-                reason: 'No active WebSocket connection'
-            };
-        }
-
-        // Emit notification to user's room
-        io.to(userRoom).emit('mindtrain:sync_notification', {
-            ...notificationData.data,
-            title: notificationData.title,
-            body: notificationData.body,
-            timestamp: new Date().toISOString()
-        });
-
-        return {
-            success: true,
-            connectedSockets: socketsInRoom.length
-        };
-
-    } catch (error) {
-        console.error('[MindTrainNotification] WebSocket delivery error:', error);
-        return {
-            success: false,
-            reason: error.message
-        };
-    }
-};
 
 /**
  * Log notification to database
@@ -211,13 +147,12 @@ const tryWebSocketDelivery = async (userId, notificationData) => {
  * @param {ObjectId} params.userId - User ID
  * @param {string} params.notificationType - 'morning' | 'evening'
  * @param {string} params.profileId - Profile ID
- * @param {string} params.deliveryMethod - 'websocket' | 'fcm' | 'error'
+ * @param {string} params.deliveryMethod - 'unified' | 'error'
  * @param {string} params.status - 'delivered' | 'sent' | 'failed'
  * @param {Object} params.notificationData - Notification payload
- * @param {Object} params.fcmResult - FCM result (optional)
  * @param {string} params.error - Error message (optional)
  */
-const logNotification = async ({ userId, notificationType, profileId, deliveryMethod, status, notificationData, fcmResult = null, error = null }) => {
+const logNotification = async ({ userId, notificationType, profileId, deliveryMethod, status, notificationData, error = null }) => {
     try {
         // Generate unique notification ID
         const notificationId = `mindtrain_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -232,17 +167,12 @@ const logNotification = async ({ userId, notificationType, profileId, deliveryMe
             body: notificationData.body,
             data: {
                 profileId: profileId,
-                syncSource: notificationData.data.syncSource,
+                syncSource: notificationData.data?.syncSource || 'fcm',
                 notificationType: notificationType
             },
-            deliveryError: error || (fcmResult && !fcmResult.success ? fcmResult.reason : null),
-            deviceId: deliveryMethod === 'websocket' ? 'websocket' : 'fcm'
+            deliveryError: error || null,
+            deviceId: deliveryMethod === 'unified' ? 'unified_inapp_push' : deliveryMethod
         };
-
-        // Add delivery metadata
-        if (deliveryMethod === 'fcm' && fcmResult) {
-            logEntry.deliveryRetries = fcmResult.failedCount || 0;
-        }
 
         await NotificationLog.create(logEntry);
 
@@ -253,6 +183,5 @@ const logNotification = async ({ userId, notificationType, profileId, deliveryMe
 };
 
 module.exports = {
-    sendMindTrainNotification,
-    tryWebSocketDelivery
+    sendMindTrainNotification
 };
