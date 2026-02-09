@@ -719,6 +719,77 @@ FCM delivery status webhook callback. Receives delivery status updates from Fire
 - Failed notifications are recorded for retry logic
 - Used by Firebase to report delivery status
 
+## When to Use Each Endpoint
+
+### Alarm Profile Management
+
+**Create Alarm Profile** (`POST /api/mindtrain/create-alarm-profile`)
+- ✅ **Use when:** User creates a new alarm profile for the first time
+- ✅ **Use when:** User wants to create a simple profile without FCM schedule configuration
+- ✅ **Use when:** You only need to create/update the profile (not FCM settings)
+- ❌ **Don't use when:** You need to configure FCM notification schedule (use `sync-config` instead)
+
+**Get Alarm Profiles** (`GET /api/mindtrain/get-alarm-profiles`)
+- ✅ **Use when:** App starts/loads - fetch user's existing profiles
+- ✅ **Use when:** User opens alarm settings screen
+- ✅ **Use when:** Need to display list of active/inactive profiles
+- ✅ **Use when:** Need to check if user has any profiles before showing create UI
+
+**Delete Alarm Profile** (`DELETE /api/mindtrain/alarm-profiles/:profileId`)
+- ✅ **Use when:** User deletes a profile from settings
+- ✅ **Use when:** User wants to remove an old/unused profile
+- ✅ **Use when:** Need to clean up profiles (cascade cleanup happens automatically)
+
+### Sync Configuration
+
+**Sync Config** (`PUT /api/mindtrain/alarm-profiles/sync-config`)
+- ✅ **Use when:** **Initial setup** - First time user sets up alarm profile + FCM notifications
+- ✅ **Use when:** **Major updates** - User changes both profile AND FCM schedule together
+- ✅ **Use when:** User completes onboarding/setup wizard
+- ✅ **Use when:** Need to configure both alarm profile and notification timing in one call
+- ❌ **Don't use when:** Only creating a profile (use `create-alarm-profile` instead)
+- ❌ **Don't use when:** Only updating FCM schedule (this endpoint updates both)
+
+### Sync Health & Status
+
+**Report Sync Health** (`PUT /api/mindtrain/alarm-profiles/sync-health`)
+- ✅ **Use when:** **Periodic reporting** - Every 24 hours (recommended)
+- ✅ **Use when:** After successful sync operation
+- ✅ **Use when:** After error recovery attempts
+- ✅ **Use when:** App background sync completes
+- ✅ **Use when:** Device state changes significantly (battery, network, etc.)
+
+**Get Sync Status** (`GET /api/mindtrain/alarm-profiles/sync-status`)
+- ✅ **Use when:** **Before syncing** - Check if server has updates/changes
+- ✅ **Use when:** App comes to foreground - Check for pending updates
+- ✅ **Use when:** Periodic check (use `nextSyncCheckTime` from previous response as guidance)
+- ✅ **Use when:** After receiving FCM notification - Check what changed
+- ✅ **Use when:** User manually triggers sync
+- ❌ **Don't use too frequently** - Respect `nextSyncCheckTime` to avoid unnecessary requests
+
+### FCM Notifications
+
+**Send FCM Notifications** (`POST /api/mindtrain/fcm-notifications/send`)
+- ✅ **Use when:** Backend scheduled job needs to send notifications
+- ✅ **Use when:** Admin/service needs to trigger notifications
+- ❌ **Not for frontend** - This is a backend/internal endpoint
+
+**Test Broadcast Notification** (`POST /api/mindtrain/fcm-notifications/test`)
+- ✅ **Use when:** Testing notification delivery during development
+- ✅ **Use when:** Debugging WebSocket/FCM integration
+- ✅ **Use when:** Verifying notification system works
+- ❌ **Not for production** - Testing only
+
+**Broadcast Notification** (`POST /api/mindtrain/fcm-notifications/broadcast`)
+- ✅ **Use when:** Sending announcements to all users
+- ✅ **Use when:** System-wide notifications
+- ✅ **Use when:** Admin needs to notify all users
+- ❌ **Not for user-specific notifications** - Broadcasts to everyone
+
+**FCM Callback** (`POST /api/mindtrain/fcm-notifications/callback`)
+- ✅ **Use when:** Firebase reports delivery status (webhook)
+- ❌ **Not called by frontend** - This is a Firebase webhook endpoint
+
 ## Notes for Frontend Integration
 
 ### General Guidelines
@@ -728,7 +799,7 @@ FCM delivery status webhook callback. Receives delivery status updates from Fire
 - Timestamps are returned in ISO 8601 format
 
 ### Alarm Profile Management
-- Only one active profile per user at a time
+- Only one active profile per user at a timef
 - Creating a new profile automatically deactivates existing profiles
 - Profile IDs should be unique and generated client-side (UUID recommended)
 - `userId` is automatically extracted from JWT token - do not include it in request body
@@ -764,19 +835,60 @@ FCM delivery status webhook callback. Receives delivery status updates from Fire
 - Don't poll sync-status too frequently (use `nextSyncCheckTime` as guidance)
 - Respect server recommendations in sync health responses
 
-### Best Practices
-1. **Initial Setup Flow:**
-   - Create alarm profile → Sync config → Report initial sync health
+### Best Practices & Common Flows
 
-2. **Regular Sync Flow:**
-   - Check sync status → Sync if needed → Report sync health
+#### 1. **Initial Setup Flow (First Time User)**
+```
+1. User opens app → GET /get-alarm-profiles (check if profiles exist)
+2. User creates profile → POST /create-alarm-profile OR PUT /sync-config
+   - Use sync-config if also setting up FCM notifications
+   - Use create-alarm-profile if just creating profile
+3. After setup → PUT /sync-health (report initial sync health)
+```
 
-3. **Error Recovery:**
-   - Monitor recovery actions from sync-status
-   - Follow server recommendations for recovery steps
-   - Report sync health after recovery attempts
+#### 2. **Regular Sync Flow (Daily Operations)**
+```
+1. App starts/foreground → GET /sync-status (check for updates)
+2. If needsSync = true → Sync data locally
+3. After sync → PUT /sync-health (report sync completion)
+4. Repeat based on nextSyncCheckTime from response
+```
 
-4. **Profile Updates:**
-   - Use sync-config for major changes
-   - Use create-alarm-profile for simple profile creation
-   - Always verify userId matches authenticated user
+#### 3. **Profile Management Flow**
+```
+Create New Profile:
+  - POST /create-alarm-profile (simple profile)
+  - OR PUT /sync-config (profile + FCM setup)
+
+Update Existing Profile:
+  - PUT /sync-config (updates both profile and FCM)
+
+View Profiles:
+  - GET /get-alarm-profiles (get all profiles)
+
+Delete Profile:
+  - DELETE /alarm-profiles/:profileId (cascade cleanup automatic)
+```
+
+#### 4. **Error Recovery Flow**
+```
+1. GET /sync-status (check for recovery actions)
+2. If recoveryActions present → Follow server recommendations
+3. Perform recovery steps locally
+4. PUT /sync-health (report recovery completion)
+```
+
+#### 5. **FCM Notification Received Flow**
+```
+1. App receives FCM notification → GET /sync-status (check what changed)
+2. If needsSync = true → Sync data
+3. Update local state
+4. PUT /sync-health (optional - report sync)
+```
+
+#### 6. **Periodic Health Reporting**
+```
+Every 24 hours (or as recommended):
+  - PUT /sync-health (report device state and sync metrics)
+  - Use nextSyncCheckTime from response for next check
+```

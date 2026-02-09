@@ -92,16 +92,20 @@ const broadcastMindTrainNotification = async ({ profileId = null, notificationTy
         const batchSize = 500;
 
         try {
-            // Get all users in batches
-            let userSkip = 0;
-            let hasMoreUsers = true;
+            // Check if User model is available and database is connected
+            if (!User) {
+                console.warn('[MindTrainNotification] User model not available, skipping push notifications');
+            } else {
+                // Get all users in batches
+                let userSkip = 0;
+                let hasMoreUsers = true;
 
-            while (hasMoreUsers) {
-                const users = await User.find({})
-                    .select('_id')
-                    .skip(userSkip)
-                    .limit(batchSize)
-                    .lean();
+                while (hasMoreUsers) {
+                    const users = await User.find({})
+                        .select('_id')
+                        .skip(userSkip)
+                        .limit(batchSize)
+                        .lean();
 
                 if (users.length === 0) {
                     hasMoreUsers = false;
@@ -146,6 +150,7 @@ const broadcastMindTrainNotification = async ({ profileId = null, notificationTy
                         hasMoreUsers = false;
                     }
                 }
+                }
             }
 
             console.log(`[MindTrainNotification] 📦 Push notifications: ${pushProcessedCount} sent, ${pushFailedCount} failed`);
@@ -169,6 +174,12 @@ const broadcastMindTrainNotification = async ({ profileId = null, notificationTy
 
     } catch (error) {
         console.error('[MindTrainNotification] Broadcast error:', error);
+        console.error('[MindTrainNotification] Error stack:', error.stack);
+        console.error('[MindTrainNotification] Error details:', {
+            message: error.message,
+            name: error.name,
+            code: error.code
+        });
         return {
             success: false,
             deliveryMethod: 'none',
