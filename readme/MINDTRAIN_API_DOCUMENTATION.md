@@ -65,14 +65,13 @@ Creates a new alarm profile and automatically deactivates all other profiles for
 ```json
 {
   "id": "profile_unique_id",
-  "userId": "user_id",
   "youtubeUrl": "https://www.youtube.com/watch?v=...",
   "title": "Morning Meditation",
   "description": "Optional description",
   "alarmsPerDay": 3,
-  "selectedDaysPerWeek": ["Monday", "Wednesday", "Friday"],
-  "startTime": "06:00",
-  "endTime": "22:00",
+  "selectedDaysPerWeek": [1, 3, 5],
+  "startTime": "06:00:00",
+  "endTime": "22:00:00",
   "isFixedTime": false,
   "fixedTime": null,
   "specificDates": null,
@@ -82,13 +81,14 @@ Creates a new alarm profile and automatically deactivates all other profiles for
 
 **Required Fields:**
 - `id`: Unique identifier for the profile
-- `userId`: Must match authenticated user ID
 - `youtubeUrl`: YouTube video URL
 - `title`: Profile title
 - `alarmsPerDay`: Number of alarms per day (number)
-- `selectedDaysPerWeek`: Array of day names
-- `startTime`: Start time in HH:mm format
-- `endTime`: End time in HH:mm format
+- `selectedDaysPerWeek`: Array of numbers (1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday)
+- `startTime`: Start time in HH:mm:ss format (e.g., "06:00:00")
+- `endTime`: End time in HH:mm:ss format (e.g., "22:00:00")
+
+**Note:** `userId` is automatically extracted from the JWT authentication token. Do not include it in the request body.
 
 **Optional Fields:**
 - `description`: Profile description
@@ -109,9 +109,9 @@ Creates a new alarm profile and automatically deactivates all other profiles for
       "title": "Morning Meditation",
       "description": "",
       "alarmsPerDay": 3,
-      "selectedDaysPerWeek": ["Monday", "Wednesday", "Friday"],
-      "startTime": "06:00",
-      "endTime": "22:00",
+      "selectedDaysPerWeek": [1, 3, 5],
+      "startTime": "06:00:00",
+      "endTime": "22:00:00",
       "isFixedTime": false,
       "fixedTime": null,
       "specificDates": null,
@@ -134,14 +134,15 @@ Creates a new alarm profile and automatically deactivates all other profiles for
 ```
 
 **Error Responses:**
-- `400` - Missing required fields or userId mismatch
+- `400` - Missing required fields
 - `401` - Authentication required
 - `500` - Server error
 
 **Notes:**
-- The `userId` in the request body must match the authenticated user's ID
-- Creating a new profile automatically deactivates all other profiles for the user
+- `userId` is automatically extracted from the JWT authentication token (from `Authorization` header)
+- Creating a new profile automatically deactivates all other profiles for the authenticated user
 - The `isActive` field is automatically set to `true` for new profiles
+- Users can only create profiles for themselves (enforced by JWT authentication)
 
 ### Get Alarm Profiles
 GET `/api/mindtrain/get-alarm-profiles` (protected)
@@ -165,9 +166,9 @@ Retrieves all alarm profiles for the authenticated user, separated into active a
         "title": "Morning Meditation",
         "description": "",
         "alarmsPerDay": 3,
-        "selectedDaysPerWeek": ["Monday", "Wednesday", "Friday"],
-        "startTime": "06:00",
-        "endTime": "22:00",
+        "selectedDaysPerWeek": [1, 3, 5],
+        "startTime": "06:00:00",
+        "endTime": "22:00:00",
         "isFixedTime": false,
         "fixedTime": null,
         "specificDates": null,
@@ -259,13 +260,12 @@ Create/update alarm profile and configure FCM schedule in a single request. This
 {
   "alarmProfile": {
     "id": "profile_unique_id",
-    "userId": "user_id",
     "youtubeUrl": "https://www.youtube.com/watch?v=...",
     "title": "Morning Meditation",
     "alarmsPerDay": 3,
-    "selectedDaysPerWeek": ["Monday", "Wednesday", "Friday"],
-    "startTime": "06:00",
-    "endTime": "22:00"
+    "selectedDaysPerWeek": [1, 3, 5],
+    "startTime": "06:00:00",
+    "endTime": "22:00:00"
   },
   "fcmConfig": {
     "morningNotificationTime": "08:00",
@@ -276,9 +276,11 @@ Create/update alarm profile and configure FCM schedule in a single request. This
 ```
 
 **Required Fields:**
-- `alarmProfile`: Object with all required alarm profile fields (same as Create Alarm Profile)
+- `alarmProfile`: Object with all required alarm profile fields (same as Create Alarm Profile, but without `userId`)
 - `fcmConfig.morningNotificationTime`: Time in HH:mm format
 - `fcmConfig.eveningNotificationTime`: Time in HH:mm format
+
+**Note:** `userId` is automatically extracted from the JWT authentication token. Do not include it in `alarmProfile` object.
 
 **Optional Fields:**
 - `fcmConfig.timezone`: Timezone string (defaults to "UTC")
@@ -313,7 +315,6 @@ Create/update alarm profile and configure FCM schedule in a single request. This
 **Error Responses:**
 - `400` - Missing required fields, invalid time format, or invalid timezone
 - `401` - Authentication required
-- `403` - userId mismatch
 - `500` - Server error
 
 **Error Codes:**
@@ -321,15 +322,17 @@ Create/update alarm profile and configure FCM schedule in a single request. This
 - `MISSING_FCM_CONFIG` - fcmConfig is required
 - `INVALID_ALARM_PROFILE` - Missing required alarmProfile fields
 - `INVALID_FCM_CONFIG` - Missing required fcmConfig fields
-- `INVALID_TIME_FORMAT` - Time must be in HH:mm format
+- `INVALID_TIME_FORMAT` - Time must be in HH:mm format (for FCM times) or HH:mm:ss format (for alarm profile times)
 - `INVALID_TIMEZONE` - Invalid timezone format
-- `USER_ID_MISMATCH` - userId doesn't match authenticated user
 - `SYNC_CONFIG_ERROR` - Server error during configuration
 
 **Notes:**
-- Time format must be HH:mm (e.g., "08:00", "20:30")
+- `userId` is automatically extracted from the JWT authentication token
+- FCM time format must be HH:mm (e.g., "08:00", "20:30")
+- Alarm profile time format must be HH:mm:ss (e.g., "06:00:00", "22:00:00")
 - `nextSyncCheckTime` is set to 1 hour from the request time
 - This endpoint automatically deactivates other profiles (same as Create Alarm Profile)
+- Users can only configure profiles for themselves (enforced by JWT authentication)
 
 ## Sync Health & Status
 
@@ -728,7 +731,8 @@ FCM delivery status webhook callback. Receives delivery status updates from Fire
 - Only one active profile per user at a time
 - Creating a new profile automatically deactivates existing profiles
 - Profile IDs should be unique and generated client-side (UUID recommended)
-- `userId` in request body must match authenticated user
+- `userId` is automatically extracted from JWT token - do not include it in request body
+- Users can only create/manage profiles for themselves (enforced by authentication)
 
 ### Sync Configuration
 - Use `sync-config` endpoint for initial setup or major updates

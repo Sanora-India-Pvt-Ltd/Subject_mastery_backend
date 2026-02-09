@@ -24,16 +24,18 @@ const createAlarmProfile = async (req, res) => {
 
         const profileData = req.body || {};
 
-        // Validate required fields
-        const { id, userId, youtubeUrl, title, alarmsPerDay, selectedDaysPerWeek, startTime, endTime, isActive } = profileData;
+        // Get authenticated userId from JWT token (single source of truth)
+        const authenticatedUserId = req.userId.toString();
 
-        if (!id || !userId || !youtubeUrl || !title || !alarmsPerDay || !selectedDaysPerWeek || !startTime || !endTime) {
+        // Validate required fields (userId not required - comes from JWT)
+        const { id, youtubeUrl, title, alarmsPerDay, selectedDaysPerWeek, startTime, endTime, isActive } = profileData;
+
+        if (!id || !youtubeUrl || !title || !alarmsPerDay || !selectedDaysPerWeek || !startTime || !endTime) {
             return res.status(400).json({
                 success: false,
                 message: 'Missing required fields',
                 errors: {
                     ...(!id && { id: 'id is required' }),
-                    ...(!userId && { userId: 'userId is required' }),
                     ...(!youtubeUrl && { youtubeUrl: 'youtubeUrl is required' }),
                     ...(!title && { title: 'title is required' }),
                     ...(!alarmsPerDay && { alarmsPerDay: 'alarmsPerDay is required' }),
@@ -44,21 +46,10 @@ const createAlarmProfile = async (req, res) => {
             });
         }
 
-        // Validate userId matches authenticated user
-        const authenticatedUserId = req.userId.toString();
-        const requestUserId = userId.toString();
-        
-        if (authenticatedUserId !== requestUserId) {
-            return res.status(400).json({
-                success: false,
-                message: 'userId in request body must match authenticated user'
-            });
-        }
-
         // Ensure isActive is true for new profile (as per requirement)
         profileData.isActive = true;
 
-        // Create/update alarm profile
+        // Create/update alarm profile (userId comes from JWT authentication)
         const result = await alarmProfileService.createOrUpdateAlarmProfile({
             ...profileData,
             userId: authenticatedUserId

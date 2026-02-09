@@ -43,26 +43,17 @@ const syncConfig = async (req, res) => {
             });
         }
 
-        // Validate alarmProfile fields
-        const { id, userId, youtubeUrl, title, alarmsPerDay, selectedDaysPerWeek, startTime, endTime, isActive } = alarmProfile;
+        // Get authenticated userId from JWT token (single source of truth)
+        const authenticatedUserId = req.userId.toString();
 
-        if (!id || !userId || !youtubeUrl || !title || !alarmsPerDay || !selectedDaysPerWeek || !startTime || !endTime) {
+        // Validate alarmProfile fields (userId not required - comes from JWT)
+        const { id, youtubeUrl, title, alarmsPerDay, selectedDaysPerWeek, startTime, endTime, isActive } = alarmProfile;
+
+        if (!id || !youtubeUrl || !title || !alarmsPerDay || !selectedDaysPerWeek || !startTime || !endTime) {
             return res.status(400).json({
                 success: false,
                 message: 'Missing required alarmProfile fields',
                 code: 'INVALID_ALARM_PROFILE'
-            });
-        }
-
-        // Validate userId matches authenticated user
-        const authenticatedUserId = req.userId.toString();
-        const requestUserId = userId.toString();
-        
-        if (authenticatedUserId !== requestUserId) {
-            return res.status(403).json({
-                success: false,
-                message: 'userId in request must match authenticated user',
-                code: 'USER_ID_MISMATCH'
             });
         }
 
