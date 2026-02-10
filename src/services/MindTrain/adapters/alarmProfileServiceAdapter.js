@@ -65,14 +65,24 @@ class AlarmProfileServiceAdapter {
                     };
                 }
 
+                // Ensure userId is a string for transformation
+                // Use user.userId from the unified model if userId parameter is not provided
+                const effectiveUserId = userId || user.userId;
+                const userIdString = effectiveUserId ? (typeof effectiveUserId === 'object' && effectiveUserId.toString ? effectiveUserId.toString() : String(effectiveUserId)) : null;
+                
+                if (!userIdString) {
+                    operationLogger.warn('No userId available for transformation');
+                    throw new ValidationError('userId is required for profile transformation');
+                }
+                
                 // Transform to old format
                 const activeProfiles = (user.alarmProfiles || [])
                     .filter(p => p.isActive === true)
-                    .map(profile => this.transformNewToOld(profile, userId));
+                    .map(profile => this.transformNewToOld(profile, userIdString));
 
                 const inactiveProfiles = (user.alarmProfiles || [])
                     .filter(p => p.isActive === false)
-                    .map(profile => this.transformNewToOld(profile, userId));
+                    .map(profile => this.transformNewToOld(profile, userIdString));
 
                 const result = {
                     activeProfiles,

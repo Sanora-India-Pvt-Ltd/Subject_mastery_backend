@@ -129,24 +129,46 @@ const getAlarmProfiles = async (req, res) => {
         const result = await alarmProfileService.getUserAlarmProfiles(req.userId);
 
         // Format profiles for response
-        const formatProfile = (profile) => ({
-            id: profile.id,
-            userId: profile.userId.toString(),
-            youtubeUrl: profile.youtubeUrl,
-            title: profile.title,
-            description: profile.description || '',
-            alarmsPerDay: profile.alarmsPerDay,
-            selectedDaysPerWeek: profile.selectedDaysPerWeek,
-            startTime: profile.startTime,
-            endTime: profile.endTime,
-            isFixedTime: profile.isFixedTime,
-            fixedTime: profile.fixedTime || null,
-            specificDates: profile.specificDates || null,
-            isActive: profile.isActive,
-            createdAt: profile.createdAt.toISOString(),
-            updatedAt: profile.updatedAt.toISOString(),
-            _id: profile._id.toString()
-        });
+        const formatProfile = (profile) => {
+            // Safely convert userId to string
+            let userIdString = null;
+            if (profile.userId) {
+                if (typeof profile.userId === 'object' && profile.userId.toString) {
+                    userIdString = profile.userId.toString();
+                } else {
+                    userIdString = String(profile.userId);
+                }
+            }
+            
+            // Safely convert _id to string
+            let idString = null;
+            if (profile._id) {
+                if (typeof profile._id === 'object' && profile._id.toString) {
+                    idString = profile._id.toString();
+                } else {
+                    idString = String(profile._id);
+                }
+            }
+            
+            return {
+                id: profile.id,
+                userId: userIdString,
+                youtubeUrl: profile.youtubeUrl,
+                title: profile.title,
+                description: profile.description || '',
+                alarmsPerDay: profile.alarmsPerDay,
+                selectedDaysPerWeek: profile.selectedDaysPerWeek,
+                startTime: profile.startTime,
+                endTime: profile.endTime,
+                isFixedTime: profile.isFixedTime,
+                fixedTime: profile.fixedTime || null,
+                specificDates: profile.specificDates || null,
+                isActive: profile.isActive,
+                createdAt: profile.createdAt ? (profile.createdAt.toISOString ? profile.createdAt.toISOString() : new Date(profile.createdAt).toISOString()) : new Date().toISOString(),
+                updatedAt: profile.updatedAt ? (profile.updatedAt.toISOString ? profile.updatedAt.toISOString() : new Date(profile.updatedAt).toISOString()) : new Date().toISOString(),
+                _id: idString
+            };
+        };
 
         // Prepare response
         const response = {

@@ -101,7 +101,7 @@ const transformNewProfileToOld = (newProfile, userId) => {
     return {
         _id: newProfile._id || null, // May not exist in nested format
         id: String(id).trim(),
-        userId: userId,
+        userId: userId ? (typeof userId === 'object' && userId.toString ? userId.toString() : String(userId)) : null,
         youtubeUrl: String(youtubeUrl).trim(),
         title: String(title).trim(),
         description: String(description || '').trim(),
