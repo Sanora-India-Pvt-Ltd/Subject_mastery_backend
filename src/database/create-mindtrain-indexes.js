@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { connectMindTrainDB, getMindTrainConnection } = require('../config/dbMindTrain');
 const mongoose = require('mongoose');
 
@@ -23,8 +24,17 @@ const createIndexes = async (dryRun = false) => {
         if (!connection) {
             throw new Error('MindTrain database connection not available');
         }
-
-        const MindTrainUser = connection.model('MindTrainUser');
+        
+        console.log(`✅ Connected to database: ${connection.name}`);
+        
+        // Import MindTrainUser model AFTER connection is established
+        // This will register the model with the connection
+        const MindTrainUser = require('../models/MindTrain/MindTrainUser');
+        
+        // Verify model is registered
+        if (!connection.models.MindTrainUser) {
+            throw new Error('MindTrainUser model not registered on connection');
+        }
         
         console.log('📊 Creating indexes for MindTrainUser collection...');
         console.log(`Mode: ${dryRun ? 'DRY RUN (no changes will be made)' : 'LIVE (indexes will be created)'}`);

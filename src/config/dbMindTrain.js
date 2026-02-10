@@ -27,7 +27,10 @@ const connectMindTrainDB = async () => {
             // Extract database name from URI and replace it
             const mainURI = process.env.MONGODB_URI;
             // Replace database name in URI (handles both /database and /database? cases)
-            connectionURI = mainURI.replace(/\/([^/?]+)(\?|$)/, '/mindtrain$2');
+            // Match pattern: /databaseName?query or /databaseName
+            connectionURI = mainURI.replace(/\/([^/?]+)(\?|$)/, (match, dbName, query) => {
+                return '/mindtrain' + (query || '');
+            });
             console.log('⚠️  MONGODB_URI_MINDTRAIN not set, using MONGODB_URI with database name "mindtrain"');
         } else {
             console.error('❌ Neither MONGODB_URI_MINDTRAIN nor MONGODB_URI is defined');

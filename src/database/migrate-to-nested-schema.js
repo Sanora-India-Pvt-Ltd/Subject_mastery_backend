@@ -15,14 +15,12 @@
 const mongoose = require('mongoose');
 require('dotenv').config();
 
-const AlarmProfile = require('../models/MindTrain/AlarmProfile');
-const FCMSchedule = require('../models/MindTrain/FCMSchedule');
-const NotificationLog = require('../models/MindTrain/NotificationLog');
-const SyncHealthLog = require('../models/MindTrain/SyncHealthLog');
-const MindTrainUser = require('../models/MindTrain/MindTrainUser');
-const { getMindTrainConnection } = require('../config/dbMindTrain');
+const { connectMindTrainDB, getMindTrainConnection } = require('../config/dbMindTrain');
 const { transformOldProfileToNew, transformOldFCMToNew, transformOldNotificationToNew, transformOldHealthToNew } = require('../utils/transformers');
 const logger = require('../utils/logger').child({ component: 'migration' });
+
+// Models will be required AFTER connection is established
+let AlarmProfile, FCMSchedule, NotificationLog, SyncHealthLog, MindTrainUser;
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const USER_ID_ARG = process.argv.find(arg => arg.startsWith('--userId='));
@@ -105,11 +103,26 @@ async function runMigration() {
     try {
         logger.info(`Starting migration${DRY_RUN ? ' (DRY RUN)' : ''}...`);
 
+        // Connect to MindTrain database FIRST
+        logger.info('Connecting to MindTrain database...');
+        await connectMindTrainDB();
+        
         // Get MindTrain connection
         const connection = getMindTrainConnection();
         if (!connection) {
             throw new Error('MindTrain database connection not initialized');
         }
+        
+        logger.info(`✅ Connected to database: ${connection.name}`);
+        
+        // NOW require models AFTER connection is established
+        logger.info('Loading models...');
+        AlarmProfile = require('../models/MindTrain/AlarmProfile');
+        FCMSchedule = require('../models/MindTrain/FCMSchedule');
+        NotificationLog = require('../models/MindTrain/NotificationLog');
+        SyncHealthLog = require('../models/MindTrain/SyncHealthLog');
+        MindTrainUser = require('../models/MindTrain/MindTrainUser');
+        logger.info('✅ Models loaded');
 
         if (TARGET_USER_ID) {
             // Migrate single user
@@ -134,9 +147,12 @@ async function runMigration() {
                     results.successful++;
                 } else if (result.skipped) {
                     results.skipped++;
+                } else if (result.dryRun) {
+                    // Dry run mode - count as successful
+                    results.successful++;
                 } else {
                     results.failed++;
-                    results.errors.push({ userId: userId.toString(), error: result.error });
+                    results.errors.push({ userId: userId.toString(), error: result.error || 'Unknown error' });
                 }
 
                 // Progress update every 10 users
