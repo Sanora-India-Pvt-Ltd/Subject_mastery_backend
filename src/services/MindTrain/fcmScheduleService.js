@@ -1,14 +1,26 @@
-const FCMSchedule = require('../../models/MindTrain/FCMSchedule');
-const mongoose = require('mongoose');
+const FCMScheduleServiceAdapter = require('./adapters/fcmScheduleServiceAdapter');
+const mindtrainUserService = require('./mindtrainUser.service');
+const logger = require('../../utils/logger');
+const metrics = require('../../utils/metrics');
+const transformers = require('../../utils/transformers');
 
 /**
  * FCM Schedule Service
  * 
- * Handles FCM notification scheduling logic:
- * - Create/update FCM schedules
- * - Calculate next notification times based on timezone
- * - Manage notification timing
+ * Wrapper service that delegates to FCMScheduleServiceAdapter.
+ * Maintains backward compatibility with existing controllers.
+ * 
+ * NOTE: This service now uses the unified MindTrainUser model via adapters.
+ * The adapter handles transformation between old and new formats.
  */
+
+// Initialize adapter
+const adapter = new FCMScheduleServiceAdapter(
+    mindtrainUserService,
+    logger,
+    metrics,
+    transformers
+);
 
 /**
  * Calculate next notification times based on timezone and current time
@@ -19,38 +31,7 @@ const mongoose = require('mongoose');
  * @returns {Object} Object with nextMorningNotification and nextEveningNotification dates
  */
 const calculateNextNotificationTimes = (morningTime, eveningTime, timezone = 'UTC') => {
-    const now = new Date();
-    
-    // Parse time strings (HH:mm format)
-    const [morningHour, morningMin] = morningTime.split(':').map(Number);
-    const [eveningHour, eveningMin] = eveningTime.split(':').map(Number);
-
-    // Create dates for today's notifications in the specified timezone
-    // Note: This is a simplified calculation. For production, use a library like moment-timezone
-    const todayMorning = new Date(now);
-    todayMorning.setUTCHours(morningHour, morningMin, 0, 0);
-    
-    const todayEvening = new Date(now);
-    todayEvening.setUTCHours(eveningHour, eveningMin, 0, 0);
-
-    // Calculate next morning notification
-    let nextMorning = new Date(todayMorning);
-    if (now >= todayMorning) {
-        // If morning time has passed today, schedule for tomorrow
-        nextMorning.setUTCDate(nextMorning.getUTCDate() + 1);
-    }
-
-    // Calculate next evening notification
-    let nextEvening = new Date(todayEvening);
-    if (now >= todayEvening) {
-        // If evening time has passed today, schedule for tomorrow
-        nextEvening.setUTCDate(nextEvening.getUTCDate() + 1);
-    }
-
-    return {
-        nextMorningNotification: nextMorning,
-        nextEveningNotification: nextEvening
-    };
+    return adapter.calculateNextNotificationTimes(morningTime, eveningTime, timezone);
 };
 
 /**
@@ -65,53 +46,7 @@ const calculateNextNotificationTimes = (morningTime, eveningTime, timezone = 'UT
  * @returns {Promise<Object>} Created/updated FCM schedule
  */
 const createOrUpdateFCMSchedule = async (scheduleData) => {
-    const { userId, activeProfileId, morningNotificationTime, eveningNotificationTime, timezone } = scheduleData;
-
-    if (!userId || !activeProfileId) {
-        throw new Error('userId and activeProfileId are required');
-    }
-
-    if (!morningNotificationTime || !eveningNotificationTime) {
-        throw new Error('morningNotificationTime and eveningNotificationTime are required');
-    }
-
-    const userIdObjectId = mongoose.Types.ObjectId.isValid(userId)
-        ? new mongoose.Types.ObjectId(userId)
-        : userId;
-
-    // Calculate next notification times
-    const { nextMorningNotification, nextEveningNotification } = calculateNextNotificationTimes(
-        morningNotificationTime,
-        eveningNotificationTime,
-        timezone || 'UTC'
-    );
-
-    // Create or update FCM schedule
-    const fcmSchedule = await FCMSchedule.findOneAndUpdate(
-        { userId: userIdObjectId },
-        {
-            $set: {
-                activeProfileId: String(activeProfileId).trim(),
-                morningNotificationTime: String(morningNotificationTime).trim(),
-                eveningNotificationTime: String(eveningNotificationTime).trim(),
-                timezone: timezone || 'UTC',
-                isEnabled: true,
-                nextMorningNotification,
-                nextEveningNotification,
-                updatedAt: new Date()
-            },
-            $setOnInsert: {
-                createdAt: new Date()
-            }
-        },
-        {
-            new: true,
-            upsert: true,
-            runValidators: true
-        }
-    );
-
-    return fcmSchedule;
+    return adapter.createOrUpdateFCMSchedule(scheduleData);
 };
 
 /**
@@ -121,15 +56,7 @@ const createOrUpdateFCMSchedule = async (scheduleData) => {
  * @returns {Promise<Object|null>} FCM schedule or null
  */
 const getFCMSchedule = async (userId) => {
-    if (!userId) {
-        throw new Error('userId is required');
-    }
-
-    const userIdObjectId = mongoose.Types.ObjectId.isValid(userId)
-        ? new mongoose.Types.ObjectId(userId)
-        : userId;
-
-    return await FCMSchedule.findOne({ userId: userIdObjectId }).lean();
+    return adapter.getFCMSchedule(userId);
 };
 
 /**
@@ -140,44 +67,7 @@ const getFCMSchedule = async (userId) => {
  * @returns {Promise<Object>} Updated schedule
  */
 const updateLastSentTime = async (userId, notificationType) => {
-    if (!userId || !notificationType) {
-        throw new Error('userId and notificationType are required');
-    }
-
-    if (!['morning', 'evening'].includes(notificationType)) {
-        throw new Error('notificationType must be "morning" or "evening"');
-    }
-
-    const userIdObjectId = mongoose.Types.ObjectId.isValid(userId)
-        ? new mongoose.Types.ObjectId(userId)
-        : userId;
-
-    const updateFields = {
-        lastSentAt: new Date(),
-        updatedAt: new Date()
-    };
-
-    // Recalculate next notification time for the sent notification
-    const schedule = await FCMSchedule.findOne({ userId: userIdObjectId });
-    if (schedule) {
-        const { nextMorningNotification, nextEveningNotification } = calculateNextNotificationTimes(
-            schedule.morningNotificationTime,
-            schedule.eveningNotificationTime,
-            schedule.timezone
-        );
-
-        if (notificationType === 'morning') {
-            updateFields.nextMorningNotification = nextMorningNotification;
-        } else {
-            updateFields.nextEveningNotification = nextEveningNotification;
-        }
-    }
-
-    return await FCMSchedule.findOneAndUpdate(
-        { userId: userIdObjectId },
-        { $set: updateFields },
-        { new: true, runValidators: true }
-    );
+    return adapter.updateLastSentTime(userId, notificationType);
 };
 
 /**
@@ -189,27 +79,7 @@ const updateLastSentTime = async (userId, notificationType) => {
  * @returns {Promise<Array>} Array of FCM schedules
  */
 const getSchedulesForNotification = async (notificationType, currentTime = new Date(), windowMinutes = 15) => {
-    if (!['morning', 'evening'].includes(notificationType)) {
-        throw new Error('notificationType must be "morning" or "evening"');
-    }
-
-    const windowStart = new Date(currentTime);
-    windowStart.setMinutes(windowStart.getMinutes() - windowMinutes);
-
-    const windowEnd = new Date(currentTime);
-    windowEnd.setMinutes(windowEnd.getMinutes() + windowMinutes);
-
-    const fieldName = notificationType === 'morning' 
-        ? 'nextMorningNotification' 
-        : 'nextEveningNotification';
-
-    return await FCMSchedule.find({
-        isEnabled: true,
-        [fieldName]: {
-            $gte: windowStart,
-            $lte: windowEnd
-        }
-    }).lean();
+    return adapter.getSchedulesForNotification(notificationType, currentTime, windowMinutes);
 };
 
 module.exports = {
@@ -219,4 +89,3 @@ module.exports = {
     getSchedulesForNotification,
     calculateNextNotificationTimes
 };
-

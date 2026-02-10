@@ -11,7 +11,9 @@
     "deploy:staging": "wrangler deploy --env staging",
     "dev:worker": "wrangler dev",
     "worker": "wrangler dev",
-    "test:oauth": "node test-oauth-server.js"
+    "test:oauth": "node test-oauth-server.js",
+    "db:create-mindtrain-indexes": "node src/database/create-mindtrain-indexes.js",
+    "db:create-mindtrain-indexes:dry-run": "node src/database/create-mindtrain-indexes.js --dry-run"
   },
   "keywords": [],
   "author": "",

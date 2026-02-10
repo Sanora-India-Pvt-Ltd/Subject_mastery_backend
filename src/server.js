@@ -977,6 +977,23 @@ try {
     });
 }
 
+// MindTrain unified user routes (new nested schema API)
+try {
+    console.log('🔄 Loading MindTrain unified user routes (nested schema)...');
+    app.use('/api/mindtrain', require('./routes/MindTrain/mindtrainUser.routes'));
+    console.log('✅ MindTrain unified user routes loaded successfully');
+} catch (error) {
+    console.error('❌ Error loading MindTrain unified user routes:', error.message);
+    console.error('Stack:', error.stack);
+    app.use('/api/mindtrain/user', (req, res) => {
+        res.status(500).json({
+            success: false,
+            message: 'MindTrain unified user routes failed to load. Check server logs.',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    });
+}
+
 // Admin routes
 try {
     console.log('🔄 Loading admin routes...');
