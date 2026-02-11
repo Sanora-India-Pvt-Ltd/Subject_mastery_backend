@@ -2,7 +2,6 @@ const express = require('express');
 const { protect } = require('../../middleware/auth');
 const {
     getMindTrainUser,
-    createAlarmProfile,
     updateAlarmProfile,
     activateProfile,
     deleteAlarmProfile,
@@ -30,13 +29,6 @@ const router = express.Router();
  * Frontend computes health status and statistics from this data
  */
 router.get('/user/:userId', protect, getMindTrainUser);
-
-/**
- * POST /api/mindtrain/user/:userId/profile
- * Create alarm profile
- * Creates new profile in alarmProfiles array
- */
-router.post('/user/:userId/profile', protect, createAlarmProfile);
 
 /**
  * PUT /api/mindtrain/user/:userId/profile/:profileId

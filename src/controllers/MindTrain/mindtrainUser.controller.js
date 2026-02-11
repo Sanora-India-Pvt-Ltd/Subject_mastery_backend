@@ -76,100 +76,6 @@ const getMindTrainUser = async (req, res) => {
 };
 
 /**
- * POST /api/mindtrain/user/:userId/profile
- * 
- * Create alarm profile
- * Request body: Complete profile data
- * Creates new profile in alarmProfiles array
- * Auto-updates metadata
- * 
- * Authentication: Required (JWT)
- */
-const createAlarmProfile = async (req, res) => {
-    try {
-        // Validate authentication
-        if (!req.userId) {
-            return res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
-        }
-
-        const { userId: paramUserId } = req.params;
-        const authenticatedUserId = req.userId.toString();
-
-        // Validate that user can only create profiles for themselves
-        if (paramUserId && paramUserId !== authenticatedUserId) {
-            return res.status(403).json({
-                success: false,
-                message: 'Access denied: You can only create profiles for yourself'
-            });
-        }
-
-        const userId = paramUserId || authenticatedUserId;
-        const profileData = req.body || {};
-
-        // Validate required fields
-        const { id, youtubeUrl, title, alarmsPerDay, selectedDaysPerWeek, startTime, endTime } = profileData;
-
-        if (!id || !youtubeUrl || !title || !alarmsPerDay || !selectedDaysPerWeek || !startTime || !endTime) {
-            return res.status(400).json({
-                success: false,
-                message: 'Missing required fields',
-                errors: {
-                    ...(!id && { id: 'id is required' }),
-                    ...(!youtubeUrl && { youtubeUrl: 'youtubeUrl is required' }),
-                    ...(!title && { title: 'title is required' }),
-                    ...(!alarmsPerDay && { alarmsPerDay: 'alarmsPerDay is required' }),
-                    ...(!selectedDaysPerWeek && { selectedDaysPerWeek: 'selectedDaysPerWeek is required' }),
-                    ...(!startTime && { startTime: 'startTime is required' }),
-                    ...(!endTime && { endTime: 'endTime is required' })
-                }
-            });
-        }
-
-        // Ensure user exists
-        let user = await mindtrainUserService.getMindTrainUser(userId);
-        if (!user) {
-            user = await mindtrainUserService.createMindTrainUser(userId);
-        }
-
-        // Check if profile with same id already exists
-        if (user.alarmProfiles && user.alarmProfiles.some(p => p.id === id)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Profile with this id already exists',
-                code: 'PROFILE_EXISTS'
-            });
-        }
-
-        // Add profile (default isActive to false, can be activated separately)
-        const updatedUser = await mindtrainUserService.addAlarmProfile(userId, {
-            ...profileData,
-            isActive: profileData.isActive || false
-        });
-
-        // Find the created profile
-        const createdProfile = updatedUser.alarmProfiles.find(p => p.id === id);
-
-        return res.status(201).json({
-            success: true,
-            message: 'Alarm profile created successfully',
-            data: {
-                profile: createdProfile
-            }
-        });
-    } catch (error) {
-        console.error('Create alarm profile error:', error);
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to create alarm profile',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
-};
-
-/**
  * PUT /api/mindtrain/user/:userId/profile/:profileId
  * 
  * Update alarm profile
@@ -634,7 +540,6 @@ const addSyncHealthLog = async (req, res) => {
 
 module.exports = {
     getMindTrainUser,
-    createAlarmProfile,
     updateAlarmProfile,
     activateProfile,
     deleteAlarmProfile,
