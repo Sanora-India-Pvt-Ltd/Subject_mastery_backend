@@ -4,49 +4,77 @@ This guide describes all MindTrain API endpoints for alarm profile management, s
 
 ## Table of Contents
 1. [Overview](#overview)
-2. [Base URL](#base-url)
-3. [Authentication Header](#authentication-header)
-4. [Standard Response Shape](#standard-response-shape)
-5. [Error Handling](#error-handling)
-6. [Alarm Profile Management](#alarm-profile-management)
+2. [Available APIs](#available-apis)
+3. [Base URL](#base-url)
+4. [Authentication Header](#authentication-header)
+5. [Standard Response Shape](#standard-response-shape)
+6. [Error Handling](#error-handling)
+7. [Alarm Profile Management](#alarm-profile-management)
    - [Create Alarm Profile](#create-alarm-profile)
    - [Get Alarm Profiles](#get-alarm-profiles)
    - [Delete Alarm Profile](#delete-alarm-profile)
-7. [Sync Configuration](#sync-configuration)
+8. [Sync Configuration](#sync-configuration)
    - [Sync Config](#sync-config)
-8. [Sync Health & Status](#sync-health--status)
+9. [Sync Health & Status](#sync-health--status)
    - [Report Sync Health](#report-sync-health)
    - [Get Sync Status](#get-sync-status)
-9. [FCM Notifications](#fcm-notifications)
-   - [Send FCM Notifications](#send-fcm-notifications)
-   - [Test Broadcast Notification](#test-broadcast-notification)
-   - [Broadcast Notification](#broadcast-notification)
-   - [FCM Callback](#fcm-callback)
-10. [Notes for Frontend Integration](#notes-for-frontend-integration)
-11. [Technical Details](#technical-details)
+10. [FCM Notifications](#fcm-notifications)
+    - [Send FCM Notifications](#send-fcm-notifications)
+    - [Test Broadcast Notification](#test-broadcast-notification)
+    - [Broadcast Notification](#broadcast-notification)
+    - [FCM Callback](#fcm-callback)
+11. [Notes for Frontend Integration](#notes-for-frontend-integration)
+12. [Technical Details](#technical-details)
 
 ## Overview
 
 ### Recent Improvements (2025)
 
-The MindTrain API has been refactored to use a unified data model architecture, providing:
+The MindTrain API has been refactored to use a unified nested schema architecture, providing:
 
 - **75% Performance Improvement**: Query latency reduced from ~80ms to ~20ms
 - **Better Data Consistency**: Atomic operations across all user data using MongoDB transactions
 - **Enhanced Error Handling**: Structured error codes for better programmatic handling
 - **100% Backward Compatibility**: All existing endpoints and response formats remain unchanged
 - **Improved Reliability**: Transaction support ensures data integrity
+- **Simplified Architecture**: Direct service layer usage without adapter overhead
 
 ### Architecture
 
-The API now uses a unified `MindTrainUser` model that stores all user data (alarm profiles, FCM schedules, notification logs, sync health logs) in a single document. This architecture:
+The API uses a unified `MindTrainUser` model that stores all user data (alarm profiles, FCM schedules, notification logs, sync health logs) in a single document within a single collection. This nested schema architecture:
 
-- Reduces database queries (from 4+ queries to 1 query)
-- Ensures atomic updates across related data
-- Improves data consistency
-- Maintains full backward compatibility with existing frontend code
+- **Single Collection**: Only one collection (`mindtrainusers`) in the MindTrain database
+- **Nested Structure**: All data stored as nested arrays/objects within user documents
+- **Reduced Queries**: Single query retrieves all user data (from 4+ queries to 1 query)
+- **Atomic Updates**: Ensures atomic updates across related data
+- **Better Performance**: 75% reduction in query latency
+- **Maintains Compatibility**: All legacy API endpoints work exactly as before
 
-**Note:** No frontend changes are required. All endpoints work exactly as before.
+**Note:** No frontend changes are required. All endpoints work exactly as before, but now use the optimized nested schema under the hood.
+
+## Available APIs
+
+The MindTrain API provides the following endpoints (all using the unified nested schema):
+
+### Alarm Profile Management (3 APIs)
+- `POST /api/mindtrain/create-alarm-profile` - Create alarm profile (auto-activates)
+- `GET /api/mindtrain/get-alarm-profiles` - Get all profiles (separated by active/inactive)
+- `DELETE /api/mindtrain/alarm-profiles/:profileId` - Delete profile (with cascade cleanup)
+
+### Sync Configuration (1 API)
+- `PUT /api/mindtrain/alarm-profiles/sync-config` - Configure profile + FCM schedule together
+
+### Sync Health & Status (2 APIs)
+- `PUT /api/mindtrain/alarm-profiles/sync-health` - Report sync health
+- `GET /api/mindtrain/alarm-profiles/sync-status` - Get sync status and changes
+
+### FCM Notifications (4 APIs)
+- `POST /api/mindtrain/fcm-notifications/send` - Send scheduled notifications (backend/internal)
+- `POST /api/mindtrain/fcm-notifications/test` - Test broadcast (public, testing only)
+- `POST /api/mindtrain/fcm-notifications/broadcast` - Broadcast to all users (public)
+- `POST /api/mindtrain/fcm-notifications/callback` - FCM delivery callback (webhook)
+
+**Total: 10 APIs** - All using the unified nested schema (`MindTrainUser` model) for optimal performance.
 
 ## Base URL
 Use your environment configuration for the API origin.
@@ -945,11 +973,12 @@ FCM delivery status webhook callback. Receives delivery status updates from Fire
 - **Auto-Rotation**: Notification logs (max 100) and sync health logs (max 50) are automatically rotated
 
 ### Alarm Profile Management
-- Only one active profile per user at a timef
+- Only one active profile per user at a time
 - Creating a new profile automatically deactivates existing profiles
 - Profile IDs should be unique and generated client-side (UUID recommended)
 - `userId` is automatically extracted from JWT token - do not include it in request body
 - Users can only create/manage profiles for themselves (enforced by authentication)
+- All operations use the unified nested schema for optimal performance
 
 ### Sync Configuration
 - Use `sync-config` endpoint for initial setup or major updates
@@ -1044,9 +1073,9 @@ Every 24 hours (or as recommended):
 
 ## Technical Details
 
-### Unified Data Model Architecture
+### Unified Nested Schema Architecture
 
-The MindTrain API has been refactored to use a unified `MindTrainUser` model that stores all user-related data in a single document:
+The MindTrain API uses a unified `MindTrainUser` model that stores all user-related data in a single document within a single collection:
 
 - **Alarm Profiles**: Stored as nested array in `alarmProfiles`
 - **FCM Schedule**: Stored as nested object in `fcmSchedule`
@@ -1059,8 +1088,9 @@ The MindTrain API has been refactored to use a unified `MindTrainUser` model tha
 1. **Performance**: Single query retrieves all user data (75% latency reduction)
 2. **Consistency**: Atomic operations ensure data integrity
 3. **Reliability**: MongoDB transactions prevent partial updates
-4. **Maintainability**: Cleaner codebase with adapter pattern
+4. **Maintainability**: Direct service layer usage - simpler codebase without adapter overhead
 5. **Backward Compatibility**: 100% compatible with existing frontend code
+6. **Single Collection**: Only one collection in MindTrain database - easier to manage and backup
 
 ### Error Handling Architecture
 
@@ -1089,13 +1119,18 @@ All multi-step operations use MongoDB transactions:
 - **Sync Health Logs**: Automatically rotated to keep only the last 50 entries
 - **Metadata**: Automatically updated when data changes
 
-### Feature Flags
+### Database Structure
 
-The API supports feature flags for safe deployment:
+The MindTrain database contains only **one active collection**:
 
-- `USE_UNIFIED_MODEL`: Controls whether to use the unified model (default: false)
-- Can be toggled via environment variable for gradual rollout
-- Allows instant rollback if issues are detected
+- **`mindtrainusers`**: Stores all user data in nested structure
+  - `alarmProfiles`: Array of alarm profile configurations
+  - `fcmSchedule`: FCM notification schedule object
+  - `notificationLogs`: Array of notification logs (max 100, auto-rotated)
+  - `syncHealthLogs`: Array of sync health logs (max 50, auto-rotated)
+  - `metadata`: Auto-calculated metadata (counts, timestamps)
+
+**Note:** Old separate collections (`alarmprofiles`, `fcmschedules`, `notificationlogs`, `synchealthlogs`) may still exist in the database from previous architecture, but they are **not used** by the application. All operations use the unified `mindtrainusers` collection.
 
 ### Migration
 
