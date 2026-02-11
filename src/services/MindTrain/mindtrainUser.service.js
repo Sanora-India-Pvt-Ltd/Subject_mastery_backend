@@ -796,6 +796,159 @@ const findUsersNeedingSync = async (limit = 100) => {
     }, { operation: 'find_users_sync' });
 };
 
+/**
+ * Update notification log status
+ * Updates notification log in nested array by notificationId
+ * 
+ * @param {string} notificationId - Notification ID
+ * @param {Object} updates - Status updates (status, deliveredAt, failedAt, deliveryError, etc.)
+ * @returns {Promise<Object|null>} Updated user document or null if not found
+ */
+const updateNotificationLog = async (notificationId, updates) => {
+    const operationLogger = logger.child({ 
+        operation: 'updateNotificationLog', 
+        notificationId
+    });
+    
+    return await metrics.record('mindtrain_notification_update', async () => {
+        try {
+            if (!notificationId) {
+                throw new ValidationError('notificationId is required');
+            }
+
+            const updateFields = {};
+            const now = new Date();
+
+            // Build update object for array element
+            Object.keys(updates).forEach(key => {
+                if (key !== 'notificationId' && key !== 'createdAt') {
+                    updateFields[`notificationLogs.$.${key}`] = updates[key];
+                }
+            });
+
+            // Always update updatedAt
+            updateFields['notificationLogs.$.updatedAt'] = now;
+            updateFields['updatedAt'] = now;
+
+            operationLogger.debug('Updating notification log');
+
+            const user = await MindTrainUser.findOneAndUpdate(
+                {
+                    'notificationLogs.notificationId': notificationId
+                },
+                { $set: updateFields },
+                { new: true }
+            ).exec();
+
+            if (!user) {
+                operationLogger.debug('Notification log not found');
+                return null;
+            }
+
+            await user.save();
+
+            operationLogger.info('Notification log updated successfully', { notificationId });
+            metrics.increment('mindtrain_notification_updated', 1);
+
+            return user.toObject();
+        } catch (error) {
+            if (error instanceof ValidationError) {
+                throw error;
+            }
+            operationLogger.error('Error updating notification log', error, { notificationId });
+            throw new DatabaseError('Failed to update notification log', error);
+        }
+    }, { operation: 'update_notification' });
+};
+
+/**
+ * Get users with FCM schedules that need notifications
+ * Finds users with enabled FCM schedules and active profiles that match notification time window
+ * 
+ * @param {string} notificationType - 'morning' or 'evening'
+ * @param {Date} currentTime - Current time for comparison (default: now)
+ * @param {number} windowMinutes - Time window in minutes (default: 15)
+ * @returns {Promise<Array>} Array of user documents with matching FCM schedules
+ */
+const getUsersForNotification = async (notificationType, currentTime = new Date(), windowMinutes = 15) => {
+    const operationLogger = logger.child({ 
+        operation: 'getUsersForNotification', 
+        notificationType,
+        windowMinutes
+    });
+    
+    return await metrics.record('mindtrain_users_notification_find', async () => {
+        try {
+            if (!['morning', 'evening'].includes(notificationType)) {
+                throw new ValidationError('notificationType must be "morning" or "evening"');
+            }
+
+            const windowStart = new Date(currentTime);
+            const windowEnd = new Date(currentTime);
+            windowEnd.setMinutes(windowEnd.getMinutes() + windowMinutes);
+
+            operationLogger.debug('Finding users for notification', { 
+                notificationType, 
+                windowStart: windowStart.toISOString(),
+                windowEnd: windowEnd.toISOString()
+            });
+
+            // Find users with:
+            // 1. Enabled FCM schedule
+            // 2. Active profile
+            // 3. Notification time within window
+            const timeField = notificationType === 'morning' 
+                ? 'fcmSchedule.morningNotificationTime' 
+                : 'fcmSchedule.eveningNotificationTime';
+
+            // Query users with enabled schedules and active profiles
+            const users = await MindTrainUser.find({
+                'fcmSchedule.isEnabled': true,
+                'alarmProfiles.isActive': true,
+                'fcmSchedule.activeProfileId': { $exists: true, $ne: null }
+            })
+            .lean()
+            .exec();
+
+            // Filter users whose notification time is within the window
+            // Note: This is a simplified check - in production, you'd want to calculate
+            // actual next notification time based on timezone and current time
+            const matchingUsers = users.filter(user => {
+                if (!user.fcmSchedule || !user.fcmSchedule.isEnabled) return false;
+                
+                const notificationTime = notificationType === 'morning'
+                    ? user.fcmSchedule.morningNotificationTime
+                    : user.fcmSchedule.eveningNotificationTime;
+
+                if (!notificationTime) return false;
+
+                // Parse time (HH:mm format) and check if it's within window
+                // This is simplified - in production, consider timezone and actual next notification time
+                const [hours, minutes] = notificationTime.split(':').map(Number);
+                const notificationDate = new Date(currentTime);
+                notificationDate.setHours(hours, minutes, 0, 0);
+
+                // Check if notification time is within window
+                return notificationDate >= windowStart && notificationDate <= windowEnd;
+            });
+
+            operationLogger.info('Found users for notification', { 
+                count: matchingUsers.length,
+                notificationType 
+            });
+            metrics.gauge('mindtrain_users_for_notification', matchingUsers.length);
+
+            return matchingUsers;
+        } catch (error) {
+            if (error instanceof ValidationError) {
+                throw error;
+            }
+            operationLogger.error('Error finding users for notification', error);
+            throw new DatabaseError('Failed to find users for notification', error);
+        }
+    }, { operation: 'get_users_notification' });
+};
+
 module.exports = {
     getMindTrainUser,
     createMindTrainUser,
@@ -805,8 +958,10 @@ module.exports = {
     deleteAlarmProfile,
     updateFCMSchedule,
     addNotificationLog,
+    updateNotificationLog,
     addSyncHealthLog,
     getFailedNotifications,
-    findUsersNeedingSync
+    findUsersNeedingSync,
+    getUsersForNotification
 };
 

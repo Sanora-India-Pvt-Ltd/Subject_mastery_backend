@@ -112,11 +112,16 @@ const syncStatus = async (req, res) => {
         }
 
         // Get user's active profile and FCM schedule
-        const alarmProfileService = require('../../services/MindTrain/alarmProfileService');
-        const fcmScheduleService = require('../../services/MindTrain/fcmScheduleService');
+        const mindtrainUserService = require('../../services/MindTrain/mindtrainUser.service');
+        
+        let user = await mindtrainUserService.getMindTrainUser(req.userId);
+        if (!user) {
+            user = await mindtrainUserService.createMindTrainUser(req.userId);
+        }
 
-        const activeProfile = await alarmProfileService.getActiveAlarmProfile(req.userId);
-        const fcmSchedule = await fcmScheduleService.getFCMSchedule(req.userId);
+        // Get active profile from nested array
+        const activeProfile = user.alarmProfiles?.find(p => p.isActive === true) || null;
+        const fcmSchedule = user.fcmSchedule || null;
 
         // Detect sync patterns
         const patterns = await syncHealthService.detectSyncPatterns(req.userId);
@@ -130,17 +135,23 @@ const syncStatus = async (req, res) => {
         if (lastSyncTime) {
             const lastSyncDate = new Date(lastSyncTime);
             
-            if (activeProfile && activeProfile.updatedAt > lastSyncDate) {
-                needsSync = true;
-                reason = 'Profile updated on server';
+            if (activeProfile) {
+                const profileUpdatedAt = activeProfile.updatedAt 
+                    ? (activeProfile.updatedAt.toISOString ? new Date(activeProfile.updatedAt) : new Date(activeProfile.updatedAt))
+                    : null;
                 
-                // Determine which fields changed (simplified - in production, track field-level changes)
-                profileChanges.push({
-                    id: activeProfile.id,
-                    action: 'updated',
-                    fields: ['profile'],
-                    changedAt: activeProfile.updatedAt.toISOString()
-                });
+                if (profileUpdatedAt && profileUpdatedAt > lastSyncDate) {
+                    needsSync = true;
+                    reason = 'Profile updated on server';
+                    
+                    // Determine which fields changed (simplified - in production, track field-level changes)
+                    profileChanges.push({
+                        id: activeProfile.id,
+                        action: 'updated',
+                        fields: ['profile'],
+                        changedAt: profileUpdatedAt.toISOString()
+                    });
+                }
             }
         } else {
             // If no lastSyncTime, assume sync is needed
@@ -163,10 +174,15 @@ const syncStatus = async (req, res) => {
         let fcmScheduleUpdate = null;
         if (fcmSchedule && lastSyncTime) {
             const lastSyncDate = new Date(lastSyncTime);
-            if (fcmSchedule.updatedAt > lastSyncDate) {
+            const scheduleUpdatedAt = fcmSchedule.updatedAt 
+                ? (fcmSchedule.updatedAt.toISOString ? new Date(fcmSchedule.updatedAt) : new Date(fcmSchedule.updatedAt))
+                : null;
+            
+            if (scheduleUpdatedAt && scheduleUpdatedAt > lastSyncDate) {
                 fcmScheduleUpdate = {
                     morningNotificationTime: fcmSchedule.morningNotificationTime,
-                    eveningNotificationTime: fcmSchedule.eveningNotificationTime
+                    eveningNotificationTime: fcmSchedule.eveningNotificationTime,
+                    timezone: fcmSchedule.timezone
                 };
             }
         }

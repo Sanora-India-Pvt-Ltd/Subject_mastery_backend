@@ -1,6 +1,4 @@
-const fcmScheduleService = require('../../services/MindTrain/fcmScheduleService');
-const alarmProfileService = require('../../services/MindTrain/alarmProfileService');
-const NotificationLog = require('../../models/MindTrain/NotificationLog');
+const mindtrainUserService = require('../../services/MindTrain/mindtrainUser.service');
 const crypto = require('crypto');
 
 /**
@@ -50,14 +48,14 @@ const sendFCMNotifications = async (req, res) => {
             });
         }
 
-        // Get schedules that need notifications
-        const schedules = await fcmScheduleService.getSchedulesForNotification(
+        // Get users that need notifications
+        const users = await mindtrainUserService.getUsersForNotification(
             notificationType,
             new Date(),
             15 // 15 minute window
         );
 
-        const targetUserCount = schedules.length;
+        const targetUserCount = users.length;
         const estimatedTime = Math.ceil(targetUserCount / batchSize) * 5; // 5 seconds per batch
 
         // Generate job ID
@@ -123,32 +121,24 @@ const fcmCallback = async (req, res) => {
 
         // Update notification logs for delivered notifications
         if (notificationIds.length > 0 && status === 'delivered') {
-            await NotificationLog.updateMany(
-                { notificationId: { $in: notificationIds } },
-                {
-                    $set: {
-                        status: 'delivered',
-                        deliveredAt: deliveredAt ? new Date(deliveredAt) : new Date(),
-                        updatedAt: new Date()
-                    }
-                }
-            );
+            for (const notificationId of notificationIds) {
+                await mindtrainUserService.updateNotificationLog(notificationId, {
+                    status: 'delivered',
+                    deliveredAt: deliveredAt ? new Date(deliveredAt) : new Date()
+                });
+            }
         }
 
         // Update notification logs for failed notifications
         if (failedIds && Array.isArray(failedIds) && failedIds.length > 0) {
-            await NotificationLog.updateMany(
-                { notificationId: { $in: failedIds } },
-                {
-                    $set: {
-                        status: 'failed',
-                        failedAt: new Date(),
-                        deliveryError: failureReason || 'Unknown error',
-                        deliveryRetries: { $inc: 1 },
-                        updatedAt: new Date()
-                    }
-                }
-            );
+            for (const notificationId of failedIds) {
+                await mindtrainUserService.updateNotificationLog(notificationId, {
+                    status: 'failed',
+                    failedAt: new Date(),
+                    deliveryError: failureReason || 'Unknown error',
+                    deliveryRetries: 1 // Will be incremented by service if needed
+                });
+            }
         }
 
         // TODO: Update deviceSyncStatus in AlarmProfile

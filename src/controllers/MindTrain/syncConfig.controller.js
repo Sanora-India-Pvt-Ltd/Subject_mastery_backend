@@ -1,5 +1,4 @@
-const alarmProfileService = require('../../services/MindTrain/alarmProfileService');
-const fcmScheduleService = require('../../services/MindTrain/fcmScheduleService');
+const mindtrainUserService = require('../../services/MindTrain/mindtrainUser.service');
 
 /**
  * PUT /api/mindtrain/alarm-profiles/sync-config
@@ -87,19 +86,53 @@ const syncConfig = async (req, res) => {
             });
         }
 
-        // Create/update alarm profile
-        const profileResult = await alarmProfileService.createOrUpdateAlarmProfile({
-            ...alarmProfile,
-            userId: authenticatedUserId
-        });
+        // Ensure user exists
+        let user = await mindtrainUserService.getMindTrainUser(authenticatedUserId);
+        if (!user) {
+            user = await mindtrainUserService.createMindTrainUser(authenticatedUserId);
+        }
 
-        // Create/update FCM schedule
-        const fcmSchedule = await fcmScheduleService.createOrUpdateFCMSchedule({
-            userId: authenticatedUserId,
+        // Check if profile already exists
+        const existingProfile = user.alarmProfiles?.find(p => p.id === id);
+        let updatedUser;
+        let profile;
+
+        if (existingProfile) {
+            // Update existing profile
+            const updates = {
+                youtubeUrl,
+                title,
+                alarmsPerDay,
+                selectedDaysPerWeek,
+                startTime,
+                endTime,
+                isActive: isActive !== undefined ? isActive : existingProfile.isActive
+            };
+            updatedUser = await mindtrainUserService.updateAlarmProfile(authenticatedUserId, id, updates);
+            profile = updatedUser.alarmProfiles.find(p => p.id === id);
+        } else {
+            // Create new profile
+            const profileToAdd = {
+                ...alarmProfile,
+                isActive: isActive !== undefined ? isActive : false
+            };
+            updatedUser = await mindtrainUserService.addAlarmProfile(authenticatedUserId, profileToAdd);
+            profile = updatedUser.alarmProfiles.find(p => p.id === id);
+        }
+
+        // Activate profile if isActive is true
+        if (isActive === true) {
+            updatedUser = await mindtrainUserService.activateProfile(authenticatedUserId, id);
+            profile = updatedUser.alarmProfiles.find(p => p.id === id);
+        }
+
+        // Update FCM schedule
+        updatedUser = await mindtrainUserService.updateFCMSchedule(authenticatedUserId, {
             activeProfileId: id,
             morningNotificationTime,
             eveningNotificationTime,
-            timezone: timezone || 'UTC'
+            timezone: timezone || 'UTC',
+            isEnabled: true
         });
 
         // Calculate next sync check time (1 hour from now)
@@ -112,21 +145,21 @@ const syncConfig = async (req, res) => {
             message: 'Profile and FCM schedule configured',
             data: {
                 profile: {
-                    id: profileResult.profile.id,
-                    userId: profileResult.profile.userId.toString(),
-                    isActive: profileResult.profile.isActive,
-                    lastSyncTimestamp: profileResult.profile.lastSyncTimestamp || null,
-                    lastSyncSource: profileResult.profile.lastSyncSource || null,
-                    syncHealthScore: profileResult.profile.syncHealthScore || 100,
+                    id: profile.id,
+                    userId: authenticatedUserId,
+                    isActive: profile.isActive,
+                    lastSyncTimestamp: profile.lastSyncTimestamp || null,
+                    lastSyncSource: profile.lastSyncSource || null,
+                    syncHealthScore: profile.syncHealthScore || 100,
                     nextSyncCheckTime: nextSyncCheckTime.toISOString()
                 },
                 fcmSchedule: {
-                    userId: fcmSchedule.userId.toString(),
-                    activeProfileId: fcmSchedule.activeProfileId,
-                    morningNotificationTime: fcmSchedule.morningNotificationTime,
-                    eveningNotificationTime: fcmSchedule.eveningNotificationTime,
-                    nextMorningNotification: fcmSchedule.nextMorningNotification.toISOString(),
-                    nextEveningNotification: fcmSchedule.nextEveningNotification.toISOString()
+                    userId: authenticatedUserId,
+                    activeProfileId: updatedUser.fcmSchedule.activeProfileId,
+                    morningNotificationTime: updatedUser.fcmSchedule.morningNotificationTime,
+                    eveningNotificationTime: updatedUser.fcmSchedule.eveningNotificationTime,
+                    timezone: updatedUser.fcmSchedule.timezone,
+                    isEnabled: updatedUser.fcmSchedule.isEnabled
                 }
             }
         };
