@@ -1,7 +1,6 @@
 const express = require('express');
 const { protect } = require('../../middleware/auth');
 const {
-    getMindTrainUser,
     updateAlarmProfile,
     activateProfile,
     deleteAlarmProfile,
@@ -15,20 +14,10 @@ const router = express.Router();
 /**
  * MindTrain User Routes - Unified Nested Schema API
  * 
- * Hybrid API Approach:
- * - Single GET endpoint for all data (reduces 4 calls to 1)
- * - Specific endpoints for each operation (clearer, easier to test)
+ * Specific endpoints for each operation (clearer, easier to test)
  * 
  * All routes require authentication (JWT)
  */
-
-/**
- * GET /api/mindtrain/user/:userId
- * Get complete user data (all-in-one)
- * Returns: alarmProfiles, fcmSchedule, notificationLogs, syncHealthLogs, metadata
- * Frontend computes health status and statistics from this data
- */
-router.get('/user/:userId', protect, getMindTrainUser);
 
 /**
  * PUT /api/mindtrain/user/:userId/profile/:profileId
