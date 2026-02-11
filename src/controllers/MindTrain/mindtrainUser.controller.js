@@ -9,6 +9,73 @@ const mongoose = require('mongoose');
  */
 
 /**
+ * GET /api/mindtrain/user/:userId
+ * 
+ * Get complete user data (all-in-one)
+ * Returns: alarmProfiles, fcmSchedule, notificationLogs, syncHealthLogs, metadata
+ * Frontend computes health status and statistics from this data
+ * Single query, single response, maximum performance
+ * 
+ * Authentication: Required (JWT)
+ */
+const getMindTrainUser = async (req, res) => {
+    try {
+        // Validate authentication
+        if (!req.userId) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required'
+            });
+        }
+
+        // Get userId from params or use authenticated userId
+        const { userId: paramUserId } = req.params;
+        const authenticatedUserId = req.userId.toString();
+
+        // Validate that user can only access their own data
+        if (paramUserId && paramUserId !== authenticatedUserId) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied: You can only access your own data'
+            });
+        }
+
+        const userId = paramUserId || authenticatedUserId;
+
+        // Get complete user data
+        let user = await mindtrainUserService.getMindTrainUser(userId);
+
+        // If user doesn't exist, create one with default values
+        if (!user) {
+            user = await mindtrainUserService.createMindTrainUser(userId);
+        }
+
+        // Prepare response
+        const response = {
+            success: true,
+            message: 'User data retrieved successfully',
+            data: {
+                userId: user.userId.toString(),
+                alarmProfiles: user.alarmProfiles || [],
+                fcmSchedule: user.fcmSchedule || {},
+                notificationLogs: user.notificationLogs || [],
+                syncHealthLogs: user.syncHealthLogs || [],
+                metadata: user.metadata || {}
+            }
+        };
+
+        return res.status(200).json(response);
+    } catch (error) {
+        console.error('Get MindTrain user error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve user data',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
  * PUT /api/mindtrain/user/:userId/profile/:profileId
  * 
  * Update alarm profile
@@ -472,6 +539,7 @@ const addSyncHealthLog = async (req, res) => {
 };
 
 module.exports = {
+    getMindTrainUser,
     updateAlarmProfile,
     activateProfile,
     deleteAlarmProfile,
