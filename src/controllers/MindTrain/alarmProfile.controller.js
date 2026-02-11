@@ -1,9 +1,4 @@
-const alarmProfileService = require('../../services/MindTrain/alarmProfileService');
-const AlarmProfile = require('../../models/MindTrain/AlarmProfile');
-const FCMSchedule = require('../../models/MindTrain/FCMSchedule');
-const NotificationLog = require('../../models/MindTrain/NotificationLog');
-const { getMindTrainConnection } = require('../../config/dbMindTrain');
-const mongoose = require('mongoose');
+const mindtrainUserService = require('../../services/MindTrain/mindtrainUser.service');
 
 /**
  * POST /api/mindtrain/create-alarm-profile
@@ -46,45 +41,76 @@ const createAlarmProfile = async (req, res) => {
             });
         }
 
-        // Ensure isActive is true for new profile (as per requirement)
-        profileData.isActive = true;
+        // Ensure user exists
+        let user = await mindtrainUserService.getMindTrainUser(authenticatedUserId);
+        if (!user) {
+            user = await mindtrainUserService.createMindTrainUser(authenticatedUserId);
+        }
 
-        // Create/update alarm profile (userId comes from JWT authentication)
-        const result = await alarmProfileService.createOrUpdateAlarmProfile({
+        // Check if profile with same id already exists
+        if (user.alarmProfiles && user.alarmProfiles.some(p => p.id === id)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Profile with this id already exists',
+                code: 'PROFILE_EXISTS'
+            });
+        }
+
+        // Add profile (default isActive to false first, then activate)
+        const profileToAdd = {
             ...profileData,
-            userId: authenticatedUserId
-        });
+            isActive: false // Will be activated below
+        };
+        
+        let updatedUser = await mindtrainUserService.addAlarmProfile(authenticatedUserId, profileToAdd);
 
-        // Prepare response
+        // Auto-activate this profile and deactivate all others (as per old endpoint behavior)
+        updatedUser = await mindtrainUserService.activateProfile(authenticatedUserId, id);
+
+        // Find the created profile
+        const createdProfile = updatedUser.alarmProfiles.find(p => p.id === id);
+        if (!createdProfile) {
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to create profile'
+            });
+        }
+
+        // Get deactivated profiles for response (all profiles except the created one)
+        const deactivatedProfiles = (updatedUser.alarmProfiles || [])
+            .filter(p => p.id !== id && !p.isActive)
+            .map(profile => ({
+                id: profile.id,
+                title: profile.title,
+                _id: null, // Not available in nested format
+                isActive: profile.isActive
+            }));
+
+        // Prepare response in old format for backward compatibility
         const response = {
             success: true,
             message: 'Alarm profile created successfully',
             data: {
                 createdProfile: {
-                    id: result.profile.id,
-                    userId: result.profile.userId.toString(),
-                    youtubeUrl: result.profile.youtubeUrl,
-                    title: result.profile.title,
-                    description: result.profile.description || '',
-                    alarmsPerDay: result.profile.alarmsPerDay,
-                    selectedDaysPerWeek: result.profile.selectedDaysPerWeek,
-                    startTime: result.profile.startTime,
-                    endTime: result.profile.endTime,
-                    isFixedTime: result.profile.isFixedTime,
-                    fixedTime: result.profile.fixedTime || null,
-                    specificDates: result.profile.specificDates || null,
-                    isActive: result.profile.isActive,
-                    createdAt: result.profile.createdAt.toISOString(),
-                    updatedAt: result.profile.updatedAt.toISOString(),
-                    _id: result.profile._id.toString()
+                    id: createdProfile.id,
+                    userId: authenticatedUserId,
+                    youtubeUrl: createdProfile.youtubeUrl,
+                    title: createdProfile.title,
+                    description: createdProfile.description || '',
+                    alarmsPerDay: createdProfile.alarmsPerDay,
+                    selectedDaysPerWeek: createdProfile.selectedDaysPerWeek,
+                    startTime: createdProfile.startTime,
+                    endTime: createdProfile.endTime,
+                    isFixedTime: createdProfile.isFixedTime,
+                    fixedTime: createdProfile.fixedTime || null,
+                    specificDates: createdProfile.specificDates || null,
+                    isActive: createdProfile.isActive,
+                    createdAt: createdProfile.createdAt ? (createdProfile.createdAt.toISOString ? createdProfile.createdAt.toISOString() : new Date(createdProfile.createdAt).toISOString()) : new Date().toISOString(),
+                    updatedAt: createdProfile.updatedAt ? (createdProfile.updatedAt.toISOString ? createdProfile.updatedAt.toISOString() : new Date(createdProfile.updatedAt).toISOString()) : new Date().toISOString(),
+                    _id: null // Not available in nested format
                 },
-                deactivatedProfiles: result.deactivatedProfiles.map(profile => ({
-                    id: profile.id,
-                    title: profile.title,
-                    _id: profile._id.toString(),
-                    isActive: profile.isActive
-                })),
-                deactivatedCount: result.deactivatedCount
+                deactivatedProfiles: deactivatedProfiles,
+                deactivatedCount: deactivatedProfiles.length
             }
         };
 
@@ -125,34 +151,29 @@ const getAlarmProfiles = async (req, res) => {
             });
         }
 
-        // Get all alarm profiles for the user
-        const result = await alarmProfileService.getUserAlarmProfiles(req.userId);
+        // Get user data with all profiles
+        let user = await mindtrainUserService.getMindTrainUser(req.userId);
+        if (!user) {
+            user = await mindtrainUserService.createMindTrainUser(req.userId);
+        }
 
-        // Format profiles for response
+        // Separate profiles into active and inactive
+        const activeProfiles = (user.alarmProfiles || []).filter(p => p.isActive === true);
+        const inactiveProfiles = (user.alarmProfiles || []).filter(p => p.isActive === false);
+        
+        const result = {
+            activeProfiles,
+            inactiveProfiles,
+            totalActive: activeProfiles.length,
+            totalInactive: inactiveProfiles.length,
+            totalProfiles: (user.alarmProfiles || []).length
+        };
+
+        // Format profiles for response (nested profiles don't have userId or _id at profile level)
         const formatProfile = (profile) => {
-            // Safely convert userId to string
-            let userIdString = null;
-            if (profile.userId) {
-                if (typeof profile.userId === 'object' && profile.userId.toString) {
-                    userIdString = profile.userId.toString();
-                } else {
-                    userIdString = String(profile.userId);
-                }
-            }
-            
-            // Safely convert _id to string
-            let idString = null;
-            if (profile._id) {
-                if (typeof profile._id === 'object' && profile._id.toString) {
-                    idString = profile._id.toString();
-                } else {
-                    idString = String(profile._id);
-                }
-            }
-            
             return {
                 id: profile.id,
-                userId: userIdString,
+                userId: req.userId.toString(), // From authenticated user
                 youtubeUrl: profile.youtubeUrl,
                 title: profile.title,
                 description: profile.description || '',
@@ -166,7 +187,7 @@ const getAlarmProfiles = async (req, res) => {
                 isActive: profile.isActive,
                 createdAt: profile.createdAt ? (profile.createdAt.toISOString ? profile.createdAt.toISOString() : new Date(profile.createdAt).toISOString()) : new Date().toISOString(),
                 updatedAt: profile.updatedAt ? (profile.updatedAt.toISOString ? profile.updatedAt.toISOString() : new Date(profile.updatedAt).toISOString()) : new Date().toISOString(),
-                _id: idString
+                _id: null // Not available in nested format
             };
         };
 
@@ -207,26 +228,12 @@ const getAlarmProfiles = async (req, res) => {
  * Authentication: Required (JWT)
  */
 const deleteAlarmProfile = async (req, res) => {
-    // Get MindTrain connection for transaction
-    const mindTrainConnection = getMindTrainConnection();
-    if (!mindTrainConnection) {
-        return res.status(500).json({
-            success: false,
-            message: 'Database connection not available',
-            code: 'DATABASE_ERROR'
-        });
-    }
-
-    const session = await mindTrainConnection.startSession();
-    session.startTransaction();
-
     try {
         const { profileId } = req.params;
         const userId = req.userId; // From JWT middleware
 
         // Validate authentication
         if (!userId) {
-            await session.abortTransaction();
             return res.status(401).json({
                 success: false,
                 message: 'Authentication required',
@@ -236,7 +243,6 @@ const deleteAlarmProfile = async (req, res) => {
 
         // Validate profileId
         if (!profileId) {
-            await session.abortTransaction();
             return res.status(400).json({
                 success: false,
                 message: 'Profile ID is required',
@@ -244,17 +250,18 @@ const deleteAlarmProfile = async (req, res) => {
             });
         }
 
-        console.log(`[Delete] User: ${userId}, Profile: ${profileId}`);
+        // Get user to check if profile exists and get profile info
+        const user = await mindtrainUserService.getMindTrainUser(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found',
+                code: 'USER_NOT_FOUND'
+            });
+        }
 
-        // Step 1: Verify ownership and get profile
-        const profile = await AlarmProfile.findOne({
-            id: profileId,
-            userId: userId,
-        }).session(session);
-
+        const profile = user.alarmProfiles?.find(p => p.id === profileId);
         if (!profile) {
-            await session.abortTransaction();
-            session.endSession();
             return res.status(404).json({
                 success: false,
                 message: 'Profile not found',
@@ -262,107 +269,35 @@ const deleteAlarmProfile = async (req, res) => {
             });
         }
 
-        console.log(`[Delete] Found profile: ${profile.title}`);
+        const wasActive = profile.isActive || false;
 
-        // Step 2: Check if has active alarms TODAY
-        // Note: AlarmTrigger model doesn't exist in this codebase, so we skip this check
-        // If you have scheduled alarms stored elsewhere, add that check here
-        // For now, we'll allow deletion regardless of active alarms
+        // Delete the profile (service handles FCM schedule cleanup automatically)
+        const updatedUser = await mindtrainUserService.deleteAlarmProfile(userId, profileId);
 
-        // Step 3: Delete FCM Schedule
-        const fcmDeleted = await FCMSchedule.deleteOne(
-            { activeProfileId: profileId },
-            { session }
-        );
+        // Get remaining profiles count
+        const remainingCount = (updatedUser.alarmProfiles || []).length;
 
-        console.log(`[Delete] FCM schedule deleted: ${fcmDeleted.deletedCount}`);
+        // Check if FCM schedule was cleared (if deleted profile was active)
+        const fcmScheduleCleared = wasActive && !updatedUser.fcmSchedule?.activeProfileId;
 
-        // Step 4: Delete notification logs
-        const notifDeleted = await NotificationLog.deleteMany(
-            { 'data.profileId': profileId },
-            { session }
-        );
-
-        console.log(`[Delete] Notifications deleted: ${notifDeleted.deletedCount}`);
-
-        // Step 5: Delete the profile
-        await AlarmProfile.deleteOne(
-            { id: profileId, userId: userId },
-            { session }
-        );
-
-        console.log(`[Delete] Profile deleted`);
-
-        // Step 6: Handle active profile transition
-        let remainingCount = 0;
-        let fcmDisabled = false;
-
-        if (profile.isActive) {
-            // Count remaining profiles (excluding the one we just deleted)
-            remainingCount = await AlarmProfile.countDocuments({
-                userId: userId,
-            }).session(session);
-
-            console.log(`[Delete] Remaining profiles: ${remainingCount}`);
-
-            if (remainingCount === 0) {
-                // Disable FCM if no profiles left
-                // Note: We already deleted the FCM schedule above, but check for any remaining
-                const remainingFCM = await FCMSchedule.countDocuments({
-                    userId: userId
-                }).session(session);
-
-                if (remainingFCM > 0) {
-                    await FCMSchedule.updateMany(
-                        { userId: userId },
-                        { isEnabled: false },
-                        { session }
-                    );
-                }
-
-                fcmDisabled = true;
-                console.log(`[Delete] FCM disabled (no profiles left)`);
-            } else {
-                // Activate next profile
-                const nextProfile = await AlarmProfile.findOne({
-                    userId: userId,
-                }).session(session);
-
-                if (nextProfile && !nextProfile.isActive) {
-                    nextProfile.isActive = true;
-                    nextProfile.lastSyncTimestamp = new Date();
-                    await nextProfile.save({ session });
-
-                    console.log(`[Delete] Activated next profile: ${nextProfile.id}`);
-                }
-            }
-        }
-
-        await session.commitTransaction();
-        session.endSession();
-        console.log(`[Delete] ✅ Transaction committed`);
-
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             message: 'Profile deleted successfully',
             data: {
                 deletedProfileId: profileId,
                 cascadeCleanup: {
-                    fcmScheduleDeleted: fcmDeleted.deletedCount > 0,
-                    notificationLogsDeleted: notifDeleted.deletedCount,
+                    fcmScheduleDeleted: fcmScheduleCleared,
+                    notificationLogsDeleted: 0, // Notification logs are in nested array, not separate collection
                     remainingProfiles: remainingCount,
-                    fcmDisabled: fcmDisabled,
+                    fcmDisabled: fcmScheduleCleared && remainingCount === 0,
                 },
             },
         });
     } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
-
         console.error('[Delete] Error:', error.message);
         console.error('[Delete] Stack:', error.stack);
 
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: 'Failed to delete profile',
             code: 'DELETE_FAILED',
