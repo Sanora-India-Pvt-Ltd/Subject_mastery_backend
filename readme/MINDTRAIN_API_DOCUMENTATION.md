@@ -129,6 +129,8 @@ The API uses structured error codes for programmatic handling:
 - `VALIDATION_ERROR` - General validation failure
 - `PROFILE_ID_REQUIRED` - Profile ID is missing
 - `MISSING_REQUIRED_FIELDS` - Required fields are missing
+- `MISSING_FCM_CONFIG` - fcmConfig is required
+- `INVALID_FCM_CONFIG` - Missing required fcmConfig fields (morningNotificationTime or eveningNotificationTime)
 - `INVALID_TIME_FORMAT` - Time format is invalid
 - `INVALID_TIMEZONE` - Timezone format is invalid
 

@@ -457,11 +457,17 @@ const deleteAlarmProfile = async (userId, profileId) => {
 
             const now = new Date();
 
-            // Remove the profile
+            // Calculate metadata after deletion (before we delete)
+            const remainingProfiles = user.alarmProfiles.filter(p => p.id !== profileId);
+            const remainingActiveProfiles = remainingProfiles.filter(p => p.isActive);
+
+            // Remove the profile and update metadata in one atomic operation
             const updateQuery = {
                 $pull: { alarmProfiles: { id: profileId } },
                 $set: {
                     'metadata.lastProfileUpdateAt': now,
+                    'metadata.totalAlarmProfiles': remainingProfiles.length,
+                    'metadata.activeAlarmProfiles': remainingActiveProfiles.length,
                     updatedAt: now
                 }
             };
@@ -482,8 +488,18 @@ const deleteAlarmProfile = async (userId, profileId) => {
                 throw new UserNotFoundError(userId);
             }
 
-            // Metadata will be auto-calculated by pre-save middleware
-            await updatedUser.save();
+            // Try to save for any additional middleware, but don't fail if it errors
+            // (deletion already succeeded, metadata already updated)
+            try {
+                await updatedUser.save();
+            } catch (saveError) {
+                operationLogger.warn('Save after deletion failed (non-critical)', { 
+                    error: saveError.message, 
+                    userId, 
+                    profileId 
+                });
+                // Continue - deletion and metadata update already succeeded
+            }
 
             operationLogger.info('Alarm profile deleted successfully', { profileId, wasActive });
             metrics.increment('mindtrain_profile_deleted', 1);
