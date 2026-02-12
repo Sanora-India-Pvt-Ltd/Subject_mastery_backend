@@ -186,6 +186,15 @@ const fcmScheduleSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+    // NEW FIELDS - Separate tracking for morning and evening
+    lastMorningSentAt: {
+        type: Date,
+        default: null
+    },
+    lastEveningSentAt: {
+        type: Date,
+        default: null
+    },
     nextMorningNotification: {
         type: Date,
         default: null

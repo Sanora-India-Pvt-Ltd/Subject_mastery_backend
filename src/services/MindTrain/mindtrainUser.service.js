@@ -879,18 +879,19 @@ const updateNotificationLog = async (notificationId, updates) => {
 
 /**
  * Get users with FCM schedules that need notifications
- * Finds users with enabled FCM schedules and active profiles that match notification time window
+ * Finds users with enabled FCM schedules and active profiles that match exact notification time
+ * Includes timezone conversion and deduplication
  * 
  * @param {string} notificationType - 'morning' or 'evening'
  * @param {Date} currentTime - Current time for comparison (default: now)
- * @param {number} windowMinutes - Time window in minutes (default: 15)
+ * @param {number} windowMinutes - DEPRECATED: No longer used, kept for backward compatibility
  * @returns {Promise<Array>} Array of user documents with matching FCM schedules
  */
 const getUsersForNotification = async (notificationType, currentTime = new Date(), windowMinutes = 15) => {
     const operationLogger = logger.child({ 
         operation: 'getUsersForNotification', 
         notificationType,
-        windowMinutes
+        currentTime: currentTime.toISOString()
     });
     
     return await metrics.record('mindtrain_users_notification_find', async () => {
@@ -899,23 +900,17 @@ const getUsersForNotification = async (notificationType, currentTime = new Date(
                 throw new ValidationError('notificationType must be "morning" or "evening"');
             }
 
-            const windowStart = new Date(currentTime);
-            const windowEnd = new Date(currentTime);
-            windowEnd.setMinutes(windowEnd.getMinutes() + windowMinutes);
+            const { convertLocalTimeToUTC, isSameDay } = require('../../utils/timezoneUtils');
+            const now = new Date(currentTime);
+            const currentHour = now.getUTCHours();
+            const currentMinute = now.getUTCMinutes();
 
             operationLogger.debug('Finding users for notification', { 
                 notificationType, 
-                windowStart: windowStart.toISOString(),
-                windowEnd: windowEnd.toISOString()
+                currentHour,
+                currentMinute,
+                currentTime: now.toISOString()
             });
-
-            // Find users with:
-            // 1. Enabled FCM schedule
-            // 2. Active profile
-            // 3. Notification time within window
-            const timeField = notificationType === 'morning' 
-                ? 'fcmSchedule.morningNotificationTime' 
-                : 'fcmSchedule.eveningNotificationTime';
 
             // Query users with enabled schedules and active profiles
             const users = await MindTrainUser.find({
@@ -926,31 +921,72 @@ const getUsersForNotification = async (notificationType, currentTime = new Date(
             .lean()
             .exec();
 
-            // Filter users whose notification time is within the window
-            // Note: This is a simplified check - in production, you'd want to calculate
-            // actual next notification time based on timezone and current time
+            operationLogger.debug(`Found ${users.length} users with enabled schedules`);
+
+            // Filter users whose exact time matches (with timezone conversion and deduplication)
             const matchingUsers = users.filter(user => {
-                if (!user.fcmSchedule || !user.fcmSchedule.isEnabled) return false;
+                const schedule = user.fcmSchedule;
+                if (!schedule || !schedule.isEnabled) {
+                    return false;
+                }
                 
-                const notificationTime = notificationType === 'morning'
-                    ? user.fcmSchedule.morningNotificationTime
-                    : user.fcmSchedule.eveningNotificationTime;
-
-                if (!notificationTime) return false;
-
-                // Parse time (HH:mm format) and check if it's within window
-                // This is simplified - in production, consider timezone and actual next notification time
-                const [hours, minutes] = notificationTime.split(':').map(Number);
-                const notificationDate = new Date(currentTime);
-                notificationDate.setHours(hours, minutes, 0, 0);
-
-                // Check if notification time is within window
-                return notificationDate >= windowStart && notificationDate <= windowEnd;
+                // Get scheduled time string
+                const scheduledTimeStr = notificationType === 'morning'
+                    ? schedule.morningNotificationTime
+                    : schedule.eveningNotificationTime;
+                
+                if (!scheduledTimeStr) {
+                    return false;
+                }
+                
+                // Parse scheduled time (HH:mm format)
+                const [scheduledHour, scheduledMinute] = scheduledTimeStr.split(':').map(Number);
+                
+                if (isNaN(scheduledHour) || isNaN(scheduledMinute)) {
+                    operationLogger.warn('Invalid scheduled time format', { 
+                        userId: user.userId, 
+                        scheduledTimeStr 
+                    });
+                    return false;
+                }
+                
+                // Convert to UTC based on user's timezone
+                const userTimezone = schedule.timezone || 'UTC';
+                const scheduledTimeUTC = convertLocalTimeToUTC(
+                    scheduledHour, 
+                    scheduledMinute, 
+                    userTimezone,
+                    now
+                );
+                
+                // Check if exact time matches (hour and minute must match exactly)
+                if (scheduledTimeUTC.hour !== currentHour || 
+                    scheduledTimeUTC.minute !== currentMinute) {
+                    return false;
+                }
+                
+                // Deduplication: Check if already sent today
+                const lastSentField = notificationType === 'morning' 
+                    ? 'lastMorningSentAt' 
+                    : 'lastEveningSentAt';
+                
+                const lastSent = schedule[lastSentField] || schedule.lastSentAt;
+                if (lastSent && isSameDay(lastSent, now)) {
+                    operationLogger.debug('Notification already sent today, skipping', {
+                        userId: user.userId,
+                        notificationType,
+                        lastSent: lastSent.toISOString()
+                    });
+                    return false; // Already sent today
+                }
+                
+                return true;
             });
 
             operationLogger.info('Found users for notification', { 
                 count: matchingUsers.length,
-                notificationType 
+                notificationType,
+                totalUsers: users.length
             });
             metrics.gauge('mindtrain_users_for_notification', matchingUsers.length);
 

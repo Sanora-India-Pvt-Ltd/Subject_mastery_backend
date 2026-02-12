@@ -1,17 +1,20 @@
 const cron = require('node-cron');
 const { broadcastMindTrainNotification } = require('../../services/MindTrain/mindTrainNotification.service');
+const mindtrainUserService = require('../../services/MindTrain/mindtrainUser.service');
+const { sendTargetedMindTrainNotification } = require('../../services/MindTrain/mindTrainNotification.service');
 
 /**
  * FCM Notification Cron Job
  * 
- * Runs every 5 minutes to broadcast notifications to all users.
+ * Runs every 1 minute to send targeted notifications to users whose scheduled time matches.
  * Uses hybrid delivery: WebSocket for connected users (real-time), FCM for all users (reliable).
  * 
  * Smart Scheduling: Only runs during notification hours to reduce server load.
- * - Morning window: 6:00 AM - 10:00 AM UTC
- * - Evening window: 6:00 PM - 10:00 PM UTC
+ * - Morning window: 6:00 AM - 10:00 AM UTC (processes morning notifications only)
+ * - Evening window: 6:00 PM - 10:00 PM UTC (processes evening notifications only)
  * 
- * Schedule: Every 5 minutes (but only executes during notification windows)
+ * Schedule: Every 1 minute (but only executes during notification windows)
+ * Features: Exact time matching, timezone conversion, deduplication
  */
 
 let job = null;
@@ -51,32 +54,74 @@ const isNotificationHour = () => {
 };
 
 /**
- * Broadcast notifications for a specific type (morning or evening)
+ * Determine which notification type should be processed based on current time
+ * @returns {string|null} 'morning', 'evening', or null if outside windows
+ */
+const getNotificationTypeForWindow = () => {
+    const now = new Date();
+    const currentHour = now.getUTCHours();
+    
+    // Morning window: 6 AM - 10 AM UTC
+    if (currentHour >= NOTIFICATION_WINDOWS.morning.startHour && 
+        currentHour < NOTIFICATION_WINDOWS.morning.endHour) {
+        return 'morning';
+    }
+    
+    // Evening window: 6 PM - 10 PM UTC
+    if (currentHour >= NOTIFICATION_WINDOWS.evening.startHour && 
+        currentHour < NOTIFICATION_WINDOWS.evening.endHour) {
+        return 'evening';
+    }
+    
+    return null; // Outside notification windows
+};
+
+/**
+ * Process notifications for a specific type (morning or evening)
+ * Uses targeted sending instead of broadcasting to all users
  */
 const processNotifications = async (notificationType) => {
     try {
         const currentTime = new Date();
-        console.log(`[FCMJob] Broadcasting ${notificationType} notifications at ${currentTime.toISOString()}`);
+        console.log(`[FCMJob] Processing ${notificationType} notifications at ${currentTime.toISOString()}`);
 
-        // Broadcast to all users
-        const result = await broadcastMindTrainNotification({
-            profileId: null,
-            notificationType: notificationType
-        });
+        // Get users whose scheduled time matches exactly
+        const matchingUsers = await mindtrainUserService.getUsersForNotification(
+            notificationType,
+            currentTime
+        );
+
+        if (matchingUsers.length === 0) {
+            console.log(`[FCMJob] No users found for ${notificationType} notification at this time`);
+            return {
+                processed: 0,
+                sent: 0,
+                failed: 0
+            };
+        }
+
+        console.log(`[FCMJob] Found ${matchingUsers.length} users for ${notificationType} notification`);
+
+        // Send targeted notifications (not broadcast)
+        const result = await sendTargetedMindTrainNotification(
+            matchingUsers,
+            notificationType
+        );
 
         if (result.success) {
-            console.log(`[FCMJob] ✅ ${notificationType} notification broadcasted successfully`);
+            console.log(`[FCMJob] ✅ ${notificationType} notification sent successfully`);
+            console.log(`  - Users processed: ${result.stats.usersProcessed}`);
+            console.log(`  - Push sent: ${result.stats.pushProcessedCount}`);
+            console.log(`  - Push failed: ${result.stats.pushFailedCount}`);
             console.log(`  - Socket broadcasts: ${result.stats.socketBroadcastCount}`);
-            console.log(`  - FCM processed: ${result.stats.fcmProcessedCount}`);
-            console.log(`  - FCM failed: ${result.stats.fcmFailedCount}`);
 
             return {
-                processed: result.stats.fcmProcessedCount + result.stats.socketBroadcastCount,
-                sent: result.stats.fcmProcessedCount + result.stats.socketBroadcastCount,
-                failed: result.stats.fcmFailedCount
+                processed: result.stats.usersProcessed,
+                sent: result.stats.pushProcessedCount + result.stats.socketBroadcastCount,
+                failed: result.stats.pushFailedCount
             };
         } else {
-            console.error(`[FCMJob] ⚠️ Failed to broadcast ${notificationType} notification: ${result.message || result.error}`);
+            console.error(`[FCMJob] ⚠️ Failed to send ${notificationType} notification: ${result.message || result.error}`);
             return {
                 processed: 0,
                 sent: 0,
@@ -86,7 +131,7 @@ const processNotifications = async (notificationType) => {
         }
 
     } catch (error) {
-        console.error(`[FCMJob] Error broadcasting ${notificationType} notifications:`, error);
+        console.error(`[FCMJob] Error processing ${notificationType} notifications:`, error);
         return {
             processed: 0,
             sent: 0,
@@ -97,7 +142,7 @@ const processNotifications = async (notificationType) => {
 };
 
 /**
- * Main job function - runs every 5 minutes
+ * Main job function - runs every 1 minute
  */
 const runJob = async () => {
     // Prevent concurrent executions
@@ -106,8 +151,10 @@ const runJob = async () => {
         return;
     }
 
-    // Smart scheduling: Only run during notification hours
-    if (!isNotificationHour()) {
+    // Determine which notification type to process (if any)
+    const notificationType = getNotificationTypeForWindow();
+    
+    if (!notificationType) {
         const now = new Date();
         const currentHour = now.getUTCHours();
         console.log(`[FCMJob] ⏸️  Skipping check (outside notification hours, current UTC hour: ${currentHour})`);
@@ -120,22 +167,17 @@ const runJob = async () => {
     try {
         const now = new Date();
         console.log(`[FCMJob] 🚀 Starting FCM notification check at ${now.toISOString()}`);
+        console.log(`[FCMJob] Processing ${notificationType} notifications only`);
 
-        // Process morning and evening notifications in parallel
-        const [morningResult, eveningResult] = await Promise.all([
-            processNotifications('morning'),
-            processNotifications('evening')
-        ]);
+        // Process only the relevant notification type
+        const result = await processNotifications(notificationType);
 
-        const totalProcessed = morningResult.processed + eveningResult.processed;
-        const totalSent = morningResult.sent + eveningResult.sent;
-        const totalFailed = morningResult.failed + eveningResult.failed;
         const duration = Date.now() - startTime;
 
         console.log(`[FCMJob] ✅ Complete in ${duration}ms:`);
-        console.log(`  - Processed: ${totalProcessed} schedules`);
-        console.log(`  - Sent: ${totalSent} notifications`);
-        console.log(`  - Failed: ${totalFailed} notifications`);
+        console.log(`  - Processed: ${result.processed} users`);
+        console.log(`  - Sent: ${result.sent} notifications`);
+        console.log(`  - Failed: ${result.failed} notifications`);
 
     } catch (error) {
         console.error('[FCMJob] ❌ Job execution error:', error);
@@ -153,13 +195,13 @@ const start = () => {
         return;
     }
 
-    // Run every 5 minutes: */5 * * * *
-    job = cron.schedule('*/5 * * * *', runJob, {
+    // Run every 1 minute for exact timing: */1 * * * *
+    job = cron.schedule('*/1 * * * *', runJob, {
         scheduled: true,
         timezone: 'UTC'
     });
 
-    console.log('[FCMJob] ✅ Started (runs every 5 minutes)');
+    console.log('[FCMJob] ✅ Started (runs every 1 minute for exact timing)');
     
     // Run immediately on start (optional - for testing)
     // Uncomment if you want to run immediately on server start:
@@ -184,13 +226,15 @@ const getStatus = () => {
     const now = new Date();
     const currentHour = now.getUTCHours();
     const inWindow = isNotificationHour();
+    const notificationType = getNotificationTypeForWindow();
     
     return {
         isRunning: isRunning,
         isScheduled: job !== null,
-        schedule: '*/5 * * * * (every 5 minutes, smart scheduling enabled)',
+        schedule: '*/1 * * * * (every 1 minute, exact timing enabled)',
         currentUTCHour: currentHour,
         inNotificationWindow: inWindow,
+        currentNotificationType: notificationType,
         notificationWindows: NOTIFICATION_WINDOWS,
         nextWindow: getNextWindow()
     };

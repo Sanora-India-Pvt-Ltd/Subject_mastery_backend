@@ -189,6 +189,217 @@ const broadcastMindTrainNotification = async ({ profileId = null, notificationTy
     }
 };
 
+/**
+ * Send MindTrain sync notification to specific users (targeted)
+ * Only sends to users whose scheduled time matches current time
+ * Updates lastSentAt tracking after successful send
+ * 
+ * @param {Array} users - Array of user documents from getUsersForNotification
+ * @param {string} notificationType - 'morning' | 'evening'
+ * @returns {Promise<Object>} Result with delivery stats
+ */
+const sendTargetedMindTrainNotification = async (users, notificationType) => {
+    const mindtrainUserService = require('./mindtrainUser.service');
+    const { getIO } = require('../../socket/socketServer');
+    const { sendPushNotification } = require('../notification/pushNotification.service');
+    
+    try {
+        // Validate inputs
+        if (!Array.isArray(users)) {
+            throw new Error('users must be an array');
+        }
+        
+        if (!['morning', 'evening'].includes(notificationType)) {
+            throw new Error('notificationType must be "morning" or "evening"');
+        }
+
+        if (users.length === 0) {
+            console.log(`[MindTrainNotification] No users to notify for ${notificationType}`);
+            return {
+                success: true,
+                deliveryMethod: 'targeted',
+                message: 'No users to notify',
+                channels: [],
+                stats: {
+                    socketBroadcastCount: 0,
+                    pushProcessedCount: 0,
+                    pushFailedCount: 0,
+                    usersProcessed: 0
+                }
+            };
+        }
+
+        // Prepare notification message
+        const title = 'MindTrain Sync';
+        const message = `Checking alarm schedule (${notificationType})`;
+
+        let socketBroadcastCount = 0;
+        let pushProcessedCount = 0;
+        let pushFailedCount = 0;
+        const batchSize = 50; // Process in smaller batches for targeted sends
+
+        // Process users in batches
+        for (let i = 0; i < users.length; i += batchSize) {
+            const batch = users.slice(i, i + batchSize);
+            
+            const batchPromises = batch.map(async (user) => {
+                try {
+                    const userId = user.userId;
+                    const profileId = user.fcmSchedule?.activeProfileId;
+                    
+                    // Prepare notification payload
+                    const notificationPayload = {
+                        profileId: profileId,
+                        notificationType: notificationType,
+                        timestamp: new Date().toISOString(),
+                        syncSource: 'fcm',
+                        broadcast: false
+                    };
+
+                    // Send via Socket.IO if user is connected
+                    try {
+                        const io = getIO();
+                        if (io) {
+                            // Send to specific user's room (if implemented)
+                            // For now, we'll use a user-specific event
+                            io.to(`user:${userId}`).emit('mindtrain:sync_notification', {
+                                ...notificationPayload,
+                                title: title,
+                                body: message
+                            });
+                            
+                            // Also emit unified notification
+                            io.to(`user:${userId}`).emit('notification', {
+                                id: `mindtrain_${Date.now()}_${userId}`,
+                                title: title,
+                                message: message,
+                                category: 'MINDTRAIN',
+                                type: 'MINDTRAIN_SYNC_TRIGGER',
+                                createdAt: new Date(),
+                                entity: profileId ? {
+                                    type: 'ALARM_PROFILE',
+                                    id: profileId
+                                } : null,
+                                payload: notificationPayload,
+                                broadcast: false
+                            });
+                        }
+                    } catch (socketError) {
+                        console.warn(`[MindTrainNotification] Socket error for user ${userId}:`, socketError.message);
+                    }
+
+                    // Send FCM push notification
+                    const pushResult = await sendPushNotification({
+                        recipientId: userId,
+                        recipientType: 'USER',
+                        title: title,
+                        body: message,
+                        data: {
+                            category: 'MINDTRAIN',
+                            type: 'MINDTRAIN_SYNC_TRIGGER',
+                            ...notificationPayload
+                        }
+                    });
+
+                    if (pushResult.success && pushResult.sentCount > 0) {
+                        // Update lastSentAt tracking after successful send
+                        const lastSentField = notificationType === 'morning' 
+                            ? 'lastMorningSentAt' 
+                            : 'lastEveningSentAt';
+                        
+                        try {
+                            await mindtrainUserService.updateFCMSchedule(userId, {
+                                [lastSentField]: new Date(),
+                                lastSentAt: new Date() // Keep for backward compatibility
+                            });
+                        } catch (updateError) {
+                            console.error(`[MindTrainNotification] Failed to update lastSentAt for user ${userId}:`, updateError);
+                            // Don't fail the whole operation if tracking update fails
+                        }
+                        
+                        return { success: true, userId };
+                    } else {
+                        return { 
+                            success: false, 
+                            userId, 
+                            reason: pushResult.reason || 'No tokens' 
+                        };
+                    }
+                } catch (error) {
+                    console.error(`[MindTrainNotification] Error sending to user ${user.userId}:`, error.message);
+                    return { 
+                        success: false, 
+                        userId: user.userId, 
+                        error: error.message 
+                    };
+                }
+            });
+
+            const batchResults = await Promise.all(batchPromises);
+            
+            batchResults.forEach(result => {
+                if (result.success) {
+                    pushProcessedCount++;
+                } else {
+                    pushFailedCount++;
+                }
+            });
+
+            // Small delay between batches to avoid overwhelming the system
+            if (i + batchSize < users.length) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+        }
+
+        // Count socket broadcasts (approximate - based on connected users)
+        try {
+            const io = getIO();
+            if (io) {
+                const sockets = await io.fetchSockets();
+                socketBroadcastCount = Math.min(sockets.length, users.length);
+            }
+        } catch (socketError) {
+            console.warn('[MindTrainNotification] Failed to count socket broadcasts:', socketError);
+        }
+
+        console.log(`[MindTrainNotification] ✅ Targeted notification completed:`);
+        console.log(`  - Users processed: ${users.length}`);
+        console.log(`  - Push sent: ${pushProcessedCount}`);
+        console.log(`  - Push failed: ${pushFailedCount}`);
+        console.log(`  - Socket broadcasts: ${socketBroadcastCount}`);
+
+        return {
+            success: true,
+            deliveryMethod: 'targeted',
+            message: `Notifications sent to ${pushProcessedCount} users`,
+            channels: ['IN_APP', 'PUSH'],
+            stats: {
+                socketBroadcastCount,
+                pushProcessedCount,
+                pushFailedCount,
+                usersProcessed: users.length
+            }
+        };
+
+    } catch (error) {
+        console.error('[MindTrainNotification] Targeted notification error:', error);
+        console.error('[MindTrainNotification] Error stack:', error.stack);
+        return {
+            success: false,
+            deliveryMethod: 'none',
+            message: 'Targeted notification failed',
+            error: error.message,
+            stats: {
+                socketBroadcastCount: 0,
+                pushProcessedCount: 0,
+                pushFailedCount: 0,
+                usersProcessed: 0
+            }
+        };
+    }
+};
+
 module.exports = {
-    broadcastMindTrainNotification
+    broadcastMindTrainNotification, // Keep for backward compatibility
+    sendTargetedMindTrainNotification // New function
 };
