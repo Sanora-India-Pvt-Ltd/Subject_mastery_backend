@@ -4,6 +4,7 @@ const mindtrainUserService = require('../../services/MindTrain/mindtrainUser.ser
  * POST /api/mindtrain/create-alarm-profile
  * 
  * Creates a new alarm profile and automatically deactivates all other profiles for the same user.
+ * Configures FCM notification schedule (required).
  * 
  * Authentication: Required (JWT)
  */
@@ -17,7 +18,7 @@ const createAlarmProfile = async (req, res) => {
             });
         }
 
-        const profileData = req.body || {};
+        const { fcmConfig, ...profileData } = req.body || {};
 
         // Get authenticated userId from JWT token (single source of truth)
         const authenticatedUserId = req.userId.toString();
@@ -38,6 +39,44 @@ const createAlarmProfile = async (req, res) => {
                     ...(!startTime && { startTime: 'startTime is required' }),
                     ...(!endTime && { endTime: 'endTime is required' })
                 }
+            });
+        }
+
+        // Validate FCM config (required)
+        if (!fcmConfig) {
+            return res.status(400).json({
+                success: false,
+                message: 'fcmConfig is required',
+                code: 'MISSING_FCM_CONFIG'
+            });
+        }
+
+        const { morningNotificationTime, eveningNotificationTime, timezone } = fcmConfig;
+
+        if (!morningNotificationTime || !eveningNotificationTime) {
+            return res.status(400).json({
+                success: false,
+                message: 'morningNotificationTime and eveningNotificationTime are required',
+                code: 'INVALID_FCM_CONFIG'
+            });
+        }
+
+        // Validate time format (HH:mm)
+        const timeRegex = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
+        if (!timeRegex.test(morningNotificationTime) || !timeRegex.test(eveningNotificationTime)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid time format. Use HH:mm format (e.g., "08:00")',
+                code: 'INVALID_TIME_FORMAT'
+            });
+        }
+
+        // Validate timezone (basic validation)
+        if (timezone && typeof timezone !== 'string') {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid timezone format',
+                code: 'INVALID_TIMEZONE'
             });
         }
 
@@ -66,6 +105,16 @@ const createAlarmProfile = async (req, res) => {
 
         // Auto-activate this profile and deactivate all others (as per old endpoint behavior)
         updatedUser = await mindtrainUserService.activateProfile(authenticatedUserId, id);
+
+        // Update FCM schedule (required)
+        // Note: morningNotificationTime, eveningNotificationTime, and timezone are already destructured above
+        updatedUser = await mindtrainUserService.updateFCMSchedule(authenticatedUserId, {
+            activeProfileId: id,
+            morningNotificationTime,
+            eveningNotificationTime,
+            timezone: timezone || 'UTC',
+            isEnabled: true
+        });
 
         // Find the created profile
         const createdProfile = updatedUser.alarmProfiles.find(p => p.id === id);
@@ -113,6 +162,18 @@ const createAlarmProfile = async (req, res) => {
                 deactivatedCount: deactivatedProfiles.length
             }
         };
+
+        // Add fcmSchedule to response (always included since fcmConfig is required)
+        if (updatedUser.fcmSchedule) {
+            response.data.fcmSchedule = {
+                userId: authenticatedUserId,
+                activeProfileId: updatedUser.fcmSchedule.activeProfileId,
+                morningNotificationTime: updatedUser.fcmSchedule.morningNotificationTime,
+                eveningNotificationTime: updatedUser.fcmSchedule.eveningNotificationTime,
+                timezone: updatedUser.fcmSchedule.timezone,
+                isEnabled: updatedUser.fcmSchedule.isEnabled
+            };
+        }
 
         return res.status(200).json(response);
     } catch (error) {

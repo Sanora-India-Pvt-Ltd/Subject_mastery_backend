@@ -1,6 +1,6 @@
 # MindTrain API Frontend Guide
 
-This guide describes all MindTrain API endpoints for alarm profile management, sync configuration, sync health monitoring, and FCM notifications.
+This guide describes all MindTrain API endpoints for alarm profile management (with required FCM configuration), sync health monitoring, and FCM notifications.
 
 ## Table of Contents
 1. [Overview](#overview)
@@ -13,18 +13,16 @@ This guide describes all MindTrain API endpoints for alarm profile management, s
    - [Create Alarm Profile](#create-alarm-profile)
    - [Get Alarm Profiles](#get-alarm-profiles)
    - [Delete Alarm Profile](#delete-alarm-profile)
-8. [Sync Configuration](#sync-configuration)
-   - [Sync Config](#sync-config)
-9. [Sync Health & Status](#sync-health--status)
+8. [Sync Health & Status](#sync-health--status)
    - [Report Sync Health](#report-sync-health)
    - [Get Sync Status](#get-sync-status)
-10. [FCM Notifications](#fcm-notifications)
-    - [Send FCM Notifications](#send-fcm-notifications)
-    - [Test Broadcast Notification](#test-broadcast-notification)
-    - [Broadcast Notification](#broadcast-notification)
-    - [FCM Callback](#fcm-callback)
-11. [Notes for Frontend Integration](#notes-for-frontend-integration)
-12. [Technical Details](#technical-details)
+9. [FCM Notifications](#fcm-notifications)
+   - [Send FCM Notifications](#send-fcm-notifications)
+   - [Test Broadcast Notification](#test-broadcast-notification)
+   - [Broadcast Notification](#broadcast-notification)
+   - [FCM Callback](#fcm-callback)
+10. [Notes for Frontend Integration](#notes-for-frontend-integration)
+11. [Technical Details](#technical-details)
 
 ## Overview
 
@@ -57,12 +55,9 @@ The API uses a unified `MindTrainUser` model that stores all user data (alarm pr
 The MindTrain API provides the following endpoints (all using the unified nested schema):
 
 ### Alarm Profile Management (3 APIs)
-- `POST /api/mindtrain/create-alarm-profile` - Create alarm profile (auto-activates)
+- `POST /api/mindtrain/create-alarm-profile` - Create alarm profile with FCM configuration (auto-activates)
 - `GET /api/mindtrain/get-alarm-profiles` - Get all profiles (separated by active/inactive)
 - `DELETE /api/mindtrain/alarm-profiles/:profileId` - Delete profile (with cascade cleanup)
-
-### Sync Configuration (1 API)
-- `PUT /api/mindtrain/alarm-profiles/sync-config` - Configure profile + FCM schedule together
 
 ### Sync Health & Status (2 APIs)
 - `PUT /api/mindtrain/alarm-profiles/sync-health` - Report sync health
@@ -74,7 +69,7 @@ The MindTrain API provides the following endpoints (all using the unified nested
 - `POST /api/mindtrain/fcm-notifications/broadcast` - Broadcast to all users (public)
 - `POST /api/mindtrain/fcm-notifications/callback` - FCM delivery callback (webhook)
 
-**Total: 10 APIs** - All using the unified nested schema (`MindTrainUser` model) for optimal performance.
+**Total: 9 APIs** - All using the unified nested schema (`MindTrainUser` model) for optimal performance.
 
 ## Base URL
 Use your environment configuration for the API origin.
@@ -202,7 +197,7 @@ try {
 ### Create Alarm Profile
 POST `/api/mindtrain/create-alarm-profile` (protected)
 
-Creates a new alarm profile and automatically deactivates all other profiles for the same user.
+Creates a new alarm profile and automatically deactivates all other profiles for the same user. Configures FCM notification schedule (required).
 
 **Request Body:**
 ```json
@@ -218,7 +213,12 @@ Creates a new alarm profile and automatically deactivates all other profiles for
   "isFixedTime": false,
   "fixedTime": null,
   "specificDates": null,
-  "isActive": true
+  "isActive": true,
+  "fcmConfig": {
+    "morningNotificationTime": "08:00",
+    "eveningNotificationTime": "20:00",
+    "timezone": "America/New_York"
+  }
 }
 ```
 
@@ -230,6 +230,10 @@ Creates a new alarm profile and automatically deactivates all other profiles for
 - `selectedDaysPerWeek`: Array of numbers (1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday)
 - `startTime`: Start time in HH:mm:ss format (e.g., "06:00:00")
 - `endTime`: End time in HH:mm:ss format (e.g., "22:00:00")
+- `fcmConfig`: Object to configure FCM notification schedule (required)
+  - `fcmConfig.morningNotificationTime`: Time in HH:mm format (e.g., "08:00") - required
+  - `fcmConfig.eveningNotificationTime`: Time in HH:mm format (e.g., "20:00") - required
+  - `fcmConfig.timezone`: Timezone string (defaults to "UTC") - optional
 
 **Note:** `userId` is automatically extracted from the JWT authentication token. Do not include it in the request body.
 
@@ -271,15 +275,29 @@ Creates a new alarm profile and automatically deactivates all other profiles for
         "isActive": false
       }
     ],
-    "deactivatedCount": 1
+    "deactivatedCount": 1,
+    "fcmSchedule": {
+      "userId": "user_id",
+      "activeProfileId": "profile_unique_id",
+      "morningNotificationTime": "08:00",
+      "eveningNotificationTime": "20:00",
+      "timezone": "America/New_York",
+      "isEnabled": true
+    }
   }
 }
 ```
+
+**Note:** The `fcmSchedule` field is always included in the response since FCM configuration is required.
 
 **Error Responses:**
 - `400` - Missing required fields or validation error
   - `VALIDATION_ERROR` - General validation failure
   - `PROFILE_CREATION_ERROR` - Failed to create profile
+  - `MISSING_FCM_CONFIG` - fcmConfig is required
+  - `INVALID_FCM_CONFIG` - Missing required fcmConfig fields (morningNotificationTime or eveningNotificationTime)
+  - `INVALID_TIME_FORMAT` - Time must be in HH:mm format (for FCM times) or HH:mm:ss format (for alarm profile times)
+  - `INVALID_TIMEZONE` - Invalid timezone format
 - `401` - Authentication required
   - `AUTH_REQUIRED` - Authentication token missing or invalid
 - `409` - Concurrency error (rare)
@@ -292,6 +310,10 @@ Creates a new alarm profile and automatically deactivates all other profiles for
 - Creating a new profile automatically deactivates all other profiles for the authenticated user
 - The `isActive` field is automatically set to `true` for new profiles
 - Users can only create profiles for themselves (enforced by JWT authentication)
+- **FCM Configuration**: `fcmConfig` is required - both `morningNotificationTime` and `eveningNotificationTime` must be provided
+- **FCM Time Format**: FCM notification times must be in HH:mm format (e.g., "08:00", "20:30")
+- **Alarm Profile Time Format**: Alarm profile times must be in HH:mm:ss format (e.g., "06:00:00", "22:00:00")
+- **Timezone**: If `fcmConfig.timezone` is not provided, it defaults to "UTC"
 
 ### Get Alarm Profiles
 GET `/api/mindtrain/get-alarm-profiles` (protected)
@@ -402,92 +424,6 @@ Deletes an alarm profile and performs cascade cleanup:
 - If the deleted profile was active and no profiles remain, FCM is disabled
 - All related data (FCM schedule, notification logs) is cleaned up automatically
 - Deletion uses database transactions to ensure data consistency
-
-## Sync Configuration
-
-### Sync Config
-PUT `/api/mindtrain/alarm-profiles/sync-config` (protected)
-
-Create/update alarm profile and configure FCM schedule in a single request. This endpoint combines alarm profile creation with FCM notification scheduling.
-
-**Request Body:**
-```json
-{
-  "alarmProfile": {
-    "id": "profile_unique_id",
-    "youtubeUrl": "https://www.youtube.com/watch?v=...",
-    "title": "Morning Meditation",
-    "alarmsPerDay": 3,
-    "selectedDaysPerWeek": [1, 3, 5],
-    "startTime": "06:00:00",
-    "endTime": "22:00:00"
-  },
-  "fcmConfig": {
-    "morningNotificationTime": "08:00",
-    "eveningNotificationTime": "20:00",
-    "timezone": "America/New_York"
-  }
-}
-```
-
-**Required Fields:**
-- `alarmProfile`: Object with all required alarm profile fields (same as Create Alarm Profile, but without `userId`)
-- `fcmConfig.morningNotificationTime`: Time in HH:mm format
-- `fcmConfig.eveningNotificationTime`: Time in HH:mm format
-
-**Note:** `userId` is automatically extracted from the JWT authentication token. Do not include it in `alarmProfile` object.
-
-**Optional Fields:**
-- `fcmConfig.timezone`: Timezone string (defaults to "UTC")
-
-**Success Response (200):**
-```json
-{
-  "success": true,
-  "message": "Profile and FCM schedule configured",
-  "data": {
-    "profile": {
-      "id": "profile_unique_id",
-      "userId": "user_id",
-      "isActive": true,
-      "lastSyncTimestamp": null,
-      "lastSyncSource": null,
-      "syncHealthScore": 100,
-      "nextSyncCheckTime": "2025-01-29T11:00:00.000Z"
-    },
-    "fcmSchedule": {
-      "userId": "user_id",
-      "activeProfileId": "profile_unique_id",
-      "morningNotificationTime": "08:00",
-      "eveningNotificationTime": "20:00",
-      "nextMorningNotification": "2025-01-30T08:00:00.000Z",
-      "nextEveningNotification": "2025-01-29T20:00:00.000Z"
-    }
-  }
-}
-```
-
-**Error Responses:**
-- `400` - Missing required fields, invalid time format, or invalid timezone
-- `401` - Authentication required
-- `500` - Server error
-
-**Error Codes:**
-- `MISSING_ALARM_PROFILE` - alarmProfile is required
-- `MISSING_FCM_CONFIG` - fcmConfig is required
-- `INVALID_ALARM_PROFILE` - Missing required alarmProfile fields
-- `INVALID_FCM_CONFIG` - Missing required fcmConfig fields
-- `INVALID_TIME_FORMAT` - Time must be in HH:mm format (for FCM times) or HH:mm:ss format (for alarm profile times)
-- `INVALID_TIMEZONE` - Invalid timezone format
-- `SYNC_CONFIG_ERROR` - Server error during configuration
-
-**Notes:**
-- `userId` is automatically extracted from the JWT authentication token
-- FCM time format must be HH:mm (e.g., "08:00", "20:30")
-- Alarm profile time format must be HH:mm:ss (e.g., "06:00:00", "22:00:00")
-- `nextSyncCheckTime` is set to 1 hour from the request time
-- This endpoint automatically deactivates other profiles (same as Create Alarm Profile)
-- Users can only configure profiles for themselves (enforced by JWT authentication)
 
 ## Sync Health & Status
 
@@ -885,10 +821,10 @@ FCM delivery status webhook callback. Receives delivery status updates from Fire
 ### Alarm Profile Management
 
 **Create Alarm Profile** (`POST /api/mindtrain/create-alarm-profile`)
-- ✅ **Use when:** User creates a new alarm profile for the first time
-- ✅ **Use when:** User wants to create a simple profile without FCM schedule configuration
-- ✅ **Use when:** You only need to create/update the profile (not FCM settings)
-- ❌ **Don't use when:** You need to configure FCM notification schedule (use `sync-config` instead)
+- ✅ **Use when:** User creates a new alarm profile with FCM notifications
+- ✅ **Use when:** Initial setup - First time user sets up alarm profile + FCM notifications
+- ✅ **Use when:** User completes onboarding/setup wizard
+- ✅ **Use when:** Need to configure both alarm profile and notification timing in one call
 
 **Get Alarm Profiles** (`GET /api/mindtrain/get-alarm-profiles`)
 - ✅ **Use when:** App starts/loads - fetch user's existing profiles
@@ -900,16 +836,6 @@ FCM delivery status webhook callback. Receives delivery status updates from Fire
 - ✅ **Use when:** User deletes a profile from settings
 - ✅ **Use when:** User wants to remove an old/unused profile
 - ✅ **Use when:** Need to clean up profiles (cascade cleanup happens automatically)
-
-### Sync Configuration
-
-**Sync Config** (`PUT /api/mindtrain/alarm-profiles/sync-config`)
-- ✅ **Use when:** **Initial setup** - First time user sets up alarm profile + FCM notifications
-- ✅ **Use when:** **Major updates** - User changes both profile AND FCM schedule together
-- ✅ **Use when:** User completes onboarding/setup wizard
-- ✅ **Use when:** Need to configure both alarm profile and notification timing in one call
-- ❌ **Don't use when:** Only creating a profile (use `create-alarm-profile` instead)
-- ❌ **Don't use when:** Only updating FCM schedule (this endpoint updates both)
 
 ### Sync Health & Status
 
@@ -980,11 +906,12 @@ FCM delivery status webhook callback. Receives delivery status updates from Fire
 - Users can only create/manage profiles for themselves (enforced by authentication)
 - All operations use the unified nested schema for optimal performance
 
-### Sync Configuration
-- Use `sync-config` endpoint for initial setup or major updates
-- Time format must be HH:mm (24-hour format)
-- Timezone defaults to UTC if not specified
-- `nextSyncCheckTime` indicates when client should check for updates
+### Alarm Profile Management (FCM Configuration)
+- FCM configuration is required when creating a profile - `fcmConfig` must be included in request body
+- FCM time format must be HH:mm (24-hour format, e.g., "08:00", "20:30")
+- Alarm profile time format must be HH:mm:ss (e.g., "06:00:00", "22:00:00")
+- Timezone defaults to "UTC" if not specified in `fcmConfig`
+- Both `morningNotificationTime` and `eveningNotificationTime` are required in `fcmConfig`
 
 ### Sync Health & Status
 - Report sync health periodically (recommended: every 24 hours)
@@ -1018,9 +945,9 @@ FCM delivery status webhook callback. Receives delivery status updates from Fire
 #### 1. **Initial Setup Flow (First Time User)**
 ```
 1. User opens app → GET /get-alarm-profiles (check if profiles exist)
-2. User creates profile → POST /create-alarm-profile OR PUT /sync-config
-   - Use sync-config if also setting up FCM notifications
-   - Use create-alarm-profile if just creating profile
+2. User creates profile → POST /create-alarm-profile
+   - Include fcmConfig in request body (required)
+   - Provide morningNotificationTime and eveningNotificationTime
 3. After setup → PUT /sync-health (report initial sync health)
 ```
 
@@ -1035,11 +962,9 @@ FCM delivery status webhook callback. Receives delivery status updates from Fire
 #### 3. **Profile Management Flow**
 ```
 Create New Profile:
-  - POST /create-alarm-profile (simple profile)
-  - OR PUT /sync-config (profile + FCM setup)
-
-Update Existing Profile:
-  - PUT /sync-config (updates both profile and FCM)
+  - POST /create-alarm-profile
+    - Include fcmConfig in request body (required)
+    - Provide morningNotificationTime and eveningNotificationTime
 
 View Profiles:
   - GET /get-alarm-profiles (get all profiles)

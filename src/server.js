@@ -932,23 +932,6 @@ try {
     });
 }
 
-// MindTrain sync config routes
-try {
-    console.log('🔄 Loading MindTrain sync config routes...');
-    app.use('/api/mindtrain/alarm-profiles', require('./routes/MindTrain/syncConfig.routes'));
-    console.log('✅ MindTrain sync config routes loaded successfully');
-} catch (error) {
-    console.error('❌ Error loading MindTrain sync config routes:', error.message);
-    console.error('Stack:', error.stack);
-    app.use('/api/mindtrain/alarm-profiles', (req, res) => {
-        res.status(500).json({
-            success: false,
-            message: 'MindTrain sync config routes failed to load. Check server logs.',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    });
-}
-
 // MindTrain sync health routes
 try {
     console.log('🔄 Loading MindTrain sync health routes...');
@@ -957,7 +940,7 @@ try {
 } catch (error) {
     console.error('❌ Error loading MindTrain sync health routes:', error.message);
     console.error('Stack:', error.stack);
-    // Note: syncHealth routes are registered on same path as syncConfig, so error handling is already covered
+    // Error handling for sync health routes
 }
 
 // MindTrain FCM notification routes
