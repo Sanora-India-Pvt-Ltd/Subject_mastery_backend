@@ -325,49 +325,73 @@ const updateAlarmProfile = async (userId, profileId, updates) => {
                 throw new ValidationError('updates object is required');
             }
 
-            const userIdObjectId = mongoose.Types.ObjectId.isValid(userId)
-                ? new mongoose.Types.ObjectId(userId)
-                : userId;
-
-            const updateFields = {};
-            const now = new Date();
-
-            // Build update object for array element
-            Object.keys(updates).forEach(key => {
-                if (key !== 'id' && key !== 'createdAt') {
-                    updateFields[`alarmProfiles.$.${key}`] = updates[key];
-                }
-            });
-
-            // Always update updatedAt
-            updateFields['alarmProfiles.$.updatedAt'] = now;
-            updateFields['metadata.lastProfileUpdateAt'] = now;
-            updateFields['updatedAt'] = now;
-
-            operationLogger.debug('Updating alarm profile');
-
-            const user = await MindTrainUser.findOneAndUpdate(
-                {
-                    userId: userIdObjectId,
-                    'alarmProfiles.id': profileId
-                },
-                { $set: updateFields },
-                { new: true }
-            ).exec();
-
-            if (!user) {
-                throw new ProfileNotFoundError(profileId);
+            // Validate required field: isActive
+            if (updates.isActive === undefined) {
+                throw new ValidationError('isActive is required');
             }
 
-            // Metadata will be auto-calculated by pre-save middleware
-            await user.save();
+            // Since isActive is always true from frontend, always trigger unified activation flow
+            if (updates.isActive === true) {
+                // Extract other fields to update (excluding isActive as it's handled by activateProfile)
+                const { isActive, ...otherFields } = updates;
+                
+                // First, activate the profile (unified flow)
+                let updatedUser = await activateProfile(userId, profileId);
+                
+                // Update other fields if provided
+                if (Object.keys(otherFields).length > 0) {
+                    const userIdObjectId = mongoose.Types.ObjectId.isValid(userId)
+                        ? new mongoose.Types.ObjectId(userId)
+                        : userId;
 
-            operationLogger.info('Alarm profile updated successfully', { profileId });
-            metrics.increment('mindtrain_profile_updated', 1);
+                    const updateFields = {};
+                    const now = new Date();
 
-            return user.toObject();
+                    // Build update object for array element
+                    Object.keys(otherFields).forEach(key => {
+                        if (key !== 'id' && key !== 'createdAt') {
+                            updateFields[`alarmProfiles.$.${key}`] = otherFields[key];
+                        }
+                    });
+
+                    // Always update updatedAt
+                    updateFields['alarmProfiles.$.updatedAt'] = now;
+                    updateFields['metadata.lastProfileUpdateAt'] = now;
+                    updateFields['updatedAt'] = now;
+
+                    operationLogger.debug('Updating other profile fields after activation');
+
+                    const user = await MindTrainUser.findOneAndUpdate(
+                        {
+                            userId: userIdObjectId,
+                            'alarmProfiles.id': profileId
+                        },
+                        { $set: updateFields },
+                        { new: true }
+                    ).exec();
+
+                    if (!user) {
+                        throw new ProfileNotFoundError(profileId);
+                    }
+
+                    // Metadata will be auto-calculated by pre-save middleware
+                    await user.save();
+
+                    updatedUser = user.toObject();
+                }
+
+                operationLogger.info('Alarm profile updated and activated successfully', { profileId });
+                metrics.increment('mindtrain_profile_updated', 1);
+
+                return updatedUser;
+            } else {
+                // Note: isActive: false case should not happen from frontend,
+                // but if it does, handle accordingly (deactivate logic)
+                // For now, throw validation error
+                throw new ValidationError('isActive must be true. Use delete endpoint to deactivate profiles.');
+            }
         } catch (error) {
-            if (error instanceof ValidationError || error instanceof ProfileNotFoundError) {
+            if (error instanceof ValidationError || error instanceof ProfileNotFoundError || error instanceof DatabaseError) {
                 throw error;
             }
             operationLogger.error('Error updating alarm profile', error, { userId, profileId });
@@ -499,6 +523,7 @@ const activateProfile = async (userId, profileId) => {
                             'alarmProfiles.$[elem].isActive': true,
                             'alarmProfiles.$[elem].updatedAt': now,
                             'fcmSchedule.activeProfileId': profileId,
+                            'fcmSchedule.isEnabled': true,
                             'fcmSchedule.updatedAt': now,
                             'metadata.lastProfileUpdateAt': now,
                             updatedAt: now

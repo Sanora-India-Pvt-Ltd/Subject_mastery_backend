@@ -54,9 +54,10 @@ The API uses a unified `MindTrainUser` model that stores all user data (alarm pr
 
 The MindTrain API provides the following endpoints (all using the unified nested schema):
 
-### Alarm Profile Management (3 APIs)
+### Alarm Profile Management (4 APIs)
 - `POST /api/mindtrain/create-alarm-profile` - Create alarm profile with FCM configuration (auto-activates)
 - `GET /api/mindtrain/get-alarm-profiles` - Get all profiles (separated by active/inactive)
+- `POST /api/mindtrain/activate-alarm-profile` - Activate an existing alarm profile (deactivates others)
 - `DELETE /api/mindtrain/alarm-profiles/:profileId` - Delete profile (with cascade cleanup)
 
 ### Sync Health & Status (2 APIs)
@@ -69,7 +70,7 @@ The MindTrain API provides the following endpoints (all using the unified nested
 - `POST /api/mindtrain/fcm-notifications/broadcast` - Broadcast to all users (public)
 - `POST /api/mindtrain/fcm-notifications/callback` - FCM delivery callback (webhook)
 
-**Total: 9 APIs** - All using the unified nested schema (`MindTrainUser` model) for optimal performance.
+**Total: 10 APIs** - All using the unified nested schema (`MindTrainUser` model) for optimal performance.
 
 ## Base URL
 Use your environment configuration for the API origin.
@@ -370,6 +371,97 @@ Retrieves all alarm profiles for the authenticated user, separated into active a
 **Notes:**
 - Returns empty arrays if no profiles exist
 - Profiles are automatically separated into active and inactive
+
+### Activate Alarm Profile
+POST `/api/mindtrain/activate-alarm-profile` (protected)
+
+Activates an existing alarm profile and automatically deactivates all other profiles for the same user. Updates FCM schedule to enable notifications for the activated profile.
+
+**Request Body:**
+```json
+{
+  "profileId": "profile_unique_id"
+}
+```
+
+**Required Fields:**
+- `profileId`: Unique identifier of the profile to activate
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Alarm profile activated successfully",
+  "data": {
+    "activatedProfile": {
+      "id": "profile_unique_id",
+      "userId": "user_id",
+      "youtubeUrl": "https://www.youtube.com/watch?v=...",
+      "title": "Morning Meditation",
+      "description": "",
+      "alarmsPerDay": 3,
+      "selectedDaysPerWeek": [1, 3, 5],
+      "startTime": "06:00:00",
+      "endTime": "22:00:00",
+      "isFixedTime": false,
+      "fixedTime": null,
+      "specificDates": null,
+      "isActive": true,
+      "createdAt": "2025-01-29T10:00:00.000Z",
+      "updatedAt": "2025-01-29T10:00:00.000Z",
+      "_id": null
+    },
+    "deactivatedProfiles": [
+      {
+        "id": "old_profile_id",
+        "title": "Old Profile",
+        "_id": null,
+        "isActive": false
+      }
+    ],
+    "deactivatedCount": 1,
+    "fcmSchedule": {
+      "userId": "user_id",
+      "activeProfileId": "profile_unique_id",
+      "morningNotificationTime": "08:00",
+      "eveningNotificationTime": "20:00",
+      "timezone": "America/New_York",
+      "isEnabled": true
+    }
+  }
+}
+```
+
+**Response Fields:**
+- `activatedProfile`: The profile that was activated (full profile details)
+- `deactivatedProfiles`: Array of profiles that were deactivated
+- `deactivatedCount`: Number of profiles that were deactivated
+- `fcmSchedule`: Updated FCM schedule with `isEnabled: true` and `activeProfileId` set
+
+**Error Responses:**
+- `400` - Missing required fields
+  - `MISSING_PROFILE_ID` - profileId is required
+- `401` - Authentication required
+  - `AUTH_REQUIRED` - Authentication token missing or invalid
+- `404` - Profile or user not found
+  - `PROFILE_NOT_FOUND` - Profile not found or doesn't belong to user
+  - `USER_NOT_FOUND` - MindTrain user not found
+- `500` - Server error
+  - `DATABASE_ERROR` - Database operation failed
+
+**Error Codes:**
+- `MISSING_PROFILE_ID` - profileId is required in request body
+- `PROFILE_NOT_FOUND` - Profile not found or doesn't belong to user
+- `USER_NOT_FOUND` - MindTrain user not found
+- `DATABASE_ERROR` - Database operation failed
+
+**Notes:**
+- Only the profile owner can activate their profile
+- Activating a profile automatically deactivates all other profiles for the user
+- FCM schedule is automatically updated with `isEnabled: true` and `activeProfileId` set to the activated profile
+- The operation is atomic - all changes happen in a single transaction
+- If the profile is already active, the operation is idempotent (no error, same result)
+- `userId` is automatically extracted from the JWT authentication token
 
 ### Delete Alarm Profile
 DELETE `/api/mindtrain/alarm-profiles/:profileId` (protected)

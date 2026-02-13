@@ -147,14 +147,14 @@ const createAlarmProfile = async (req, res) => {
             isActive: updatedUser.alarmProfiles?.find(p => p.id === id)?.isActive
         });
 
-        // Update FCM schedule (required)
+        // Update FCM schedule timing fields (isEnabled is already set by activateProfile)
         // Note: morningNotificationTime, eveningNotificationTime, and timezone are already destructured above
         updatedUser = await mindtrainUserService.updateFCMSchedule(authenticatedUserId, {
             activeProfileId: id,
             morningNotificationTime,
             eveningNotificationTime,
-            timezone: timezone || 'UTC',
-            isEnabled: true
+            timezone: timezone || 'UTC'
+            // Note: isEnabled is not needed here as activateProfile already sets it to true
         });
 
         // Find the created profile
@@ -422,9 +422,181 @@ const deleteAlarmProfile = async (req, res) => {
     }
 };
 
+/**
+ * POST /api/mindtrain/activate-alarm-profile
+ * 
+ * Activates an existing alarm profile and automatically deactivates all other profiles for the same user.
+ * Updates FCM schedule to enable notifications for the activated profile.
+ * 
+ * Authentication: Required (JWT)
+ */
+const activateAlarmProfile = async (req, res) => {
+    // Create diagnostic logger for full flow tracking
+    const diagLogger = createDiagnosticLogger('activateAlarmProfile', {
+        requestId: req.id || 'unknown',
+        timestamp: new Date().toISOString()
+    });
+
+    try {
+        diagLogger.start('Starting activate alarm profile request');
+
+        // Validate authentication
+        if (!req.userId) {
+            diagLogger.validation('Authentication check', false);
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required'
+            });
+        }
+        diagLogger.validation('Authentication check', true, { userId: req.userId.toString() });
+
+        const { profileId } = req.body || {};
+        diagLogger.step('Request body parsed', {
+            profileId: profileId
+        });
+
+        // Get authenticated userId from JWT token (single source of truth)
+        const authenticatedUserId = req.userId.toString();
+        diagLogger.userState(authenticatedUserId, 'AUTHENTICATED');
+
+        // Validate required fields
+        if (!profileId) {
+            diagLogger.validation('profileId required', false);
+            return res.status(400).json({
+                success: false,
+                message: 'profileId is required',
+                code: 'MISSING_PROFILE_ID'
+            });
+        }
+        diagLogger.validation('profileId validation', true);
+
+        // Check if profile exists
+        diagLogger.step('Checking if profile exists');
+        const user = await mindtrainUserService.getMindTrainUser(authenticatedUserId);
+        if (!user) {
+            diagLogger.warn('User not found', { userId: authenticatedUserId });
+            return res.status(404).json({
+                success: false,
+                message: 'User not found',
+                code: 'USER_NOT_FOUND'
+            });
+        }
+
+        const profile = user.alarmProfiles?.find(p => p.id === profileId);
+        if (!profile) {
+            diagLogger.warn('Profile not found', { profileId });
+            return res.status(404).json({
+                success: false,
+                message: 'Profile not found',
+                code: 'PROFILE_NOT_FOUND'
+            });
+        }
+        diagLogger.step('Profile found', {
+            profileId: profileId,
+            currentIsActive: profile.isActive
+        });
+
+        // Activate the profile (unified flow handles everything)
+        diagLogger.step('Calling activateProfile service to activate the profile');
+        const updatedUser = await mindtrainUserService.activateProfile(authenticatedUserId, profileId);
+        diagLogger.step('Profile activated successfully', {
+            profileId: profileId,
+            isActive: updatedUser.alarmProfiles?.find(p => p.id === profileId)?.isActive
+        });
+
+        // Find the activated profile
+        const activatedProfile = updatedUser.alarmProfiles.find(p => p.id === profileId);
+        if (!activatedProfile) {
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to activate profile'
+            });
+        }
+
+        // Get deactivated profiles for response (all profiles except the activated one)
+        const deactivatedProfiles = (updatedUser.alarmProfiles || [])
+            .filter(p => p.id !== profileId && !p.isActive)
+            .map(profile => ({
+                id: profile.id,
+                title: profile.title,
+                _id: null, // Not available in nested format
+                isActive: profile.isActive
+            }));
+
+        // Format activated profile for response
+        const formatProfile = (profile) => {
+            return {
+                id: profile.id,
+                userId: authenticatedUserId,
+                youtubeUrl: profile.youtubeUrl,
+                title: profile.title,
+                description: profile.description || '',
+                alarmsPerDay: profile.alarmsPerDay,
+                selectedDaysPerWeek: profile.selectedDaysPerWeek,
+                startTime: profile.startTime,
+                endTime: profile.endTime,
+                isFixedTime: profile.isFixedTime,
+                fixedTime: profile.fixedTime || null,
+                specificDates: profile.specificDates || null,
+                isActive: profile.isActive,
+                createdAt: profile.createdAt ? (profile.createdAt.toISOString ? profile.createdAt.toISOString() : new Date(profile.createdAt).toISOString()) : new Date().toISOString(),
+                updatedAt: profile.updatedAt ? (profile.updatedAt.toISOString ? profile.updatedAt.toISOString() : new Date(profile.updatedAt).toISOString()) : new Date().toISOString(),
+                _id: null // Not available in nested format
+            };
+        };
+
+        // Prepare response
+        const response = {
+            success: true,
+            message: 'Alarm profile activated successfully',
+            data: {
+                activatedProfile: formatProfile(activatedProfile),
+                deactivatedProfiles: deactivatedProfiles,
+                deactivatedCount: deactivatedProfiles.length
+            }
+        };
+
+        // Add fcmSchedule to response
+        if (updatedUser.fcmSchedule) {
+            response.data.fcmSchedule = {
+                userId: authenticatedUserId,
+                activeProfileId: updatedUser.fcmSchedule.activeProfileId,
+                morningNotificationTime: updatedUser.fcmSchedule.morningNotificationTime,
+                eveningNotificationTime: updatedUser.fcmSchedule.eveningNotificationTime,
+                timezone: updatedUser.fcmSchedule.timezone,
+                isEnabled: updatedUser.fcmSchedule.isEnabled
+            };
+        }
+
+        diagLogger.complete('Activate alarm profile request completed successfully', {
+            profileId: profileId,
+            isActive: activatedProfile.isActive,
+            totalProfiles: updatedUser.alarmProfiles?.length || 0
+        });
+        diagLogger.logSummary();
+
+        return res.status(200).json(response);
+    } catch (error) {
+        console.error('Activate alarm profile error:', error);
+        diagLogger.error('Activate alarm profile failed', error, {
+            errorName: error?.name,
+            errorMessage: error?.message,
+            errorCode: error?.code
+        });
+        diagLogger.logSummary();
+        
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to activate alarm profile',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 module.exports = {
     createAlarmProfile,
     getAlarmProfiles,
-    deleteAlarmProfile
+    deleteAlarmProfile,
+    activateAlarmProfile
 };
 
