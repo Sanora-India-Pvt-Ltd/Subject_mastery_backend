@@ -1,6 +1,6 @@
 const express = require('express');
 const { protect } = require('../../middleware/auth');
-const { createAlarmProfile, getAlarmProfiles, deleteAlarmProfile, activateAlarmProfile } = require('../../controllers/MindTrain/alarmProfile.controller');
+const { createAlarmProfile, getAlarmProfiles, activateAlarmProfile, deleteAlarmProfile } = require('../../controllers/MindTrain/alarmProfile.controller');
 
 const router = express.Router();
 

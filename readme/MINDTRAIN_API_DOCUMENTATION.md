@@ -377,15 +377,53 @@ POST `/api/mindtrain/activate-alarm-profile` (protected)
 
 Activates an existing alarm profile and automatically deactivates all other profiles for the same user. Updates FCM schedule to enable notifications for the activated profile.
 
+Can also update profile fields if provided in the request body.
+
 **Request Body:**
 ```json
 {
-  "profileId": "profile_unique_id"
+  "profileId": "profile_unique_id",
+  "isActive": true,
+  "title": "Updated Title",
+  "alarmsPerDay": 5
 }
 ```
 
 **Required Fields:**
 - `profileId`: Unique identifier of the profile to activate
+- `isActive`: Must be `true` (always sent from frontend when saving)
+
+**Optional Fields:** (Only send if changed)
+- `title`: Profile title
+- `youtubeUrl`: YouTube video URL
+- `description`: Profile description
+- `alarmsPerDay`: Number of alarms per day
+- `selectedDaysPerWeek`: Array of numbers (1=Monday, 2=Tuesday, etc.)
+- `startTime`: Start time in HH:mm:ss format
+- `endTime`: End time in HH:mm:ss format
+- `isFixedTime`: Boolean, if true use fixedTime
+- `fixedTime`: Time string if isFixedTime is true
+- `specificDates`: Array of specific dates if applicable
+
+**Request Examples:**
+
+**Minimal Request (only required fields - just activate):**
+```json
+{
+  "profileId": "profile_unique_id",
+  "isActive": true
+}
+```
+
+**Request with Field Updates (activate + update fields):**
+```json
+{
+  "profileId": "profile_unique_id",
+  "isActive": true,
+  "title": "Updated Title",
+  "alarmsPerDay": 5
+}
+```
 
 **Success Response (200):**
 ```json
@@ -439,8 +477,11 @@ Activates an existing alarm profile and automatically deactivates all other prof
 - `fcmSchedule`: Updated FCM schedule with `isEnabled: true` and `activeProfileId` set
 
 **Error Responses:**
-- `400` - Missing required fields
+- `400` - Missing required fields or validation error
   - `MISSING_PROFILE_ID` - profileId is required
+  - `MISSING_IS_ACTIVE` - isActive is required
+  - `INVALID_IS_ACTIVE_TYPE` - isActive must be a boolean
+  - `INVALID_IS_ACTIVE_VALUE` - isActive must be true
 - `401` - Authentication required
   - `AUTH_REQUIRED` - Authentication token missing or invalid
 - `404` - Profile or user not found
@@ -451,17 +492,24 @@ Activates an existing alarm profile and automatically deactivates all other prof
 
 **Error Codes:**
 - `MISSING_PROFILE_ID` - profileId is required in request body
+- `MISSING_IS_ACTIVE` - isActive is required in request body
+- `INVALID_IS_ACTIVE_TYPE` - isActive must be a boolean
+- `INVALID_IS_ACTIVE_VALUE` - isActive must be true
 - `PROFILE_NOT_FOUND` - Profile not found or doesn't belong to user
 - `USER_NOT_FOUND` - MindTrain user not found
 - `DATABASE_ERROR` - Database operation failed
 
 **Notes:**
 - Only the profile owner can activate their profile
+- `isActive` is always `true` from frontend - every activation request activates the profile
 - Activating a profile automatically deactivates all other profiles for the user
+- If optional fields are provided, they are updated along with activation
+- Only the optional fields provided in the request are updated - unchanged fields remain as they were
 - FCM schedule is automatically updated with `isEnabled: true` and `activeProfileId` set to the activated profile
 - The operation is atomic - all changes happen in a single transaction
 - If the profile is already active, the operation is idempotent (no error, same result)
 - `userId` is automatically extracted from the JWT authentication token
+- Partial updates are supported - send only the fields that changed
 
 ### Delete Alarm Profile
 DELETE `/api/mindtrain/alarm-profiles/:profileId` (protected)

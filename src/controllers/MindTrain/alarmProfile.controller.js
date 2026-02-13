@@ -428,6 +428,8 @@ const deleteAlarmProfile = async (req, res) => {
  * Activates an existing alarm profile and automatically deactivates all other profiles for the same user.
  * Updates FCM schedule to enable notifications for the activated profile.
  * 
+ * Can also update profile fields if provided in the request body.
+ * 
  * Authentication: Required (JWT)
  */
 const activateAlarmProfile = async (req, res) => {
@@ -450,9 +452,11 @@ const activateAlarmProfile = async (req, res) => {
         }
         diagLogger.validation('Authentication check', true, { userId: req.userId.toString() });
 
-        const { profileId } = req.body || {};
+        const { profileId, isActive, ...otherFields } = req.body || {};
         diagLogger.step('Request body parsed', {
-            profileId: profileId
+            profileId: profileId,
+            isActive: isActive,
+            otherFieldsCount: Object.keys(otherFields).length
         });
 
         // Get authenticated userId from JWT token (single source of truth)
@@ -468,7 +472,35 @@ const activateAlarmProfile = async (req, res) => {
                 code: 'MISSING_PROFILE_ID'
             });
         }
-        diagLogger.validation('profileId validation', true);
+
+        if (isActive === undefined) {
+            diagLogger.validation('isActive required', false);
+            return res.status(400).json({
+                success: false,
+                message: 'isActive is required',
+                code: 'MISSING_IS_ACTIVE'
+            });
+        }
+
+        if (typeof isActive !== 'boolean') {
+            diagLogger.validation('isActive must be boolean', false);
+            return res.status(400).json({
+                success: false,
+                message: 'isActive must be a boolean',
+                code: 'INVALID_IS_ACTIVE_TYPE'
+            });
+        }
+
+        if (isActive !== true) {
+            diagLogger.validation('isActive must be true', false);
+            return res.status(400).json({
+                success: false,
+                message: 'isActive must be true. Use delete endpoint to deactivate profiles.',
+                code: 'INVALID_IS_ACTIVE_VALUE'
+            });
+        }
+
+        diagLogger.validation('Required fields validation', true);
 
         // Check if profile exists
         diagLogger.step('Checking if profile exists');
@@ -493,16 +525,34 @@ const activateAlarmProfile = async (req, res) => {
         }
         diagLogger.step('Profile found', {
             profileId: profileId,
-            currentIsActive: profile.isActive
+            currentIsActive: profile.isActive,
+            fieldsToUpdate: Object.keys(otherFields).length
         });
 
-        // Activate the profile (unified flow handles everything)
-        diagLogger.step('Calling activateProfile service to activate the profile');
-        const updatedUser = await mindtrainUserService.activateProfile(authenticatedUserId, profileId);
-        diagLogger.step('Profile activated successfully', {
-            profileId: profileId,
-            isActive: updatedUser.alarmProfiles?.find(p => p.id === profileId)?.isActive
-        });
+        // Determine if we need to update fields or just activate
+        let updatedUser;
+        if (Object.keys(otherFields).length > 0) {
+            // Has optional fields - use updateAlarmProfile service (handles activation + field updates)
+            diagLogger.step('Optional fields provided, calling updateAlarmProfile service');
+            const updates = {
+                isActive: true,
+                ...otherFields
+            };
+            updatedUser = await mindtrainUserService.updateAlarmProfile(authenticatedUserId, profileId, updates);
+            diagLogger.step('Profile updated and activated successfully', {
+                profileId: profileId,
+                isActive: updatedUser.alarmProfiles?.find(p => p.id === profileId)?.isActive,
+                fieldsUpdated: Object.keys(otherFields).length
+            });
+        } else {
+            // No optional fields - just activate
+            diagLogger.step('No optional fields, calling activateProfile service to activate the profile');
+            updatedUser = await mindtrainUserService.activateProfile(authenticatedUserId, profileId);
+            diagLogger.step('Profile activated successfully', {
+                profileId: profileId,
+                isActive: updatedUser.alarmProfiles?.find(p => p.id === profileId)?.isActive
+            });
+        }
 
         // Find the activated profile
         const activatedProfile = updatedUser.alarmProfiles.find(p => p.id === profileId);
@@ -545,10 +595,16 @@ const activateAlarmProfile = async (req, res) => {
             };
         };
 
+        // Prepare response message based on whether fields were updated
+        const hasFieldUpdates = Object.keys(otherFields).length > 0;
+        const responseMessage = hasFieldUpdates 
+            ? 'Alarm profile updated and activated successfully'
+            : 'Alarm profile activated successfully';
+
         // Prepare response
         const response = {
             success: true,
-            message: 'Alarm profile activated successfully',
+            message: responseMessage,
             data: {
                 activatedProfile: formatProfile(activatedProfile),
                 deactivatedProfiles: deactivatedProfiles,
@@ -571,6 +627,7 @@ const activateAlarmProfile = async (req, res) => {
         diagLogger.complete('Activate alarm profile request completed successfully', {
             profileId: profileId,
             isActive: activatedProfile.isActive,
+            fieldsUpdated: Object.keys(otherFields).length,
             totalProfiles: updatedUser.alarmProfiles?.length || 0
         });
         diagLogger.logSummary();
@@ -596,7 +653,7 @@ const activateAlarmProfile = async (req, res) => {
 module.exports = {
     createAlarmProfile,
     getAlarmProfiles,
-    deleteAlarmProfile,
-    activateAlarmProfile
+    activateAlarmProfile,
+    deleteAlarmProfile
 };
 
