@@ -1,4 +1,5 @@
 const mindtrainUserService = require('../../services/MindTrain/mindtrainUser.service');
+const { createDiagnosticLogger } = require('../../services/MindTrain/mindtrainDiagnosticLogger');
 
 /**
  * POST /api/mindtrain/create-alarm-profile
@@ -9,19 +10,35 @@ const mindtrainUserService = require('../../services/MindTrain/mindtrainUser.ser
  * Authentication: Required (JWT)
  */
 const createAlarmProfile = async (req, res) => {
+    // Create diagnostic logger for full flow tracking
+    const diagLogger = createDiagnosticLogger('createAlarmProfile', {
+        requestId: req.id || 'unknown',
+        timestamp: new Date().toISOString()
+    });
+
     try {
+        diagLogger.start('Starting create alarm profile request');
+
         // Validate authentication
         if (!req.userId) {
+            diagLogger.validation('Authentication check', false);
             return res.status(401).json({
                 success: false,
                 message: 'Authentication required'
             });
         }
+        diagLogger.validation('Authentication check', true, { userId: req.userId.toString() });
 
         const { fcmConfig, ...profileData } = req.body || {};
+        diagLogger.step('Request body parsed', {
+            hasFcmConfig: !!fcmConfig,
+            profileId: profileData?.id,
+            profileTitle: profileData?.title
+        });
 
         // Get authenticated userId from JWT token (single source of truth)
         const authenticatedUserId = req.userId.toString();
+        diagLogger.userState(authenticatedUserId, 'AUTHENTICATED');
 
         // Validate required fields (userId not required - comes from JWT)
         const { id, youtubeUrl, title, alarmsPerDay, selectedDaysPerWeek, startTime, endTime, isActive } = profileData;
@@ -81,30 +98,54 @@ const createAlarmProfile = async (req, res) => {
         }
 
         // Ensure user exists
+        diagLogger.step('Checking if MindTrain user exists');
         let user = await mindtrainUserService.getMindTrainUser(authenticatedUserId);
         if (!user) {
+            diagLogger.step('User does not exist, creating new user');
             user = await mindtrainUserService.createMindTrainUser(authenticatedUserId);
+            diagLogger.userState(authenticatedUserId, 'CREATED');
+        } else {
+            diagLogger.userState(authenticatedUserId, 'EXISTS', {
+                existingProfiles: user.alarmProfiles?.length || 0
+            });
         }
 
         // Check if profile with same id already exists
+        diagLogger.step('Checking for duplicate profile ID');
         if (user.alarmProfiles && user.alarmProfiles.some(p => p.id === id)) {
+            diagLogger.warn('Profile with same ID already exists', { profileId: id });
             return res.status(400).json({
                 success: false,
                 message: 'Profile with this id already exists',
                 code: 'PROFILE_EXISTS'
             });
         }
+        diagLogger.validation('Duplicate profile check', true);
 
         // Add profile (default isActive to false first, then activate)
         const profileToAdd = {
             ...profileData,
             isActive: false // Will be activated below
         };
+        diagLogger.step('Preparing profile to add', {
+            profileId: profileToAdd.id,
+            isActive: profileToAdd.isActive
+        });
         
+        diagLogger.step('Calling addAlarmProfile service');
         let updatedUser = await mindtrainUserService.addAlarmProfile(authenticatedUserId, profileToAdd);
+        diagLogger.step('Profile added successfully', {
+            profileId: id,
+            totalProfiles: updatedUser.alarmProfiles?.length || 0
+        });
 
         // Auto-activate this profile and deactivate all others (as per old endpoint behavior)
+        diagLogger.step('Calling activateProfile service to activate the new profile');
         updatedUser = await mindtrainUserService.activateProfile(authenticatedUserId, id);
+        diagLogger.step('Profile activated successfully', {
+            profileId: id,
+            isActive: updatedUser.alarmProfiles?.find(p => p.id === id)?.isActive
+        });
 
         // Update FCM schedule (required)
         // Note: morningNotificationTime, eveningNotificationTime, and timezone are already destructured above
@@ -175,9 +216,23 @@ const createAlarmProfile = async (req, res) => {
             };
         }
 
+        diagLogger.complete('Create alarm profile request completed successfully', {
+            profileId: id,
+            isActive: createdProfile.isActive,
+            totalProfiles: updatedUser.alarmProfiles?.length || 0
+        });
+        diagLogger.logSummary();
+
         return res.status(200).json(response);
     } catch (error) {
         console.error('Create alarm profile error:', error);
+        diagLogger.error('Create alarm profile failed', error, {
+            errorName: error?.name,
+            errorMessage: error?.message,
+            errorCode: error?.code
+        });
+        diagLogger.logSummary();
+        
         return res.status(500).json({
             success: false,
             message: 'Failed to create alarm profile',

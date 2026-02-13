@@ -11,6 +11,7 @@ const {
     ConcurrencyError
 } = require('../../utils/errors');
 const config = require('../../config/mindtrain.config');
+const { createDiagnosticLogger } = require('./mindtrainDiagnosticLogger');
 
 /**
  * MindTrain User Service
@@ -152,37 +153,64 @@ const addAlarmProfile = async (userId, profileData) => {
         profileId: profileData?.id 
     });
     
+    // Create diagnostic logger
+    const diagLogger = createDiagnosticLogger('addAlarmProfile', { userId, profileId: profileData?.id });
+    
     return await metrics.record('mindtrain_profile_add', async () => {
         try {
+            diagLogger.start('Starting alarm profile addition');
+
             if (!userId) {
+                diagLogger.validation('userId required', false);
                 throw new ValidationError('userId is required');
             }
             if (!profileData || !profileData.id) {
+                diagLogger.validation('profileData with id required', false, { hasProfileData: !!profileData, hasId: !!profileData?.id });
                 throw new ValidationError('profileData with id is required');
             }
+            diagLogger.validation('Input validation', true);
 
             const userIdObjectId = mongoose.Types.ObjectId.isValid(userId)
                 ? new mongoose.Types.ObjectId(userId)
                 : userId;
+            diagLogger.step('User ID converted to ObjectId', { userIdObjectId: userIdObjectId.toString() });
 
             // Check if profile with same id already exists
+            diagLogger.step('Checking for existing profile with same ID');
             const existingUser = await MindTrainUser.findOne({
                 userId: userIdObjectId,
                 'alarmProfiles.id': profileData.id
             }).lean();
 
+            diagLogger.mongoOperation('findOne (duplicate check)', existingUser, {
+                userId: userIdObjectId.toString(),
+                profileId: profileData.id
+            });
+
             if (existingUser) {
-                operationLogger.warn('Profile with same id already exists', { profileId: profileData.id });
+                diagLogger.warn('Profile with same id already exists', { profileId: profileData.id });
                 throw new ValidationError(`Profile with id '${profileData.id}' already exists`);
             }
+            diagLogger.validation('Duplicate profile check', true);
 
             // Check profile limit
+            diagLogger.step('Checking profile limit');
             const user = await MindTrainUser.findOne({ userId: userIdObjectId }).lean();
+            diagLogger.mongoOperation('findOne (profile limit check)', user, {
+                userId: userIdObjectId.toString()
+            });
+
             if (user && user.alarmProfiles && user.alarmProfiles.length >= config.MAX_ALARM_PROFILES) {
+                diagLogger.warn('Profile limit exceeded', {
+                    currentCount: user.alarmProfiles.length,
+                    maxAllowed: config.MAX_ALARM_PROFILES
+                });
                 throw new ValidationError(`Maximum ${config.MAX_ALARM_PROFILES} alarm profiles allowed`);
             }
-
-            operationLogger.debug('Adding alarm profile');
+            diagLogger.validation('Profile limit check', true, {
+                currentCount: user?.alarmProfiles?.length || 0,
+                maxAllowed: config.MAX_ALARM_PROFILES
+            });
 
             const now = new Date();
             const newProfile = {
@@ -190,7 +218,13 @@ const addAlarmProfile = async (userId, profileData) => {
                 createdAt: now,
                 updatedAt: now
             };
+            diagLogger.step('Profile data prepared', {
+                profileId: newProfile.id,
+                title: newProfile.title,
+                isActive: newProfile.isActive
+            });
 
+            diagLogger.step('Executing findOneAndUpdate to add profile');
             const updatedUser = await MindTrainUser.findOneAndUpdate(
                 { userId: userIdObjectId },
                 {
@@ -203,22 +237,63 @@ const addAlarmProfile = async (userId, profileData) => {
                 { new: true, upsert: false }
             ).exec();
 
+            diagLogger.mongoOperation('findOneAndUpdate (add profile)', updatedUser, {
+                operation: 'push_alarm_profile',
+                userId: userIdObjectId.toString(),
+                profileId: profileData.id
+            });
+
             if (!updatedUser) {
+                diagLogger.error('User not found during profile addition', null, {
+                    userId: userIdObjectId.toString()
+                });
                 throw new UserNotFoundError(userId);
             }
 
-            // Metadata will be auto-calculated by pre-save middleware
-            await updatedUser.save();
+            // Verify profile was added
+            const addedProfile = updatedUser.alarmProfiles?.find(p => p.id === profileData.id);
+            if (!addedProfile) {
+                diagLogger.error('CRITICAL: Profile not found in result after addition', null, {
+                    profileId: profileData.id,
+                    totalProfiles: updatedUser.alarmProfiles?.length || 0
+                });
+                throw new DatabaseError(`Failed to add profile: Profile not found in result`);
+            }
+
+            diagLogger.profileState(profileData.id, 'ADDED', {
+                isActive: addedProfile.isActive,
+                totalProfiles: updatedUser.alarmProfiles.length
+            });
+
+            // FIX: Remove redundant save() call - findOneAndUpdate already saves
+            // Pre-save middleware will run on next save, but we don't need it here
+            // as metadata is already updated in the $set operation
+            // Only call save() if we need to trigger middleware for other purposes
+            // For now, we skip it to avoid potential validation issues
+            
+            // Note: If pre-save middleware is critical, we can call save() conditionally
+            // But since we're already updating metadata in $set, it's redundant
+            diagLogger.step('Skipping redundant save() call - findOneAndUpdate already persisted changes');
 
             operationLogger.info('Alarm profile added successfully', { profileId: profileData.id });
             metrics.increment('mindtrain_profile_added', 1);
 
+            diagLogger.complete('Profile addition completed successfully', {
+                profileId: profileData.id,
+                totalProfiles: updatedUser.alarmProfiles.length,
+                isActive: addedProfile.isActive
+            });
+            diagLogger.logSummary();
+
             return updatedUser.toObject();
         } catch (error) {
             if (error instanceof ValidationError || error instanceof UserNotFoundError) {
+                diagLogger.error('Known error type', error);
                 throw error;
             }
             operationLogger.error('Error adding alarm profile', error, { userId, profileId: profileData?.id });
+            diagLogger.error('Unknown error type', error);
+            diagLogger.logSummary();
             throw new DatabaseError('Failed to add alarm profile', error);
         }
     }, { operation: 'add_profile' });
@@ -319,44 +394,76 @@ const activateProfile = async (userId, profileId) => {
         profileId 
     });
     
+    // Create diagnostic logger for detailed debugging
+    const diagLogger = createDiagnosticLogger('activateProfile', { userId, profileId });
+    
     return await metrics.record('mindtrain_profile_activate', async () => {
         try {
+            diagLogger.start('Starting profile activation');
+
             if (!userId || !profileId) {
+                diagLogger.validation('userId and profileId required', false, { userId: !!userId, profileId: !!profileId });
                 throw new ValidationError('userId and profileId are required');
             }
+            diagLogger.validation('userId and profileId required', true);
 
             const mindTrainConnection = getMindTrainConnection();
             if (!mindTrainConnection) {
+                diagLogger.error('MindTrain database connection not initialized');
                 throw new DatabaseError('MindTrain database connection not initialized');
             }
+            diagLogger.step('Database connection verified');
 
             const userIdObjectId = mongoose.Types.ObjectId.isValid(userId)
                 ? new mongoose.Types.ObjectId(userId)
                 : userId;
+            diagLogger.step('User ID converted to ObjectId', { userIdObjectId: userIdObjectId.toString() });
 
             const session = await mindTrainConnection.startSession();
             session.startTransaction();
+            diagLogger.transactionState('STARTED', { sessionId: session.id?.toString() });
 
             try {
-                operationLogger.debug('Starting transaction to activate profile');
-
                 // First, verify the profile exists
+                diagLogger.step('Checking if profile exists before transaction');
                 const user = await MindTrainUser.findOne({
                     userId: userIdObjectId,
                     'alarmProfiles.id': profileId
                 }).session(session).exec();
 
+                diagLogger.mongoOperation('findOne (profile existence check)', user, {
+                    userId: userIdObjectId.toString(),
+                    profileId
+                });
+
                 if (!user) {
+                    diagLogger.warn('Profile not found, aborting transaction', { userId, profileId });
                     await session.abortTransaction();
                     session.endSession();
+                    diagLogger.transactionState('ABORTED', { reason: 'Profile not found' });
                     throw new ProfileNotFoundError(profileId);
                 }
+
+                // Log current profile state
+                const currentProfile = user.alarmProfiles?.find(p => p.id === profileId);
+                const allProfiles = user.alarmProfiles || [];
+                diagLogger.profileState(profileId, 'FOUND', {
+                    isActive: currentProfile?.isActive,
+                    totalProfiles: allProfiles.length,
+                    activeProfiles: allProfiles.filter(p => p.isActive).length,
+                    profileDetails: {
+                        id: currentProfile?.id,
+                        title: currentProfile?.title,
+                        isActive: currentProfile?.isActive
+                    }
+                });
 
                 const now = new Date();
 
                 // Atomic operation: deactivate all profiles, activate the specified one, update FCM schedule
                 // First, set all profiles to inactive
-                await MindTrainUser.updateOne(
+                diagLogger.step('Deactivating all profiles');
+                const deactivateResult = await MindTrainUser.updateOne(
                     { userId: userIdObjectId },
                     {
                         $set: {
@@ -366,8 +473,26 @@ const activateProfile = async (userId, profileId) => {
                     { session }
                 ).exec();
 
+                diagLogger.mongoOperation('updateOne (deactivate all)', deactivateResult, {
+                    operation: 'deactivate_all_profiles',
+                    userId: userIdObjectId.toString()
+                });
+
+                if (deactivateResult.matchedCount === 0) {
+                    diagLogger.warn('No documents matched for deactivation', {
+                        matchedCount: deactivateResult.matchedCount,
+                        modifiedCount: deactivateResult.modifiedCount
+                    });
+                } else {
+                    diagLogger.step('All profiles deactivated', {
+                        matchedCount: deactivateResult.matchedCount,
+                        modifiedCount: deactivateResult.modifiedCount
+                    });
+                }
+
                 // Then, activate the target profile and update FCM schedule
-                await MindTrainUser.findOneAndUpdate(
+                diagLogger.step('Activating target profile and updating FCM schedule');
+                const activateResult = await MindTrainUser.findOneAndUpdate(
                     { userId: userIdObjectId },
                     {
                         $set: {
@@ -386,28 +511,108 @@ const activateProfile = async (userId, profileId) => {
                     }
                 ).exec();
 
+                // CRITICAL FIX: Check if update actually happened
+                diagLogger.mongoOperation('findOneAndUpdate (activate profile)', activateResult, {
+                    operation: 'activate_target_profile',
+                    profileId,
+                    arrayFilter: { 'elem.id': profileId }
+                });
+
+                if (!activateResult) {
+                    diagLogger.error('CRITICAL: findOneAndUpdate returned null - no document was updated', null, {
+                        userId: userIdObjectId.toString(),
+                        profileId,
+                        reason: 'Array filter did not match any profile or user not found'
+                    });
+                    await session.abortTransaction();
+                    session.endSession();
+                    diagLogger.transactionState('ABORTED', { reason: 'findOneAndUpdate returned null' });
+                    throw new DatabaseError(`Failed to activate profile ${profileId}: Update operation returned null`);
+                }
+
+                // Verify the profile was actually activated
+                const activatedProfile = activateResult.alarmProfiles?.find(p => p.id === profileId);
+                if (!activatedProfile || !activatedProfile.isActive) {
+                    diagLogger.error('CRITICAL: Profile activation failed - profile not found or not active in result', null, {
+                        profileFound: !!activatedProfile,
+                        isActive: activatedProfile?.isActive,
+                        resultProfileIds: activateResult.alarmProfiles?.map(p => ({ id: p.id, isActive: p.isActive }))
+                    });
+                    await session.abortTransaction();
+                    session.endSession();
+                    diagLogger.transactionState('ABORTED', { reason: 'Profile not activated in result' });
+                    throw new DatabaseError(`Failed to activate profile ${profileId}: Profile not active after update`);
+                }
+
+                diagLogger.profileState(profileId, 'ACTIVATED', {
+                    isActive: activatedProfile.isActive,
+                    updatedAt: activatedProfile.updatedAt,
+                    fcmScheduleActiveProfileId: activateResult.fcmSchedule?.activeProfileId
+                });
+
                 await session.commitTransaction();
                 session.endSession();
+                diagLogger.transactionState('COMMITTED', { success: true });
 
                 operationLogger.info('Profile activated successfully', { profileId });
 
-                // Fetch updated user
+                // Fetch updated user to verify final state
+                diagLogger.step('Fetching updated user to verify final state');
                 const updatedUser = await MindTrainUser.findOne({ userId: userIdObjectId })
                     .lean()
                     .exec();
 
+                const finalProfile = updatedUser?.alarmProfiles?.find(p => p.id === profileId);
+                diagLogger.profileState(profileId, 'FINAL_VERIFICATION', {
+                    found: !!finalProfile,
+                    isActive: finalProfile?.isActive,
+                    totalProfiles: updatedUser?.alarmProfiles?.length || 0,
+                    activeProfiles: updatedUser?.alarmProfiles?.filter(p => p.isActive).length || 0,
+                    fcmScheduleActiveProfileId: updatedUser?.fcmSchedule?.activeProfileId
+                });
+
+                if (!finalProfile || !finalProfile.isActive) {
+                    diagLogger.error('CRITICAL: Final verification failed - profile not active after commit', null, {
+                        profileFound: !!finalProfile,
+                        isActive: finalProfile?.isActive
+                    });
+                    // Don't throw here - transaction already committed, but log the issue
+                } else {
+                    diagLogger.step('Final verification passed', {
+                        profileId: finalProfile.id,
+                        isActive: finalProfile.isActive
+                    });
+                }
+
                 metrics.increment('mindtrain_profile_activated', 1);
+                diagLogger.complete('Profile activation completed successfully', {
+                    profileId,
+                    isActive: finalProfile?.isActive,
+                    totalProfiles: updatedUser?.alarmProfiles?.length
+                });
+                
+                // Log full diagnostic summary
+                diagLogger.logSummary();
+                
                 return updatedUser;
             } catch (error) {
+                diagLogger.error('Error during transaction', error, {
+                    errorName: error?.name,
+                    errorMessage: error?.message
+                });
                 await session.abortTransaction();
                 session.endSession();
+                diagLogger.transactionState('ABORTED', { reason: error?.message });
                 throw error;
             }
         } catch (error) {
             if (error instanceof ValidationError || error instanceof ProfileNotFoundError || error instanceof DatabaseError) {
+                diagLogger.error('Known error type', error);
                 throw error;
             }
             operationLogger.error('Error activating profile', error, { userId, profileId });
+            diagLogger.error('Unknown error type', error);
+            diagLogger.logSummary();
             throw new DatabaseError('Failed to activate profile', error);
         }
     }, { operation: 'activate_profile' });
