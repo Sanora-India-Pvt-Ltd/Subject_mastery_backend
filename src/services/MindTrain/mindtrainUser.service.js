@@ -340,48 +340,48 @@ const updateAlarmProfile = async (userId, profileId, updates) => {
                 
                 // Update other fields if provided
                 if (Object.keys(otherFields).length > 0) {
-                    const userIdObjectId = mongoose.Types.ObjectId.isValid(userId)
-                        ? new mongoose.Types.ObjectId(userId)
-                        : userId;
+            const userIdObjectId = mongoose.Types.ObjectId.isValid(userId)
+                ? new mongoose.Types.ObjectId(userId)
+                : userId;
 
-                    const updateFields = {};
-                    const now = new Date();
+            const updateFields = {};
+            const now = new Date();
 
-                    // Build update object for array element
+            // Build update object for array element
                     Object.keys(otherFields).forEach(key => {
-                        if (key !== 'id' && key !== 'createdAt') {
+                if (key !== 'id' && key !== 'createdAt') {
                             updateFields[`alarmProfiles.$.${key}`] = otherFields[key];
-                        }
-                    });
+                }
+            });
 
-                    // Always update updatedAt
-                    updateFields['alarmProfiles.$.updatedAt'] = now;
-                    updateFields['metadata.lastProfileUpdateAt'] = now;
-                    updateFields['updatedAt'] = now;
+            // Always update updatedAt
+            updateFields['alarmProfiles.$.updatedAt'] = now;
+            updateFields['metadata.lastProfileUpdateAt'] = now;
+            updateFields['updatedAt'] = now;
 
                     operationLogger.debug('Updating other profile fields after activation');
 
-                    const user = await MindTrainUser.findOneAndUpdate(
-                        {
-                            userId: userIdObjectId,
-                            'alarmProfiles.id': profileId
-                        },
-                        { $set: updateFields },
-                        { new: true }
-                    ).exec();
+            const user = await MindTrainUser.findOneAndUpdate(
+                {
+                    userId: userIdObjectId,
+                    'alarmProfiles.id': profileId
+                },
+                { $set: updateFields },
+                { new: true }
+            ).exec();
 
-                    if (!user) {
-                        throw new ProfileNotFoundError(profileId);
-                    }
+            if (!user) {
+                throw new ProfileNotFoundError(profileId);
+            }
 
-                    // Metadata will be auto-calculated by pre-save middleware
-                    await user.save();
+            // Metadata will be auto-calculated by pre-save middleware
+            await user.save();
 
                     updatedUser = user.toObject();
                 }
 
                 operationLogger.info('Alarm profile updated and activated successfully', { profileId });
-                metrics.increment('mindtrain_profile_updated', 1);
+            metrics.increment('mindtrain_profile_updated', 1);
 
                 return updatedUser;
             } else {

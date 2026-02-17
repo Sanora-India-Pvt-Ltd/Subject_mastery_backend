@@ -11,3 +11,8 @@ test-otp-flow.sh
 
 # Cloudflare Tunnel credentials (keep config.yml, ignore credentials)
 .cloudflared/*.json
+
+# Firebase service account credentials (sensitive - contains private keys)
+*-firebase-adminsdk-*.json
+firebase-adminsdk-*.json
+service-account*.json

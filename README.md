@@ -176,6 +176,16 @@ src/
   - Format: `redis://username:password@host:port` or `rediss://` for TLS
   - If not set, system uses in-memory storage (single server only)
 
+### Firebase (FCM Push Notifications)
+- `FIREBASE_SERVICE_ACCOUNT_PATH` (optional) - Path to Firebase service account JSON file
+  - Example: `FIREBASE_SERVICE_ACCOUNT_PATH=ulearnandearn-firebase-adminsdk-fbsvc-388ce753f1.json`
+  - Or use relative path: `FIREBASE_SERVICE_ACCOUNT_PATH=./ulearnandearn-firebase-adminsdk-fbsvc-388ce753f1.json`
+  - **Alternative:** Use environment variables instead:
+    - `FIREBASE_PROJECT_ID` - Firebase project ID
+    - `FIREBASE_PRIVATE_KEY` - Private key (with \n for newlines)
+    - `FIREBASE_CLIENT_EMAIL` - Service account email
+  - **Note:** If not configured, push notifications will be disabled (silent failure)
+
 ### Application
 - `PORT` (optional) - Server port (default: 3100)
 - `NODE_ENV` (optional) - Environment mode ('development' | 'production')
@@ -602,6 +612,7 @@ Located in `src/middleware/errorhandler.js`:
    TWILIO_ACCOUNT_SID=your-twilio-sid
    TWILIO_AUTH_TOKEN=your-twilio-token
    TWILIO_VERIFY_SERVICE_SID=your-service-sid
+   FIREBASE_SERVICE_ACCOUNT_PATH=ulearnandearn-firebase-adminsdk-fbsvc-388ce753f1.json
    PORT=3100
    NODE_ENV=development
    ```
@@ -648,7 +659,13 @@ Located in `src/middleware/errorhandler.js`:
    - Use secure secret management (AWS Secrets Manager, etc.)
    - Never commit `.env` file
 
-2. **Process Management**
+2. **Firebase Setup on EC2**
+   - See detailed guide: `readme/EC2_FIREBASE_SETUP.md`
+   - Upload Firebase service account file to EC2
+   - Set `FIREBASE_SERVICE_ACCOUNT_PATH` environment variable
+   - Restart server to enable FCM push notifications
+
+3. **Process Management**
    - Use **PM2** for process management:
      ```bash
      pm2 start src/server.js --name sanora-backend

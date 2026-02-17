@@ -517,7 +517,7 @@ mindTrainUserSchema.index({ 'syncHealthLogs.healthScore': 1 });
 // ==================== MIDDLEWARE ====================
 
 // Pre-save middleware: Auto-update metadata and rotate logs
-mindTrainUserSchema.pre('save', function(next) {
+mindTrainUserSchema.pre('save', async function() {
     const user = this;
     
     // Auto-calculate metadata
@@ -581,8 +581,6 @@ mindTrainUserSchema.pre('save', function(next) {
             log.updatedAt = new Date();
         });
     }
-    
-    next();
 });
 
 // ==================== VIRTUAL FIELDS ====================
