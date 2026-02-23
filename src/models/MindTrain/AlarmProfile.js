@@ -35,7 +35,8 @@ const alarmProfileSchema = new mongoose.Schema({
     // Alarm content
     youtubeUrl: {
         type: String,
-        required: true,
+        required: false,
+        default: null,
         trim: true
     },
 

@@ -43,13 +43,12 @@ const createAlarmProfile = async (req, res) => {
         // Validate required fields (userId not required - comes from JWT)
         const { id, youtubeUrl, title, alarmsPerDay, selectedDaysPerWeek, startTime, endTime, isActive } = profileData;
 
-        if (!id || !youtubeUrl || !title || !alarmsPerDay || !selectedDaysPerWeek || !startTime || !endTime) {
+        if (!id || !title || !alarmsPerDay || !selectedDaysPerWeek || !startTime || !endTime) {
             return res.status(400).json({
                 success: false,
                 message: 'Missing required fields',
                 errors: {
                     ...(!id && { id: 'id is required' }),
-                    ...(!youtubeUrl && { youtubeUrl: 'youtubeUrl is required' }),
                     ...(!title && { title: 'title is required' }),
                     ...(!alarmsPerDay && { alarmsPerDay: 'alarmsPerDay is required' }),
                     ...(!selectedDaysPerWeek && { selectedDaysPerWeek: 'selectedDaysPerWeek is required' }),

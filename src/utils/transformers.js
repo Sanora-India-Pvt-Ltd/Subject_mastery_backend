@@ -39,7 +39,7 @@ const transformOldProfileToNew = (oldProfile) => {
 
     return {
         id: String(id).trim(),
-        youtubeUrl: String(youtubeUrl).trim(),
+        youtubeUrl: youtubeUrl ? String(youtubeUrl).trim() : null,
         title: String(title).trim(),
         description: String(description || '').trim(),
         alarmsPerDay: Number(alarmsPerDay),
@@ -102,7 +102,7 @@ const transformNewProfileToOld = (newProfile, userId) => {
         _id: newProfile._id || null, // May not exist in nested format
         id: String(id).trim(),
         userId: userId ? (typeof userId === 'object' && userId.toString ? userId.toString() : String(userId)) : null,
-        youtubeUrl: String(youtubeUrl).trim(),
+        youtubeUrl: youtubeUrl ? String(youtubeUrl).trim() : null,
         title: String(title).trim(),
         description: String(description || '').trim(),
         alarmsPerDay: Number(alarmsPerDay),
